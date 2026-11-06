@@ -1,0 +1,17 @@
+{
+  "apiVersion": 5,
+  "id": "grapher",
+  "name": "Grapher",
+  "version": "1.0.0",
+  "description": "Plot functions in Cartesian, trigonometric, polar and parametric coordinates, with live sliders and a zoomable graph.",
+  "author": [
+    "mavt"
+  ],
+  "authorUrl": [
+    "https://github.com/mavt-ch"
+  ],
+  "license": "MIT",
+  "minAppVersion": "1.0.0",
+  "isDesktopOnly": true,
+  "enabled": true
+}

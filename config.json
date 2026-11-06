@@ -1,0 +1,42 @@
+{
+  "icon": "icon.svg",
+  "main": "runtime/index.js",
+  "assets": "runtime/assets",
+  "uiSlots": {
+    "left_sidebar": "grapher.sidebar",
+    "main_workspace": "grapher.graph"
+  },
+  "slotDefaults": {
+    "left_sidebar": {
+      "order": 95
+    }
+  },
+  "locales": {
+    "en": "runtime/locales/en.json",
+    "de": "runtime/locales/de.json",
+    "es": "runtime/locales/es.json",
+    "fr": "runtime/locales/fr.json",
+    "zh-CN": "runtime/locales/zh-CN.json"
+  },
+  "runtime": {
+    "ui": "runtime/index.js",
+    "wasm": [
+      {
+        "id": "plot",
+        "path": "runtime/assets/plot.wasm",
+        "sha256": "abb74824f236a058dbc7c34ef41478b43d2c20d5d4d1330845d5dc34f0a9d6a8",
+        "target": "ui",
+        "memoryPagesMax": 512,
+        "exports": [
+          "plot_input",
+          "plot_analyze",
+          "plot_text",
+          "plot_sample",
+          "plot_samples",
+          "plot_eval",
+          "plot_space"
+        ]
+      }
+    ]
+  }
+}

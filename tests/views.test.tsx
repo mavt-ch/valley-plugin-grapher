@@ -32,7 +32,7 @@ describe('the sidebar', () => {
     mount()
     render(<Sidebar />)
     const radios = await screen.findAllByRole('radio')
-    expect(radios.map((radio) => radio.getAttribute('aria-label'))).toEqual(['Cartesian', 'Trigonometric', 'Polar', 'Parametric', '3D'])
+    expect(radios.map((radio) => radio.getAttribute('aria-label'))).toEqual(['Cartesian', 'Trigonometric', 'Polar', 'Parametric', '3D', 'Complex'])
     expect(radios[0].getAttribute('aria-checked')).toBe('true')
     expect(screen.getByDisplayValue('y = x^2 - 2')).toBeTruthy()
     fireEvent.click(radios[2])

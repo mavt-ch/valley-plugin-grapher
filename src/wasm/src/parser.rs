@@ -37,11 +37,27 @@ pub enum Node {
     Tuple(Vec<Node>),
 }
 
-/// One row: `left = right`, or a bare expression in `right`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Relation {
+    Eq,
+    Lt,
+    Le,
+    Gt,
+    Ge,
+}
+
+impl Relation {
+    pub fn strict(self) -> bool {
+        matches!(self, Self::Lt | Self::Gt)
+    }
+}
+
+/// One row: `left = right` (or `<`, `≤`, `>`, `≥`), or a bare expression in `right`.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Statement {
     pub left: Option<Node>,
     pub right: Node,
+    pub relation: Relation,
 }
 
 fn bin(op: BinOp, left: Node, right: Node) -> Node {
@@ -123,10 +139,13 @@ impl Parser<'_> {
         let tokens = self.tokens;
         self.tokens = &tokens[..end];
         let first = self.expr()?;
-        let statement = if self.eat('=') {
-            Statement { left: Some(first), right: self.expr()? }
-        } else {
-            Statement { left: None, right: first }
+        let relation = [('=', Relation::Eq), ('<', Relation::Lt), ('≤', Relation::Le), ('>', Relation::Gt), ('≥', Relation::Ge)]
+            .into_iter()
+            .find(|(op, _)| self.eat(*op))
+            .map(|(_, relation)| relation);
+        let statement = match relation {
+            Some(relation) => Statement { left: Some(first), right: self.expr()?, relation },
+            None => Statement { left: None, right: first, relation: Relation::Eq },
         };
         if self.peek().is_some() {
             return Err(self.unexpected());

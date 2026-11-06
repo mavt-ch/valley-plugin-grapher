@@ -35,6 +35,11 @@ export const Space = (p: IconProps): ReactElement => (
   <Svg {...p}><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z" /><path d="M12 12l8-4.5M12 12v9M12 12L4 7.5" /></Svg>
 )
 
+/** The Gaussian plane: axes and a complex number as an arrow. */
+export const Complex = (p: IconProps): ReactElement => (
+  <Svg {...p}><path d="M4 20V3M4 20h17" opacity={0.45} /><path d="M4 20L15.5 8.5" /><path d="M11 8h5v5" /></Svg>
+)
+
 export const X = (p: IconProps): ReactElement => (
   <Svg {...p}><path d="M18 6L6 18M6 6l12 12" /></Svg>
 )

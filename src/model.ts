@@ -2,12 +2,12 @@ import { normalizePaletteValue, paletteRef } from '@valley/plugin-sdk/palette'
 
 /**
  * The coordinate system of a sheet. Each keeps its own rows; trigonometric is Cartesian with π on the x-axis and
- * space is the 3D sheet.
+ * space is the 3D sheet and complex the Gaussian plane.
  */
-export type Mode = 'cartesian' | 'trig' | 'polar' | 'parametric' | 'space'
-export const MODES: readonly Mode[] = ['cartesian', 'trig', 'polar', 'parametric', 'space']
+export type Mode = 'cartesian' | 'trig' | 'polar' | 'parametric' | 'space' | 'complex'
+export const MODES: readonly Mode[] = ['cartesian', 'trig', 'polar', 'parametric', 'space', 'complex']
 /** The kernel's mode numbers (`plot_analyze`). */
-export const MODE_INDEX: Record<Mode, number> = { cartesian: 0, trig: 1, polar: 2, parametric: 3, space: 4 }
+export const MODE_INDEX: Record<Mode, number> = { cartesian: 0, trig: 1, polar: 2, parametric: 3, space: 4, complex: 5 }
 
 export interface Slider {
   min: number
@@ -78,11 +78,12 @@ export function defaultSheet(mode: Mode): Row[] {
     case 'polar': return examples(['r = 1 + cos(θ)', 'r = 2 sin(3θ)'])
     case 'parametric': return examples(['(cos(3t), sin(2t))', ['(0.2t cos t, 0.2t sin t)', '0', '6π']])
     case 'space': return examples(['z = (x^2 + y^2) / 5 - 6', ['(6cos t, 6sin t, t / 2)', '0', '6π']])
+    case 'complex': return examples(['w = 2e^(iπ/3)', 'cos(φ) + i sin(φ)', 'φ = 0.8', '|z + 2| < 3'])
   }
 }
 
 export function defaultDocument(): GrapherDocument {
-  return { version: 1, mode: 'cartesian', sheets: { cartesian: defaultSheet('cartesian'), trig: defaultSheet('trig'), polar: defaultSheet('polar'), parametric: defaultSheet('parametric'), space: defaultSheet('space') } }
+  return { version: 1, mode: 'cartesian', sheets: { cartesian: defaultSheet('cartesian'), trig: defaultSheet('trig'), polar: defaultSheet('polar'), parametric: defaultSheet('parametric'), space: defaultSheet('space'), complex: defaultSheet('complex') } }
 }
 
 const text = (value: unknown, fallback = ''): string => (typeof value === 'string' ? value.slice(0, LIMIT) : fallback)

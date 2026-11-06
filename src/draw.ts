@@ -1,7 +1,7 @@
 import { readPaletteColor } from '@valley/plugin-sdk/palette'
 import { STRIDE, type SamplePath, type Viewport } from './engine'
 import type { Mode } from './model'
-import { decimalAxis, decimalStep, formatNumber, formatPi, piAxis, type Axis } from './ticks'
+import { decimalAxis, decimalStep, formatComplex, formatImaginary, formatNumber, formatPi, piAxis, type Axis } from './ticks'
 
 export interface Size {
   width: number
@@ -143,7 +143,9 @@ function cartesianGrid(ctx: CanvasRenderingContext2D, mode: Mode, view: Viewport
   const lo = toWorldX(view, size, 0)
   const hi = toWorldX(view, size, size.width)
   const x = mode === 'trig' ? piAxis(lo, hi, view.scale) : decimalAxis(lo, hi, view.scale)
-  const y = decimalAxis(toWorldY(view, size, size.height), toWorldY(view, size, 0), view.scale)
+  const real = decimalAxis(toWorldY(view, size, size.height), toWorldY(view, size, 0), view.scale)
+  // The Gaussian plane labels its vertical axis with multiples of i.
+  const y = mode === 'complex' ? { ...real, labels: real.labels.map((label) => ({ ...label, text: formatImaginary(label.text) })) } : real
   ctx.lineWidth = 1
   ctx.strokeStyle = theme.minor
   verticals(ctx, x, view, size, false)
@@ -153,6 +155,52 @@ function cartesianGrid(ctx: CanvasRenderingContext2D, mode: Mode, view: Viewport
   horizontals(ctx, y, view, size, true)
   axes(ctx, view, size, theme)
   labels(ctx, x, y, view, size, theme)
+  if (mode === 'complex') axisNames(ctx, view, size, theme)
+}
+
+/** `Re` at the right end of the real axis and `Im` at the top of the imaginary one, pinned inside the view. */
+function axisNames(ctx: CanvasRenderingContext2D, view: Viewport, size: Size, theme: Theme): void {
+  const ox = Math.max(28, Math.min(size.width - 28, toScreenX(view, size, 0)))
+  const oy = Math.max(14, Math.min(size.height - 14, toScreenY(view, size, 0)))
+  ctx.font = `600 ${theme.font}`
+  ctx.textBaseline = 'bottom'
+  ctx.textAlign = 'right'
+  haloText(ctx, theme, 'Re', size.width - 8, oy - 4)
+  ctx.textAlign = 'left'
+  ctx.textBaseline = 'top'
+  haloText(ctx, theme, 'Im', ox + 8, 8)
+  ctx.font = theme.font
+}
+
+/** Complex numbers as arrows from 0, with their value beside the tip. */
+export function drawArrows(ctx: CanvasRenderingContext2D, arrows: readonly { x: number; y: number; color: string }[], view: Viewport, size: Size, theme: Theme): void {
+  const ox = toScreenX(view, size, 0)
+  const oy = toScreenY(view, size, 0)
+  ctx.font = theme.font
+  for (const arrow of arrows) {
+    const tx = clamp(toScreenX(view, size, arrow.x))
+    const ty = clamp(toScreenY(view, size, arrow.y))
+    const length = Math.hypot(tx - ox, ty - oy)
+    if (length < 8) continue
+    const [ux, uy] = [(tx - ox) / length, (ty - oy) / length]
+    const [bx, by] = [tx - ux * 11, ty - uy * 11]
+    ctx.strokeStyle = arrow.color
+    ctx.fillStyle = arrow.color
+    ctx.lineWidth = 2
+    ctx.beginPath()
+    ctx.moveTo(ox, oy)
+    ctx.lineTo(bx, by)
+    ctx.stroke()
+    ctx.beginPath()
+    ctx.moveTo(tx, ty)
+    ctx.lineTo(bx - uy * 5, by + ux * 5)
+    ctx.lineTo(bx + uy * 5, by - ux * 5)
+    ctx.closePath()
+    ctx.fill()
+    ctx.textAlign = ux >= 0 ? 'left' : 'right'
+    ctx.textBaseline = uy >= 0 ? 'top' : 'bottom'
+    haloText(ctx, theme, formatComplex(arrow.x, arrow.y), tx + (ux >= 0 ? 7 : -7), ty + (uy >= 0 ? 5 : -5))
+  }
 }
 
 /** Where a ray from the origin leaves the view (inset for its label), or null when it misses it. */
@@ -234,10 +282,31 @@ export function drawGrid(ctx: CanvasRenderingContext2D, mode: Mode, view: Viewpo
   else cartesianGrid(ctx, mode, view, size, theme)
 }
 
-export function drawPaths(ctx: CanvasRenderingContext2D, paths: readonly SamplePath[], colors: readonly string[], theme: Theme): void {
+/** Regions are filled first, translucent and once per row so neighbouring cells never double up; `dashed` marks
+ * rows whose boundary is excluded (strict inequalities). */
+export function drawPaths(ctx: CanvasRenderingContext2D, paths: readonly SamplePath[], colors: readonly string[], theme: Theme, dashed: readonly boolean[] = []): void {
   ctx.lineJoin = 'round'
   ctx.lineCap = 'round'
+  const regions = new Map<number, Path2D>()
   for (const path of paths) {
+    if (path.kind !== 'region') continue
+    const area = regions.get(path.row) ?? new Path2D()
+    for (let i = 0; i < path.points.length; i += STRIDE) {
+      if (i === 0) area.moveTo(clamp(path.points[i]), clamp(path.points[i + 1]))
+      else area.lineTo(clamp(path.points[i]), clamp(path.points[i + 1]))
+    }
+    area.closePath()
+    regions.set(path.row, area)
+  }
+  ctx.save()
+  ctx.globalAlpha = 0.22
+  for (const [row, area] of regions) {
+    ctx.fillStyle = colors[row] ?? theme.axis
+    ctx.fill(area)
+  }
+  ctx.restore()
+  for (const path of paths) {
+    if (path.kind === 'region') continue
     const color = colors[path.row] ?? theme.axis
     const { points } = path
     if (path.kind === 'point') {
@@ -252,15 +321,17 @@ export function drawPaths(ctx: CanvasRenderingContext2D, paths: readonly SampleP
     }
     ctx.lineWidth = 2.5
     ctx.strokeStyle = color
+    ctx.setLineDash(dashed[path.row] ? [7, 5] : [])
     ctx.beginPath()
     for (let i = 0; i < points.length; i += STRIDE) {
       const x = clamp(points[i])
       const y = clamp(points[i + 1])
-      if (i === 0 || (path.kind === 'segments' && (i / STRIDE) % 2 === 0)) ctx.moveTo(x, y)
+      if (i === 0) ctx.moveTo(x, y)
       else ctx.lineTo(x, y)
     }
     ctx.stroke()
   }
+  ctx.setLineDash([])
 }
 
 export interface Hit {
@@ -282,6 +353,7 @@ export function findHit(paths: readonly SamplePath[], px: number, py: number, ra
   let lineDistance = radius
   for (const path of paths) {
     const { points } = path
+    if (path.kind === 'region') continue
     if (path.kind === 'point') {
       const distance = Math.hypot(points[0] - px, points[1] - py)
       if (distance <= pointDistance) {
@@ -290,8 +362,7 @@ export function findHit(paths: readonly SamplePath[], px: number, py: number, ra
       }
       continue
     }
-    const step = path.kind === 'segments' ? 2 * STRIDE : STRIDE
-    for (let i = 0; i + STRIDE < points.length; i += step) {
+    for (let i = 0; i + STRIDE < points.length; i += STRIDE) {
       const j = i + STRIDE
       const ax = points[i], ay = points[i + 1], bx = points[j], by = points[j + 1]
       if (Math.min(ax, bx) - lineDistance > px || Math.max(ax, bx) + lineDistance < px || Math.min(ay, by) - lineDistance > py || Math.max(ay, by) + lineDistance < py) continue
@@ -312,7 +383,7 @@ export function findHit(paths: readonly SamplePath[], px: number, py: number, ra
   return point ?? line
 }
 
-export function drawHover(ctx: CanvasRenderingContext2D, hover: Hover, color: string, size: Size, theme: Theme): void {
+export function drawHover(ctx: CanvasRenderingContext2D, hover: Hover, color: string, size: Size, theme: Theme, complex = false): void {
   ctx.beginPath()
   ctx.arc(hover.sx, hover.sy, 5, 0, Math.PI * 2)
   ctx.fillStyle = color
@@ -320,7 +391,7 @@ export function drawHover(ctx: CanvasRenderingContext2D, hover: Hover, color: st
   ctx.lineWidth = 2
   ctx.strokeStyle = theme.background
   ctx.stroke()
-  const lines = [`(${formatNumber(hover.wx)}, ${formatNumber(hover.wy)})`]
+  const lines = [complex ? formatComplex(hover.wx, hover.wy) : `(${formatNumber(hover.wx)}, ${formatNumber(hover.wy)})`]
   if (hover.parameter) lines.push(`${hover.parameter.name} = ${formatNumber(hover.parameter.value)}`)
   ctx.font = theme.font
   const width = Math.max(...lines.map((line) => ctx.measureText(line).width)) + 12

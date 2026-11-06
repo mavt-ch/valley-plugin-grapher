@@ -3,18 +3,24 @@
 //! long, so curvature, domain edges and asymptotes get detail and straight stretches stay cheap. A chord that is
 //! still long at the deepest level spans a jump and is left out instead of drawn as a vertical line.
 //!
+//! Relations over the plane (`x^2 + y^2 = 1`, `y > x^2`, `|z + 2| < 3`) are sampled on a grid of cells: marching
+//! squares traces where the field crosses zero (joined into polylines), and regions are filled from whole cells plus the clipped parts of
+//! the cells their boundary passes through.
+//!
 //! Output is one flat `f64` stream of paths: `[row, kind, count]`, then `count` points of
 //! `[screen x, screen y, world x, world y, parameter]`.
 
 use std::f64::consts::TAU;
 
+use crate::complex::{self, C64, CUserFn};
 use crate::eval::{Expr, UserFn, eval};
-use crate::sheet::{Plot, Sheet, T, THETA, X, Y};
+use crate::parser::Relation;
+use crate::sheet::{Field, Plot, Sheet, T, THETA, X, Y, Z};
 
 pub const LINE: f64 = 0.0;
 pub const POINT: f64 = 1.0;
-/// Pairs of points, each pair one segment (implicit curves).
-pub const SEGMENTS: f64 = 2.0;
+/// One filled polygon of a region.
+pub const REGION: f64 = 3.0;
 pub const STRIDE: usize = 5;
 
 const FUNCTION_DEPTH: u32 = 12;
@@ -81,7 +87,7 @@ impl Writer {
     fn end(&mut self) {
         let Some((header, kind)) = self.open.take() else { return };
         let count = (self.data.len() - header - 3) / STRIDE;
-        if count == 0 || (kind == LINE && count < 2) {
+        if count == 0 || (kind == LINE && count < 2) || (kind == REGION && count < 3) {
             self.data.truncate(header);
         } else {
             self.data[header + 2] = count as f64;
@@ -99,6 +105,8 @@ struct Graph<'a> {
     view: View,
     env: &'a mut [f64],
     functions: &'a [UserFn],
+    cenv: &'a mut [C64],
+    cfunctions: &'a [CUserFn],
     out: &'a mut Writer,
     budget: usize,
 }
@@ -263,33 +271,29 @@ impl Graph<'_> {
         self.refine_curve(curve, (pm, qm), b, depth + 1);
     }
 
-    // ---- F(x, y) = 0 by marching squares ----
+    // ---- F(x, y) = 0 by marching squares, and the regions where F < 0 or F > 0 ----
 
-    fn implicit_at(&mut self, expr: &Expr, sx: f64, sy: f64) -> f64 {
-        self.env[X] = self.view.wx(sx);
-        self.env[Y] = self.view.wy(sy);
-        eval(expr, self.env, self.functions)
-    }
-
-    /// Where F changes sign along an edge, by linear interpolation; `None` at a pole, where |F| grows there.
-    fn crossing(&mut self, expr: &Expr, a: (f64, f64, f64), b: (f64, f64, f64)) -> Option<(f64, f64)> {
-        let t = a.2 / (a.2 - b.2);
-        let point = (a.0 + (b.0 - a.0) * t, a.1 + (b.1 - a.1) * t);
-        let value = self.implicit_at(expr, point.0, point.1);
-        (value.abs() <= a.2.abs() + b.2.abs()).then_some(point)
-    }
-
-    /// The segment between the crossings on two edges; edge `e` runs from corner `e` to corner `e + 1`.
-    fn segment(&mut self, expr: &Expr, corners: [(f64, f64, f64); 4], from: usize, to: usize) {
-        let a = self.crossing(expr, corners[from], corners[(from + 1) % 4]);
-        let b = self.crossing(expr, corners[to], corners[(to + 1) % 4]);
-        let (Some(a), Some(b)) = (a, b) else { return };
-        for (sx, sy) in [a, b] {
-            self.out.push(sx, sy, self.view.wx(sx), self.view.wy(sy), 0.0);
+    /// The field at a screen point. A complex field counts only where its value is real.
+    fn field_at(&mut self, field: &Field, sx: f64, sy: f64) -> f64 {
+        let (wx, wy) = (self.view.wx(sx), self.view.wy(sy));
+        match field {
+            Field::Real(expr) => {
+                self.env[X] = wx;
+                self.env[Y] = wy;
+                eval(expr, self.env, self.functions)
+            }
+            Field::Complex(expr) => {
+                self.cenv[Z] = C64::new(wx, wy);
+                self.cenv[X] = C64::real(wx);
+                self.cenv[Y] = C64::real(wy);
+                let value = complex::eval(expr, self.cenv, self.cfunctions);
+                if value.is_real() { value.re } else { f64::NAN }
+            }
         }
     }
 
-    fn implicit(&mut self, expr: &Expr) {
+    /// The field at the corners of a grid of cells over the view: cell size in pixels, columns, rows, values.
+    fn grid(&mut self, field: &Field) -> (f64, usize, usize, Vec<f64>) {
         let view = self.view;
         let cell = (view.width * view.height / 250_000.0).sqrt().max(4.0);
         let cols = (view.width / cell).ceil() as usize + 1;
@@ -298,14 +302,45 @@ impl Graph<'_> {
         let mut grid = vec![0.0; stride * (rows + 1)];
         for j in 0..=rows {
             for i in 0..=cols {
-                grid[j * stride + i] = self.implicit_at(expr, i as f64 * cell, j as f64 * cell);
+                grid[j * stride + i] = self.field_at(field, i as f64 * cell, j as f64 * cell);
             }
         }
-        self.out.begin(SEGMENTS);
+        (cell, cols, rows, grid)
+    }
+
+    /// A cell's corners clockwise from top-left as (screen x, screen y, value).
+    fn corners(cell: f64, cols: usize, grid: &[f64], i: usize, j: usize) -> [(f64, f64, f64); 4] {
+        let stride = cols + 1;
+        let (x0, y0, x1, y1) = (i as f64 * cell, j as f64 * cell, (i + 1) as f64 * cell, (j + 1) as f64 * cell);
+        [(x0, y0, grid[j * stride + i]), (x1, y0, grid[j * stride + i + 1]), (x1, y1, grid[(j + 1) * stride + i + 1]), (x0, y1, grid[(j + 1) * stride + i])]
+    }
+
+    /// Where F changes sign along an edge, by linear interpolation; `None` at a pole, where |F| grows there.
+    fn crossing(&mut self, field: &Field, a: (f64, f64, f64), b: (f64, f64, f64)) -> Option<(f64, f64)> {
+        let t = a.2 / (a.2 - b.2);
+        let point = (a.0 + (b.0 - a.0) * t, a.1 + (b.1 - a.1) * t);
+        let value = self.field_at(field, point.0, point.1);
+        (value.abs() <= a.2.abs() + b.2.abs()).then_some(point)
+    }
+
+    /// The segment between the crossings on two edges; edge `e` runs from corner `e` to corner `e + 1`.
+    fn segment(&mut self, field: &Field, corners: [(f64, f64, f64); 4], from: usize, to: usize) -> Option<((f64, f64), (f64, f64))> {
+        let a = self.crossing(field, corners[from], corners[(from + 1) % 4])?;
+        let b = self.crossing(field, corners[to], corners[(to + 1) % 4])?;
+        Some((a, b))
+    }
+
+    fn implicit(&mut self, field: &Field) {
+        let (cell, cols, rows, grid) = self.grid(field);
+        self.contour(field, cell, cols, rows, &grid);
+    }
+
+    /// The zero line of the field, joined from cell segments into polylines so dashes and joins run continuously.
+    fn contour(&mut self, field: &Field, cell: f64, cols: usize, rows: usize, grid: &[f64]) {
+        let mut segments = Vec::new();
         for j in 0..rows {
             for i in 0..cols {
-                let (x0, y0, x1, y1) = (i as f64 * cell, j as f64 * cell, (i + 1) as f64 * cell, (j + 1) as f64 * cell);
-                let corners = [(x0, y0, grid[j * stride + i]), (x1, y0, grid[j * stride + i + 1]), (x1, y1, grid[(j + 1) * stride + i + 1]), (x0, y1, grid[(j + 1) * stride + i])];
+                let corners = Self::corners(cell, cols, grid, i, j);
                 if corners.iter().any(|corner| !corner.2.is_finite()) {
                     continue;
                 }
@@ -320,19 +355,114 @@ impl Graph<'_> {
                     6 | 9 => &[(0, 2)],
                     7 | 8 => &[(0, 3)],
                     5 | 10 => {
-                        let center = self.implicit_at(expr, 0.5 * (x0 + x1), 0.5 * (y0 + y1)) > 0.0;
+                        let center = self.field_at(field, corners[0].0 + 0.5 * cell, corners[0].1 + 0.5 * cell) > 0.0;
                         // 5: top-right and bottom-left positive; 10: top-left and bottom-right positive.
                         if (case == 5) == center { &[(0, 3), (2, 1)] } else { &[(0, 1), (3, 2)] }
                     }
                     _ => &[],
                 };
                 for &(from, to) in pairs {
-                    self.segment(expr, corners, from, to);
+                    segments.extend(self.segment(field, corners, from, to));
                 }
             }
         }
+        for line in chain(&segments) {
+            self.out.begin(LINE);
+            for (sx, sy) in line {
+                self.out.push(sx, sy, self.view.wx(sx), self.view.wy(sy), 0.0);
+            }
+            self.out.end();
+        }
+    }
+
+    fn polygon(&mut self, points: &[(f64, f64)]) {
+        self.out.begin(REGION);
+        for &(sx, sy) in points {
+            self.out.push(sx, sy, self.view.wx(sx), self.view.wy(sy), 0.0);
+        }
         self.out.end();
     }
+
+    /// Where `F < 0` (`<`, `≤`) or `F > 0` (`>`, `≥`): runs of whole cells as rectangles, boundary cells clipped
+    /// along the interpolated zero line, then the boundary itself.
+    fn region(&mut self, field: &Field, relation: Relation) {
+        let sign = if matches!(relation, Relation::Lt | Relation::Le) { -1.0 } else { 1.0 };
+        let inside = |value: f64| sign * value > 0.0;
+        let (cell, cols, rows, grid) = self.grid(field);
+        for j in 0..rows {
+            let (top, bottom) = (j as f64 * cell, (j + 1) as f64 * cell);
+            let mut run: Option<usize> = None;
+            for i in 0..=cols {
+                let corners = (i < cols).then(|| Self::corners(cell, cols, &grid, i, j));
+                let full = corners.is_some_and(|corners| corners.iter().all(|corner| corner.2.is_finite() && inside(corner.2)));
+                if full {
+                    run.get_or_insert(i);
+                    continue;
+                }
+                if let Some(start) = run.take() {
+                    let (left, right) = (start as f64 * cell, i as f64 * cell);
+                    self.polygon(&[(left, top), (right, top), (right, bottom), (left, bottom)]);
+                }
+                let Some(corners) = corners else { continue };
+                if corners.iter().any(|corner| !corner.2.is_finite()) || !corners.iter().any(|corner| inside(corner.2)) {
+                    continue;
+                }
+                let mut clipped = Vec::with_capacity(6);
+                for (k, a) in corners.iter().enumerate() {
+                    let b = corners[(k + 1) % 4];
+                    if inside(a.2) {
+                        clipped.push((a.0, a.1));
+                    }
+                    if inside(a.2) != inside(b.2) {
+                        let t = a.2 / (a.2 - b.2);
+                        clipped.push((a.0 + (b.0 - a.0) * t, a.1 + (b.1 - a.1) * t));
+                    }
+                }
+                self.polygon(&clipped);
+            }
+        }
+        self.contour(field, cell, cols, rows, &grid);
+    }
+}
+
+/// Joins segments that share endpoints into polylines. Neighbouring cells compute a shared crossing from the same
+/// edge, so endpoints agree up to rounding; they are matched on a 1/1024-pixel grid.
+fn chain(segments: &[((f64, f64), (f64, f64))]) -> Vec<Vec<(f64, f64)>> {
+    use std::collections::HashMap;
+    let key = |p: (f64, f64)| ((p.0 * 1024.0).round() as i64, (p.1 * 1024.0).round() as i64);
+    let mut ends: HashMap<(i64, i64), Vec<usize>> = HashMap::new();
+    for (index, (a, b)) in segments.iter().enumerate() {
+        ends.entry(key(*a)).or_default().push(index);
+        ends.entry(key(*b)).or_default().push(index);
+    }
+    let mut used = vec![false; segments.len()];
+    let mut next = |at: (f64, f64), used: &mut Vec<bool>| -> Option<(f64, f64)> {
+        let candidates = ends.get_mut(&key(at))?;
+        let index = candidates.iter().copied().find(|index| !used[*index])?;
+        used[index] = true;
+        let (a, b) = segments[index];
+        Some(if key(a) == key(at) { b } else { a })
+    };
+    let mut lines = Vec::new();
+    for start in 0..segments.len() {
+        if used[start] {
+            continue;
+        }
+        used[start] = true;
+        let (a, b) = segments[start];
+        let mut forward = vec![a, b];
+        while let Some(point) = next(*forward.last().unwrap_or(&b), &mut used) {
+            forward.push(point);
+        }
+        let mut backward = Vec::new();
+        while let Some(point) = next(*backward.last().unwrap_or(&a), &mut used) {
+            backward.push(point);
+        }
+        backward.reverse();
+        backward.extend(forward);
+        lines.push(backward);
+    }
+    lines
 }
 
 pub fn sample(sheet: &mut Sheet, view: View) -> Vec<f64> {
@@ -340,22 +470,31 @@ pub fn sample(sheet: &mut Sheet, view: View) -> Vec<f64> {
     if !view.valid() {
         return out.data;
     }
-    let Sheet { env, functions, rows } = sheet;
+    let Sheet { env, functions, cenv, cfunctions, rows } = sheet;
     for (index, row) in rows.iter().enumerate() {
         let Some(plot) = row.plot().filter(|_| !row.hidden) else { continue };
         out.row = index as f64;
-        let mut graph = Graph { view, env: env.as_mut_slice(), functions: functions.as_slice(), out: &mut out, budget: ROW_BUDGET };
+        let mut graph = Graph {
+            view,
+            env: env.as_mut_slice(),
+            functions: functions.as_slice(),
+            cenv: cenv.as_mut_slice(),
+            cfunctions: cfunctions.as_slice(),
+            out: &mut out,
+            budget: ROW_BUDGET,
+        };
         match plot {
             Plot::FunctionX(expr) => graph.function(expr, true),
             Plot::FunctionY(expr) => graph.function(expr, false),
             Plot::Polar { r, from, to } => graph.curve(Curve::Polar(r), *from, *to),
             Plot::Curve { x, y, from, to } => graph.curve(Curve::Pair(x, y), *from, *to),
-            Plot::Point { x, y } => {
+            Plot::Point { x, y } | Plot::ComplexPoint { re: x, im: y, .. } => {
                 graph.out.begin(POINT);
                 graph.out.push(view.sx(*x), view.sy(*y), *x, *y, 0.0);
                 graph.out.end();
             }
-            Plot::Implicit(expr) => graph.implicit(expr),
+            Plot::Implicit(field) => graph.implicit(field),
+            Plot::Region { field, relation } => graph.region(field, *relation),
             Plot::Surface { .. } | Plot::Curve3 { .. } | Plot::Point3 { .. } => {}
         }
     }
@@ -364,7 +503,7 @@ pub fn sample(sheet: &mut Sheet, view: View) -> Vec<f64> {
 
 /// `f(value)` of a `y = f(x)` or `x = g(y)` row, for tracing under the pointer; NaN for any other row.
 pub fn evaluate(sheet: &mut Sheet, row: usize, value: f64) -> f64 {
-    let Sheet { env, functions, rows } = sheet;
+    let Sheet { env, functions, rows, .. } = sheet;
     let (expr, slot) = match rows.get(row).and_then(|row| row.plot()) {
         Some(Plot::FunctionX(expr)) => (expr, X),
         Some(Plot::FunctionY(expr)) => (expr, Y),
@@ -442,7 +581,7 @@ mod tests {
                 assert!((point[2].hypot(point[3]) - 3.0).abs() < 0.05, "{point:?}");
             }
         }
-        assert_eq!(implicit[0].kind, SEGMENTS);
+        assert_eq!(implicit[0].kind, LINE);
         assert!(implicit[0].points.len() > 40);
     }
 
@@ -456,5 +595,41 @@ mod tests {
         assert!(sample(&mut sheet, VIEW).is_empty());
         assert_eq!(evaluate(&mut sheet, 0, 2.0), 8.0);
         assert!(evaluate(&mut sheet, 5, 2.0).is_nan());
+    }
+
+    #[test]
+    fn a_complex_disk_is_filled_inside_its_circle() {
+        let found = paths(Mode::Complex, &["|z + 2| < 3"], VIEW);
+        let regions: Vec<&Path> = found.iter().filter(|path| path.kind == REGION).collect();
+        assert!(regions.len() > 50, "{} region polygons", regions.len());
+        for polygon in &regions {
+            for point in &polygon.points {
+                assert!((point[2] + 2.0).hypot(point[3]) <= 3.0 + 0.3, "{point:?} lies outside the disk");
+            }
+        }
+        let boundary: Vec<&Path> = found.iter().filter(|path| path.kind == LINE).collect();
+        assert_eq!(boundary.len(), 1, "the circle is one closed polyline");
+        assert!(boundary[0].points.len() > 100);
+        for point in &boundary[0].points {
+            assert!(((point[2] + 2.0).hypot(point[3]) - 3.0).abs() < 0.05, "{point:?}");
+        }
+        // Filled area ≈ the disk's area, 9π.
+        let area: f64 = regions.iter().map(|polygon| {
+            let n = polygon.points.len();
+            (0..n).map(|k| { let (a, b) = (polygon.points[k], polygon.points[(k + 1) % n]); a[2] * b[3] - b[2] * a[3] }).sum::<f64>().abs() / 2.0
+        }).sum();
+        assert!((area - 9.0 * std::f64::consts::PI).abs() < 0.5, "area {area}");
+    }
+
+    #[test]
+    fn a_cartesian_inequality_and_complex_points() {
+        let found = paths(Mode::Cartesian, &["y > x^2"], VIEW);
+        for polygon in found.iter().filter(|path| path.kind == REGION) {
+            for point in &polygon.points {
+                assert!(point[3] >= point[2] * point[2] - 0.3, "{point:?}");
+            }
+        }
+        let points = paths(Mode::Complex, &["3 - 2i", "w = i"], VIEW);
+        assert_eq!(points.iter().map(|path| (path.kind, path.points[0][2], path.points[0][3])).collect::<Vec<_>>(), [(POINT, 3.0, -2.0), (POINT, 0.0, 1.0)]);
     }
 }

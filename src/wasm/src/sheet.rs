@@ -1,15 +1,17 @@
 //! One sheet of rows, analysed together: parameters (`a = 2`) and user functions (`f(x) = …`) are defined
 //! once and resolved in dependency order, then every other row is classified by the variables it uses and
-//! compiled against those definitions.
+//! compiled against those definitions. The complex sheet evaluates definitions and relations in ℂ.
 
+use std::cell::Cell;
 use std::collections::hash_map::Entry;
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::f64::consts::TAU;
 
+use crate::complex::{self, C64, CExpr, CUserFn};
 use crate::error::MathError;
 use crate::eval::{Expr, Scope, UserFn, compile, constant, eval};
 use crate::lexer::{Tok, tokenize};
-use crate::parser::{BinOp, Callee, Node, Statement, parse};
+use crate::parser::{BinOp, Callee, Node, Relation, Statement, parse};
 
 pub const X: usize = 0;
 pub const Y: usize = 1;
@@ -17,6 +19,13 @@ pub const T: usize = 2;
 pub const THETA: usize = 3;
 pub const Z: usize = 4;
 const RESERVED: [&str; 6] = ["x", "y", "z", "t", "θ", "r"];
+/// On the complex sheet `r`, `t` and θ are ordinary names (as in `r e^(iθ)`) and `i` is the imaginary unit.
+const RESERVED_COMPLEX: [&str; 4] = ["x", "y", "z", "i"];
+
+thread_local! {
+    /// Set by `analyze` for the sheet being read.
+    static COMPLEX_NAMES: Cell<bool> = const { Cell::new(false) };
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Mode {
@@ -25,6 +34,7 @@ pub enum Mode {
     Polar,
     Parametric,
     Space,
+    Complex,
 }
 
 impl Mode {
@@ -34,6 +44,7 @@ impl Mode {
             2 => Self::Polar,
             3 => Self::Parametric,
             4 => Self::Space,
+            5 => Self::Complex,
             _ => Self::Cartesian,
         }
     }
@@ -57,12 +68,24 @@ pub enum Plot {
     Polar { r: Expr, from: f64, to: f64 },
     Curve { x: Expr, y: Expr, from: f64, to: f64 },
     Point { x: f64, y: f64 },
-    /// `F(x, y) = 0`.
-    Implicit(Expr),
+    /// `F(x, y) = 0`; on the complex sheet `F(z) = 0`.
+    Implicit(Field),
+    /// Where the field is negative (`<`, `≤`) or positive (`>`, `≥`); the boundary is drawn too.
+    Region { field: Field, relation: Relation },
+    /// A complex number on the complex sheet, with the name it was defined under.
+    ComplexPoint { re: f64, im: f64, name: String },
     /// `z = f(x, y)`, `x = f(y, z)` or `y = f(x, z)`: `axis` is the one the expression gives.
     Surface { expr: Expr, axis: Axis3 },
     Curve3 { x: Expr, y: Expr, z: Expr, from: f64, to: f64 },
     Point3 { x: f64, y: f64, z: f64 },
+}
+
+/// `left - right` of a relation over the plane: real in `x` and `y`, or complex in `z`, which counts only where
+/// it is real.
+#[derive(Clone, Debug)]
+pub enum Field {
+    Real(Expr),
+    Complex(CExpr),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -120,11 +143,18 @@ impl Row {
 pub struct Sheet {
     pub env: Vec<f64>,
     pub functions: Vec<UserFn>,
+    pub cenv: Vec<C64>,
+    pub cfunctions: Vec<CUserFn>,
     pub rows: Vec<Row>,
 }
 
 fn is_reserved(name: &str) -> bool {
-    RESERVED.contains(&name)
+    if COMPLEX_NAMES.with(Cell::get) { RESERVED_COMPLEX.contains(&name) } else { RESERVED.contains(&name) }
+}
+
+/// Free of the plane's variables; the imaginary unit is a constant.
+fn plane_free(node: &Node) -> bool {
+    variables(node).iter().all(|name| name == "i")
 }
 
 fn is_var(node: &Node, name: &str) -> bool {
@@ -220,6 +250,9 @@ struct Analysis<'a> {
     function_index: HashMap<String, usize>,
     env: Vec<f64>,
     functions: Vec<UserFn>,
+    complex: bool,
+    cenv: Vec<C64>,
+    cfunctions: Vec<CUserFn>,
     state: HashMap<String, Resolution>,
     errors: HashMap<String, MathError>,
 }
@@ -289,6 +322,26 @@ impl Analysis<'_> {
             Definition::Parameter(row) => (*row, None),
             Definition::Function { row, param } => (*row, Some(param.clone())),
         };
+        if self.complex {
+            let body = self.statement(row).right.clone();
+            let own: Vec<&str> = param.iter().map(String::as_str).collect();
+            self.require(&[&body], &own)?;
+            match param {
+                None => {
+                    let value = self.constant_c(&body)?;
+                    let slot = self.slots[name];
+                    self.cenv[slot] = value;
+                    self.env[slot] = if value.is_real() { value.re } else { f64::NAN };
+                }
+                Some(param) => {
+                    let allowed = param.clone();
+                    let expr = self.compile_c(&body, &move |name| name == allowed || !is_reserved(name))?;
+                    let index = self.function_index[name];
+                    self.cfunctions[index] = CUserFn { slot: self.slots[&param], body: expr };
+                }
+            }
+            return Ok(());
+        }
         match param {
             None => {
                 let right = self.statement(row).right.clone();
@@ -311,6 +364,17 @@ impl Analysis<'_> {
 
     fn compile(&self, node: &Node, allow: &dyn Fn(&str) -> bool) -> Result<Expr, MathError> {
         compile(node, &Scope { slots: &self.slots, functions: &self.function_index, allow })
+    }
+
+    fn compile_c(&self, node: &Node, allow: &dyn Fn(&str) -> bool) -> Result<CExpr, MathError> {
+        complex::compile(node, &Scope { slots: &self.slots, functions: &self.function_index, allow })
+    }
+
+    /// A constant complex expression evaluated with the sheet's definitions.
+    fn constant_c(&mut self, node: &Node) -> Result<C64, MathError> {
+        self.require(&[node], &[])?;
+        let expr = self.compile_c(node, &|name| !is_reserved(name))?;
+        Ok(complex::eval(&expr, &mut self.cenv, &self.cfunctions))
     }
 
     /// A constant expression (a point coordinate, a range bound) evaluated with the sheet's parameters.
@@ -346,8 +410,22 @@ impl Analysis<'_> {
             nodes.push(left);
         }
         self.require(&nodes, &[])?;
+        if mode == Mode::Complex {
+            return self.plot_complex(&statement);
+        }
         if mode == Mode::Space {
             return self.plot_space(&statement, input);
+        }
+        if let (Some(left), right) = (&statement.left, &statement.right)
+            && statement.relation != Relation::Eq
+        {
+            let planar = only(left, &["x", "y"]) && only(right, &["x", "y"]) && !(variables(left).is_empty() && variables(right).is_empty());
+            if !planar || !matches!(mode, Mode::Cartesian | Mode::Trig) {
+                return Err(MathError::new("error.unsupported", ""));
+            }
+            let difference = Node::Bin(BinOp::Sub, Box::new(left.clone()), Box::new(right.clone()));
+            let field = Field::Real(self.compile(&difference, &|name| name == "x" || name == "y" || !is_reserved(name))?);
+            return Ok(Outcome::Plotted(Plot::Region { field, relation: statement.relation }));
         }
         let function = |analysis: &Self, node: &Node, variable: &'static str| -> Result<Expr, MathError> {
             analysis.compile(node, &move |name| name == variable || !is_reserved(name))
@@ -400,7 +478,7 @@ impl Analysis<'_> {
                     Plot::Polar { r: function(self, expr, "θ")?, from, to }
                 } else if only(left, &["x", "y"]) && only(right, &["x", "y"]) && !(variables(left).is_empty() && variables(right).is_empty()) {
                     let difference = Node::Bin(BinOp::Sub, Box::new(left.clone()), Box::new(right.clone()));
-                    Plot::Implicit(self.compile(&difference, &|name| name == "x" || name == "y" || !is_reserved(name))?)
+                    Plot::Implicit(Field::Real(self.compile(&difference, &|name| name == "x" || name == "y" || !is_reserved(name))?))
                 } else {
                     return Err(MathError::new("error.unsupported", ""));
                 }
@@ -409,8 +487,44 @@ impl Analysis<'_> {
         Ok(Outcome::Plotted(plot))
     }
 
+    /// Rows of the complex sheet: numbers in any notation become points, relations in `z` (or its parts `x`
+    /// and `y`) become curves (`=`) or shaded regions.
+    fn plot_complex(&mut self, statement: &Statement) -> Result<Outcome, MathError> {
+        let point = |value: C64| Outcome::Plotted(Plot::ComplexPoint { re: value.re, im: if value.is_real() { 0.0 } else { value.im }, name: String::new() });
+        match (&statement.left, &statement.right) {
+            (None, Node::Tuple(items)) => match items.as_slice() {
+                [re, im] if plane_free(re) && plane_free(im) => {
+                    let (re, im) = (self.constant_c(re)?, self.constant_c(im)?);
+                    if re.is_real() && im.is_real() { Ok(point(C64::new(re.re, im.re))) } else { Err(MathError::new("error.unsupported", "")) }
+                }
+                _ => Err(MathError::new("error.tuple", "")),
+            },
+            (None, expr) if plane_free(expr) => Ok(point(self.constant_c(expr)?)),
+            (None, _) => Err(MathError::new("error.relation", "")),
+            (Some(left), right) => {
+                if let Node::Var(name) = left
+                    && (constant(name).is_some() || name == "i")
+                {
+                    return Err(MathError::new("error.reserved", name.clone()));
+                }
+                if statement.relation == Relation::Eq && is_var(left, "z") && plane_free(right) {
+                    return Ok(point(self.constant_c(right)?));
+                }
+                if plane_free(left) && plane_free(right) {
+                    return Err(MathError::new("error.unsupported", ""));
+                }
+                let difference = Node::Bin(BinOp::Sub, Box::new(left.clone()), Box::new(right.clone()));
+                let field = Field::Complex(self.compile_c(&difference, &|name| !is_reserved(name) || matches!(name, "x" | "y" | "z"))?);
+                Ok(Outcome::Plotted(if statement.relation == Relation::Eq { Plot::Implicit(field) } else { Plot::Region { field, relation: statement.relation } }))
+            }
+        }
+    }
+
     /// Rows of a 3D sheet: surfaces over two axes, space curves and points.
     fn plot_space(&mut self, statement: &Statement, input: &RowInput) -> Result<Outcome, MathError> {
+        if statement.relation != Relation::Eq {
+            return Err(MathError::new("error.unsupported", ""));
+        }
         let over = |analysis: &Self, node: &Node, axes: [&'static str; 2]| -> Result<Expr, MathError> {
             analysis.compile(node, &move |name| axes.contains(&name) || !is_reserved(name))
         };
@@ -459,6 +573,7 @@ impl Analysis<'_> {
 }
 
 pub fn analyze(mode: Mode, inputs: &[RowInput]) -> Sheet {
+    COMPLEX_NAMES.with(|flag| flag.set(mode == Mode::Complex));
     let tokens: Vec<Option<Result<Vec<Tok>, MathError>>> =
         inputs.iter().map(|input| (!input.text.trim().is_empty()).then(|| tokenize(&input.text))).collect();
     let user_functions: HashSet<String> = tokens.iter().flatten().flatten().filter_map(|tokens| defined_function(tokens)).collect();
@@ -486,10 +601,10 @@ pub fn analyze(mode: Mode, inputs: &[RowInput]) -> Sheet {
     for (row, statement) in statements.iter().enumerate() {
         let Some(Ok(statement)) = statement else { continue };
         let definition = match &statement.left {
-            Some(Node::Var(name)) if !is_reserved(name) && constant(name).is_none() && variables(&statement.right).is_empty() => {
+            Some(Node::Var(name)) if statement.relation == Relation::Eq && !is_reserved(name) && constant(name).is_none() && plane_free(&statement.right) => {
                 Some((name.clone(), Definition::Parameter(row)))
             }
-            Some(Node::Call(Callee::User(name), args)) => match args.as_slice() {
+            Some(Node::Call(Callee::User(name), args)) if statement.relation == Relation::Eq => match args.as_slice() {
                 [Node::Var(param)] => Some((name.clone(), Definition::Function { row, param: param.clone() })),
                 _ => None,
             },
@@ -508,6 +623,8 @@ pub fn analyze(mode: Mode, inputs: &[RowInput]) -> Sheet {
 
     let mut slots: HashMap<String, usize> = [("x", X), ("y", Y), ("t", T), ("θ", THETA), ("z", Z)].map(|(name, slot)| (name.to_string(), slot)).into();
     let mut env = vec![0.0; 5];
+    let mut cenv = vec![C64::real(0.0); 5];
+    let mut cfunctions = Vec::new();
     let mut function_index = HashMap::new();
     let mut functions = Vec::new();
     let mut names: Vec<&String> = definitions.keys().collect();
@@ -518,12 +635,14 @@ pub fn analyze(mode: Mode, inputs: &[RowInput]) -> Sheet {
             Definition::Function { param, .. } => {
                 function_index.insert(name.clone(), functions.len());
                 functions.push(UserFn { slot: 0, body: Expr::Num(f64::NAN) });
+                cfunctions.push(CUserFn { slot: 0, body: CExpr::Num(C64::NAN) });
                 param.clone()
             }
         };
         if let Entry::Vacant(entry) = slots.entry(param) {
             entry.insert(env.len());
             env.push(f64::NAN);
+            cenv.push(C64::NAN);
         }
     }
 
@@ -535,6 +654,9 @@ pub fn analyze(mode: Mode, inputs: &[RowInput]) -> Sheet {
         function_index,
         env,
         functions,
+        complex: mode == Mode::Complex,
+        cenv,
+        cfunctions,
         state: HashMap::new(),
         errors: HashMap::new(),
     };
@@ -547,6 +669,10 @@ pub fn analyze(mode: Mode, inputs: &[RowInput]) -> Sheet {
             (Some(Ok(statement)), Some(name)) => match analysis.resolve(name) {
                 Err(error) => Outcome::Error(error),
                 Ok(()) => match &analysis.definitions[name] {
+                    Definition::Parameter(_) if analysis.complex && !analysis.cenv[analysis.slots[name]].is_real() => {
+                        let value = analysis.cenv[analysis.slots[name]];
+                        Outcome::Plotted(Plot::ComplexPoint { re: value.re, im: value.im, name: name.clone() })
+                    }
                     Definition::Parameter(_) => Outcome::Parameter {
                         name: name.clone(),
                         value: analysis.env[analysis.slots[name]],
@@ -556,7 +682,7 @@ pub fn analyze(mode: Mode, inputs: &[RowInput]) -> Sheet {
                             _ => false,
                         },
                     },
-                    Definition::Function { param, .. } if param == "x" => {
+                    Definition::Function { param, .. } if param == "x" && !analysis.complex => {
                         let index = analysis.function_index[name];
                         Outcome::Plotted(Plot::FunctionX(analysis.functions[index].body.clone()))
                     }
@@ -567,7 +693,7 @@ pub fn analyze(mode: Mode, inputs: &[RowInput]) -> Sheet {
         };
         rows.push(Row { outcome, hidden: input.hidden });
     }
-    Sheet { env: analysis.env, functions: analysis.functions, rows }
+    Sheet { env: analysis.env, functions: analysis.functions, cenv: analysis.cenv, cfunctions: analysis.cfunctions, rows }
 }
 
 #[cfg(test)]
@@ -581,7 +707,7 @@ mod tests {
 
     fn at(sheet: &mut Sheet, row: usize, slot: usize, value: f64) -> f64 {
         let expr = match sheet.rows[row].plot() {
-            Some(Plot::FunctionX(expr) | Plot::FunctionY(expr) | Plot::Implicit(expr)) => expr.clone(),
+            Some(Plot::FunctionX(expr) | Plot::FunctionY(expr) | Plot::Implicit(Field::Real(expr))) => expr.clone(),
             Some(Plot::Polar { r, .. }) => r.clone(),
             other => panic!("row {row} is not a function: {other:?}"),
         };
@@ -685,5 +811,48 @@ mod tests {
         assert_eq!(error(&sheet, 7).key, "error.unsupported");
         assert!(matches!(sheet.rows[8].outcome, Outcome::Value(value) if value == 7.0));
     }
-}
 
+    fn complex_point(sheet: &Sheet, row: usize) -> (f64, f64, String) {
+        match sheet.rows[row].plot() {
+            Some(Plot::ComplexPoint { re, im, name }) => (*re, *im, name.clone()),
+            other => panic!("row {row} is not a complex point: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn complex_sheets_read_numbers_in_every_notation_and_relations() {
+        let sheet = sheet(Mode::Complex, &[
+            "w = 2e^(iπ/3)", "cos(φ) + i sin(φ)", "φ = 0.8", "3 - 2i", "|z + 2| < 3", "|z - w| = 1", "Re(z) ≥ 1", "z^2", "z = 1 + i",
+            "(1, 2)", "r e^(iθ)", "r = 2", "θ = π/4", "arg(z) < π/4", "x^2 + y^2 > 4", "5 < 3", "i = 2",
+        ]);
+        let (re, im, name) = complex_point(&sheet, 0);
+        assert!((re - 1.0).abs() < 1e-12 && (im - 3.0_f64.sqrt()).abs() < 1e-12 && name == "w");
+        let (re, im, _) = complex_point(&sheet, 1);
+        assert!((re - 0.8_f64.cos()).abs() < 1e-12 && (im - 0.8_f64.sin()).abs() < 1e-12);
+        assert!(matches!(&sheet.rows[2].outcome, Outcome::Parameter { slider: true, .. }));
+        assert_eq!(complex_point(&sheet, 3).0..complex_point(&sheet, 3).1, 3.0..-2.0);
+        assert!(matches!(sheet.rows[4].plot(), Some(Plot::Region { relation: Relation::Lt, field: Field::Complex(_) })));
+        assert!(matches!(sheet.rows[5].plot(), Some(Plot::Implicit(Field::Complex(_)))));
+        assert!(matches!(sheet.rows[6].plot(), Some(Plot::Region { relation: Relation::Ge, .. })));
+        assert_eq!(error(&sheet, 7).key, "error.relation");
+        assert_eq!(complex_point(&sheet, 8).0..complex_point(&sheet, 8).1, 1.0..1.0);
+        assert_eq!(complex_point(&sheet, 9).0..complex_point(&sheet, 9).1, 1.0..2.0);
+        let (re, im, _) = complex_point(&sheet, 10);
+        assert!((re - 2.0_f64.sqrt()).abs() < 1e-12 && (im - 2.0_f64.sqrt()).abs() < 1e-12);
+        assert!(matches!(sheet.rows[13].plot(), Some(Plot::Region { .. })));
+        assert!(matches!(sheet.rows[14].plot(), Some(Plot::Region { relation: Relation::Gt, .. })));
+        assert_eq!(error(&sheet, 15).key, "error.unsupported");
+        assert_eq!(error(&sheet, 16).key, "error.reserved");
+    }
+
+    #[test]
+    fn inequalities_shade_cartesian_sheets_only() {
+        let cartesian = sheet(Mode::Cartesian, &["y > x^2", "x^2 + y^2 ≤ 4", "y < 2x + a", "a = 1", "i = 2"]);
+        assert!(matches!(cartesian.rows[0].plot(), Some(Plot::Region { relation: Relation::Gt, field: Field::Real(_) })));
+        assert!(matches!(cartesian.rows[1].plot(), Some(Plot::Region { relation: Relation::Le, .. })));
+        assert!(matches!(cartesian.rows[2].plot(), Some(Plot::Region { relation: Relation::Lt, .. })));
+        assert!(matches!(&cartesian.rows[4].outcome, Outcome::Parameter { name, .. } if name == "i"));
+        let polar = sheet(Mode::Polar, &["r < 2"]);
+        assert_eq!(error(&polar, 0).key, "error.unsupported");
+    }
+}

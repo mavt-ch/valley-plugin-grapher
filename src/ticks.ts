@@ -90,6 +90,43 @@ export function formatPi(numerator: number, denominator: number): string {
   return d === 1 ? `${sign}${coefficient}π` : `${sign}${coefficient}π/${d}`
 }
 
+const near = (value: number, scale: number): boolean => Math.abs(value) < 1e-12 * Math.max(1, Math.abs(scale))
+
+/** A complex number in rectangular form: `3 + 2i`, `−i`, `0.5 − 1.25i`, `4`. */
+export function formatComplex(re: number, im: number, digits = 4): string {
+  const real = near(re, im) ? 0 : re
+  const imag = near(im, re) ? 0 : im
+  if (imag === 0) return formatNumber(real, digits)
+  const imaginary = `${Math.abs(imag) === 1 ? '' : formatNumber(Math.abs(imag), digits)}i`
+  if (real === 0) return imag < 0 ? `${MINUS}${imaginary}` : imaginary
+  return `${formatNumber(real, digits)} ${imag < 0 ? MINUS : '+'} ${imaginary}`
+}
+
+/** Polar (Euler) form `r·e^(iθ)`, with θ as a fraction of π when it is one: `2·e^(iπ/3)`, `e^(−iπ/2)`. */
+export function formatPolar(re: number, im: number, digits = 4): string {
+  const r = Math.hypot(re, im)
+  if (!Number.isFinite(r)) return formatNumber(r, digits)
+  if (r === 0) return '0'
+  const theta = Math.atan2(im + 0, re)
+  let angle: string | null = null
+  for (let denominator = 1; denominator <= 12 && angle === null; denominator++) {
+    const numerator = (theta / Math.PI) * denominator
+    if (Math.abs(numerator - Math.round(numerator)) < 1e-9) angle = formatPi(Math.round(numerator), denominator)
+  }
+  if (angle === '0') return formatNumber(r, digits)
+  const negative = angle ? angle.startsWith(MINUS) : theta < 0
+  const body = angle ? `i${negative ? angle.slice(1) : angle}` : `${formatNumber(Math.abs(theta), digits)}i`
+  const modulus = Math.abs(r - 1) < 1e-12 ? '' : `${formatNumber(r, digits)}·`
+  return `${modulus}e^(${negative ? MINUS : ''}${body})`
+}
+
+/** An imaginary-axis tick: `i`, `−i`, `2i`, `0.5i`. */
+export function formatImaginary(text: string): string {
+  if (text === '1') return 'i'
+  if (text === `${MINUS}1`) return `${MINUS}i`
+  return `${text}i`
+}
+
 /** Label steps as (numerator, denominator) of π with the minor divisions between labels. */
 const PI_STEPS: readonly [number, number, number][] = [
   [1, 12, 1], [1, 6, 2], [1, 4, 2], [1, 2, 4], [1, 1, 4], [2, 1, 4], [5, 1, 5], [10, 1, 5], [20, 1, 4], [50, 1, 5], [100, 1, 5]

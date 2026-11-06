@@ -9,6 +9,8 @@
 #[forbid(unsafe_code)]
 mod builtins;
 #[forbid(unsafe_code)]
+mod complex;
+#[forbid(unsafe_code)]
 mod error;
 #[forbid(unsafe_code)]
 mod eval;

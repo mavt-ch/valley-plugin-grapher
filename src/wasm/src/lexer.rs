@@ -120,7 +120,12 @@ pub fn tokenize(source: &str) -> Result<Vec<Tok>, MathError> {
             while chars.get(i).copied().is_some_and(is_letter) {
                 i += 1;
             }
-            split_word(&chars[start..i], &mut tokens);
+            // `Re z` and `Im z`, capitalized as in print; lower-case `re`/`im` stay products such as r·e.
+            match chars[start..i] {
+                ['R', 'e'] => tokens.push(Tok::Ident("real".into())),
+                ['I', 'm'] => tokens.push(Tok::Ident("imag".into())),
+                _ => split_word(&chars[start..i], &mut tokens),
+            }
             if chars.get(i) == Some(&'_') {
                 i += 1;
                 let braced = chars.get(i) == Some(&'{');
@@ -175,6 +180,13 @@ pub fn tokenize(source: &str) -> Result<Vec<Tok>, MathError> {
                 i += 1;
                 '='
             }
+            '<' | '>' if chars.get(i) == Some(&'=') => {
+                i += 1;
+                if c == '<' { '≤' } else { '≥' }
+            }
+            '<' | '>' | '≤' | '≥' => c,
+            '⩽' => '≤',
+            '⩾' => '≥',
             '+' | '/' | '^' | ',' | '=' | '|' | '!' | '√' | '∛' | '°' | '*' => c,
             '(' | '[' | '{' => {
                 depth += 1;
@@ -250,5 +262,14 @@ mod tests {
         assert_eq!(idents("f(x) := x"), ["f", "(", "x", ")", "=", "x"]);
         assert_eq!(idents("log_2 x"), ["log_2", "x"]);
         assert_eq!(idents("∛x"), ["∛", "x"]);
+    }
+
+    #[test]
+    fn relations_and_complex_parts() {
+        assert_eq!(idents("|z+2| < 3"), ["|", "z", "+", "2", "|", "<", "3"]);
+        assert_eq!(idents("x <= 1 >= ≤ ≥"), ["x", "≤", "1", "≥", "≤", "≥"]);
+        assert_eq!(idents("Re(z) + Im z"), ["real", "(", "z", ")", "+", "imag", "z"]);
+        assert_eq!(idents("re^(iθ)"), ["r", "e", "^", "(", "i", "θ", ")"]);
+        assert_eq!(idents("conj(z) arg z"), ["conj", "(", "z", ")", "arg", "z"]);
     }
 }

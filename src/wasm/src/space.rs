@@ -318,7 +318,7 @@ pub fn render(sheet: &mut Sheet, camera: Camera) -> Vec<f64> {
     }
     let projector = Projector::new(&camera);
     frame(&mut out, &camera, &projector);
-    let Sheet { env, functions, rows } = sheet;
+    let Sheet { env, functions, rows, .. } = sheet;
     let mut scene = Scene { camera, projector, env: env.as_mut_slice(), functions: functions.as_slice(), items: Vec::new() };
     for (index, row) in rows.iter().enumerate() {
         let Some(plot) = row.plot().filter(|_| !row.hidden) else { continue };

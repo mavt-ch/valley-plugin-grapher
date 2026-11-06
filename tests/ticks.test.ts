@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { decimalAxis, decimalStep, formatNumber, formatPi, piAxis } from '../src/ticks'
+import { decimalAxis, decimalStep, formatComplex, formatImaginary, formatNumber, formatPi, formatPolar, piAxis } from '../src/ticks'
 
 describe('axis ticks', () => {
   it('steps decimal axes by 1, 2 and 5', () => {
@@ -25,5 +25,15 @@ describe('axis ticks', () => {
     expect(formatNumber(2e6)).toBe('2e6')
     expect(formatNumber(1.23456e-5)).toBe('1.235e-5')
     expect(formatNumber(Number.NaN)).toBe('—')
+  })
+
+  it('writes complex numbers in rectangular and Euler form', () => {
+    expect([formatComplex(3, 2), formatComplex(3, -2), formatComplex(0, 1), formatComplex(0, -1), formatComplex(-1.5, 0), formatComplex(1, 1e-17)]).toEqual(['3 + 2i', '3 − 2i', 'i', '−i', '−1.5', '1'])
+    expect(formatPolar(1, Math.sqrt(3))).toBe('2·e^(iπ/3)')
+    expect(formatPolar(0, -1)).toBe('e^(−iπ/2)')
+    expect(formatPolar(-2, 0)).toBe('2·e^(iπ)')
+    expect(formatPolar(3, 4)).toBe('5·e^(0.9273i)')
+    expect(formatPolar(4, 0)).toBe('4')
+    expect([formatImaginary('1'), formatImaginary('−1'), formatImaginary('2')]).toEqual(['i', '−i', '2i'])
   })
 })

@@ -1,6 +1,6 @@
 import { React } from './runtime'
 import type { KeyboardEvent, PointerEvent, ReactElement } from 'react'
-import { colorOf, drawGrid, drawHover, drawPaths, findHit, readTheme, toScreenY, toWorldX, toWorldY, type Hover, type Size } from './draw'
+import { colorOf, drawArrows, drawGrid, drawHover, drawPaths, findHit, readTheme, toScreenY, toWorldX, toWorldY, type Hover, type Size } from './draw'
 import type { PlotEngine, RowAnalysis, SamplePath, Viewport } from './engine'
 import { Fit, Minus, Plus } from './icons'
 import { uiText } from './localization'
@@ -9,7 +9,7 @@ import { getStore, useGrapher } from './store'
 import { SpaceCanvas } from './Space'
 
 /** Units across the width of a fresh view, per coordinate system. */
-const HOME_SPAN: Record<Exclude<Mode, 'space'>, number> = { cartesian: 20, trig: 4 * Math.PI + 1, polar: 8, parametric: 10 }
+const HOME_SPAN: Record<Exclude<Mode, 'space'>, number> = { cartesian: 20, trig: 4 * Math.PI + 1, polar: 8, parametric: 10, complex: 12 }
 const MIN_SCALE = 1e-3
 const MAX_SCALE = 1e7
 
@@ -77,7 +77,7 @@ export const GraphCanvas = ({ mode, rows, analyses, engine }: CanvasProps): Reac
     const ctx = canvas?.getContext('2d')
     const size = sizeRef.current
     if (!canvas || !ctx || size.width <= 0 || size.height <= 0) return
-    const { mode, rows, engine } = inputs.current
+    const { mode, rows, analyses, engine } = inputs.current
     const view = viewRef.current ?? (viewRef.current = homeView(mode, size))
     if (frame.resample) {
       frame.resample = false
@@ -92,10 +92,15 @@ export const GraphCanvas = ({ mode, rows, analyses, engine }: CanvasProps): Reac
     const theme = readTheme(canvas)
     drawGrid(ctx, mode, view, size, theme)
     const colors = rows.map((row) => colorOf(row.color))
-    drawPaths(ctx, pathsRef.current, colors, theme)
+    drawPaths(ctx, pathsRef.current, colors, theme, rows.map((_, index) => Boolean(analyses[index]?.strict)))
+    if (mode === 'complex') {
+      const arrows = analyses.flatMap((analysis, index) => analysis.kind === 'cpoint' && !rows[index]?.hidden && analysis.x !== undefined && analysis.y !== undefined
+        ? [{ x: analysis.x, y: analysis.y, color: colors[index] ?? theme.axis }] : [])
+      drawArrows(ctx, arrows, view, size, theme)
+    }
     const pointer = pointerRef.current
     const hover = pointer && !dragRef.current ? hoverAt(pointer.x, pointer.y) : null
-    if (hover) drawHover(ctx, hover, colors[hover.row] ?? theme.axis, size, theme)
+    if (hover) drawHover(ctx, hover, colors[hover.row] ?? theme.axis, size, theme, mode === 'complex')
   }, [hoverAt])
 
   const invalidate = React.useCallback((resample: boolean): void => {

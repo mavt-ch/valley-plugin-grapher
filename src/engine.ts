@@ -8,7 +8,7 @@ const FIELD = '\u001f'
 /** Values per sampled point: screen x, screen y, world x, world y, parameter. */
 export const STRIDE = 5
 
-export type RowKind = 'empty' | 'error' | 'param' | 'value' | 'function' | 'definition' | 'polar' | 'curve' | 'point' | 'implicit' | 'surface' | 'curve3' | 'point3'
+export type RowKind = 'empty' | 'error' | 'param' | 'value' | 'function' | 'definition' | 'polar' | 'curve' | 'point' | 'implicit' | 'surface' | 'curve3' | 'point3' | 'region' | 'cpoint'
 
 export interface RowError {
   key: string
@@ -28,12 +28,15 @@ export interface RowAnalysis {
   axis?: 'x' | 'y' | 'z'
   from?: number
   to?: number
+  /** Coordinates of a point; real and imaginary part of a `cpoint`. */
   x?: number
   y?: number
   z?: number
+  /** `region` rows: a strict inequality, drawn with a dashed boundary. */
+  strict?: boolean
 }
 
-export type PathKind = 'line' | 'point' | 'segments'
+export type PathKind = 'line' | 'point' | 'region'
 
 export interface SamplePath {
   row: number
@@ -105,6 +108,8 @@ export function decodeOutcomes(text: string, count: number): RowAnalysis[] {
       case 'surface': return { kind, axis: a === 'x' ? 'x' : a === 'y' ? 'y' : 'z' }
       case 'curve3': return { kind, from: Number(a), to: Number(b) }
       case 'point3': return { kind, x: Number(a), y: Number(b), z: Number(c) }
+      case 'region': return { kind, strict: a === 'strict' }
+      case 'cpoint': return { kind, x: Number(a), y: Number(b), ...(c ? { name: c } : {}) }
       case 'definition': return { kind, name: a }
       case 'polar':
       case 'curve': return { kind, from: Number(a), to: Number(b) }
@@ -122,7 +127,7 @@ export function decodePaths(data: Float64Array): SamplePath[] {
     const count = data[at + 2]
     const end = at + 3 + count * STRIDE
     if (!Number.isInteger(count) || end > data.length) break
-    const kind: PathKind = data[at + 1] === 1 ? 'point' : data[at + 1] === 2 ? 'segments' : 'line'
+    const kind: PathKind = data[at + 1] === 1 ? 'point' : data[at + 1] === 3 ? 'region' : 'line'
     paths.push({ row: data[at], kind, points: data.subarray(at + 3, end) })
     at = end
   }

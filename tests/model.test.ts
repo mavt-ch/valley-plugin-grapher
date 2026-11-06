@@ -27,6 +27,7 @@ describe('sheets', () => {
     expect(new Set(document.sheets.polar.map((row) => row.id)).size).toBe(2)
     expect(document.sheets.cartesian).toEqual(expect.any(Array))
     expect(defaultDocument().sheets.trig.some((row) => row.text === 'sin(x)')).toBe(true)
+    expect(defaultDocument().sheets.complex.map((row) => row.text)).toEqual(['w = 2e^(iπ/3)', 'cos(φ) + i sin(φ)', 'φ = 0.8', '|z + 2| < 3', ''])
     expect(defaultDocument().sheets.space.map((row) => row.text)).toEqual(['z = (x^2 + y^2) / 5 - 6', '(6cos t, 6sin t, t / 2)', ''])
   })
 

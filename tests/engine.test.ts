@@ -130,5 +130,30 @@ describe('the plot kernel through api.wasm', () => {
       expect(record.points[i]).toBeLessThanOrEqual(600)
     }
   })
-})
 
+  it('reads complex numbers in every notation and draws relations as regions', () => {
+    const rows = sheet('w = 2e^(iπ/3)', 'cos(φ) + i sin(φ)', 'φ = 0.8', '3 - 2i', '|z + 2| < 3', '|z - w| = 1', 'Re(z) ≥ 1', 'z^2')
+    const analyses = engine.analyze('complex', rows)
+    expect(analyses.map((row) => row.kind)).toEqual(['cpoint', 'cpoint', 'param', 'cpoint', 'region', 'implicit', 'region', 'error'])
+    expect(analyses[0].name).toBe('w')
+    expect(analyses[0].x).toBeCloseTo(1, 12)
+    expect(analyses[0].y).toBeCloseTo(Math.sqrt(3), 12)
+    expect(analyses[3]).toMatchObject({ x: 3, y: -2 })
+    expect(analyses[4].strict).toBe(true)
+    expect(analyses[6].strict).toBe(false)
+    expect(analyses[7].error?.key).toBe('error.relation')
+    const paths = engine.sample('complex', rows, 400, 300, { cx: 0, cy: 0, scale: 20 })
+    const disk = paths.filter((path) => path.row === 4)
+    expect(disk.some((path) => path.kind === 'region')).toBe(true)
+    expect(disk.filter((path) => path.kind === 'line')).toHaveLength(1)
+    for (const path of disk.filter((path) => path.kind === 'region')) {
+      for (let i = 0; i < path.points.length; i += STRIDE) expect(Math.hypot(path.points[i + 2] + 2, path.points[i + 3])).toBeLessThan(3.3)
+    }
+  })
+
+  it('shades inequalities on Cartesian sheets', () => {
+    const rows = sheet('y > x^2', 'x^2 + y^2 ≤ 4')
+    expect(engine.analyze('cartesian', rows)).toMatchObject([{ kind: 'region', strict: true }, { kind: 'region', strict: false }])
+    expect(engine.sample('cartesian', rows, 400, 300, { cx: 0, cy: 0, scale: 20 }).filter((path) => path.kind === 'region').length).toBeGreaterThan(20)
+  })
+})

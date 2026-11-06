@@ -35,10 +35,14 @@ pub enum Builtin {
     Max,
     Mod,
     Root,
+    Real,
+    Imag,
+    Conj,
+    Arg,
 }
 
 /// Every accepted spelling. The lexer splits letter runs on these words, longest first.
-pub const NAMES: [(&str, Builtin); 44] = [
+pub const NAMES: [(&str, Builtin); 48] = [
     ("sin", Builtin::Sin),
     ("cos", Builtin::Cos),
     ("tan", Builtin::Tan),
@@ -83,6 +87,10 @@ pub const NAMES: [(&str, Builtin); 44] = [
     ("mod", Builtin::Mod),
     ("root", Builtin::Root),
     ("nthroot", Builtin::Root),
+    ("real", Builtin::Real),
+    ("imag", Builtin::Imag),
+    ("conj", Builtin::Conj),
+    ("arg", Builtin::Arg),
 ];
 
 impl Builtin {
@@ -145,6 +153,10 @@ impl Builtin {
             Self::Round => x.round(),
             Self::Min | Self::Max => x,
             Self::Mod | Self::Root => f64::NAN,
+            // On real numbers: the number itself, no imaginary part, its own conjugate, angle 0 or π.
+            Self::Real | Self::Conj => x,
+            Self::Imag => 0.0,
+            Self::Arg => 0.0_f64.atan2(x),
         }
     }
 

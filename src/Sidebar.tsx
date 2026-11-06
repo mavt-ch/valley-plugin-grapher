@@ -3,14 +3,14 @@ import type { ChangeEvent, KeyboardEvent, MouseEvent, ReactElement } from 'react
 import { paletteCssValue, paletteRef } from '@valley/plugin-sdk/palette'
 import type { UiMenuItem } from '@valley/plugin-sdk'
 import type { RowAnalysis } from './engine'
-import { Cartesian, Eye, EyeOff, Parametric, Polar, Slider, Space, Trash, Trig, X } from './icons'
+import { Cartesian, Complex, Eye, EyeOff, Parametric, Polar, Slider, Space, Trash, Trig, X } from './icons'
 import { uiText } from './localization'
 import { COLORS, MODES, createRow, rangeVariable, type Mode, type Row } from './model'
 import { getStore, useGrapher } from './store'
-import { formatNumber } from './ticks'
+import { formatComplex, formatNumber, formatPolar } from './ticks'
 
-const MODE_ICONS: Record<Mode, (props: { className?: string }) => ReactElement> = { cartesian: Cartesian, trig: Trig, polar: Polar, parametric: Parametric, space: Space }
-const PLACEHOLDERS: Record<Mode, string> = { cartesian: 'y = x^2', trig: 'y = sin(2x)', polar: 'r = 2cos(3θ)', parametric: '(cos t, sin(2t))', space: 'z = x^2 + y^2' }
+const MODE_ICONS: Record<Mode, (props: { className?: string }) => ReactElement> = { cartesian: Cartesian, trig: Trig, polar: Polar, parametric: Parametric, space: Space, complex: Complex }
+const PLACEHOLDERS: Record<Mode, string> = { cartesian: 'y = x^2', trig: 'y = sin(2x)', polar: 'r = 2cos(3θ)', parametric: '(cos t, sin(2t))', space: 'z = x^2 + y^2', complex: '|z - 1| < 2' }
 
 /** The row whose input takes focus on its next render (after Enter adds a row or Backspace removes one). */
 let pendingFocus: string | null = null
@@ -160,6 +160,10 @@ const Details = (props: RowProps): ReactElement | null => {
     }
     case 'value':
       return <div className="grapher-value">= {formatNumber(analysis.value ?? Number.NaN, 8)}</div>
+    case 'cpoint': {
+      const [re, im] = [analysis.x ?? Number.NaN, analysis.y ?? Number.NaN]
+      return <div className="grapher-value">= {formatComplex(re, im, 6)} = {formatPolar(re, im, 6)}</div>
+    }
     case 'param':
       return analysis.slider ? <SliderControl {...props} /> : <div className="grapher-value">= {formatNumber(analysis.value ?? Number.NaN, 8)}</div>
     case 'polar':
@@ -181,7 +185,7 @@ const ExpressionRow = (props: RowProps): ReactElement => {
     input?.focus()
     input?.setSelectionRange(input.value.length, input.value.length)
   })
-  const drawn = analysis ? ['function', 'polar', 'curve', 'point', 'implicit', 'surface', 'curve3', 'point3'].includes(analysis.kind) : false
+  const drawn = analysis ? ['function', 'polar', 'curve', 'point', 'implicit', 'surface', 'curve3', 'point3', 'region', 'cpoint'].includes(analysis.kind) : false
   const color = paletteCssValue(row.color)
   const openMenu = (event: MouseEvent<HTMLElement>): void => {
     event.preventDefault()

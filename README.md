@@ -21,7 +21,7 @@ The open-page button in the header opens the graph in the workspace: drag to pan
 
 ## Install
 
-Copy this repository into `<vault>/.valley/plugins/packages/local/grapher`. The compiled `runtime/` (`index.js`, locales and `assets/plot.wasm`) is included; Valley does not install dependencies or compile plugins on load.
+Copy this repository into `<realm>/.valley/plugins/packages/local/grapher`. The compiled `runtime/` (`index.js`, locales and `assets/plot.wasm`) is included; Valley does not install dependencies or compile plugins on load.
 
 ## Development
 

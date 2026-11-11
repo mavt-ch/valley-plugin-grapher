@@ -9,7 +9,7 @@ const Icon = (p: IconProps): ReactElement => (
   <Svg {...p}><path d="M4 3v17h17" /><path d="M7.5 5c1.5 6 3.3 9 5.2 9s3.7-3 5.3-9" /></Svg>
 )
 
-/** y = f(x), x = g(y), equations and inequalities in x and y, points, on a decimal grid. */
+/** y = f(x), x = g(y), equations and inequalities in x and y, points; the x-axis in decimals or multiples of π. */
 export const cartesian: PlaneView = {
   id: 'cartesian',
   kernel: 0,
@@ -18,5 +18,6 @@ export const cartesian: PlaneView = {
   placeholder: 'y = x^2',
   examples: ['y = x^2 - 2', 'y = a x + b', 'a = 1', 'b = 0'],
   homeSpan: 20,
-  grid: planeGrid()
+  grid: planeGrid(),
+  units: 'decimal'
 }

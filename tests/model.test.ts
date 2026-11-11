@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { createRow, defaultDocument, moveRow, normalizeDocument, withTrailingRow, type Row } from '../src/model'
+import { createRow, defaultDocument, moveRow, normalizeDocument, unitsOf, withTrailingRow, type Row } from '../src/model'
 import { parseMath, tokenizeMath } from '../src/MathText'
 import { MODES, viewOf } from '../src/views'
 import { sliderText } from '../src/Sidebar'
@@ -28,7 +28,6 @@ describe('sheets', () => {
     expect(document.sheets.polar[0].slider).toEqual({ min: -10, max: 10, step: 0.1 })
     expect(new Set(document.sheets.polar.map((row) => row.id)).size).toBe(2)
     expect(document.sheets.cartesian).toEqual(expect.any(Array))
-    expect(defaultDocument().sheets.trig.some((row) => row.text === 'sin(x)')).toBe(true)
     expect(defaultDocument().sheets.complex.map((row) => row.text)).toEqual(['w = 2e^(iπ/3)', 'cos(φ) + i sin(φ)', 'φ = 0.8', '|z + 2| < 3', ''])
     expect(defaultDocument().sheets.space.map((row) => row.text)).toEqual(['z = (x^2 + y^2) / 5 - 6', '(6cos t, 6sin t, t / 2)', ''])
   })
@@ -44,10 +43,25 @@ describe('sheets', () => {
   })
 
   it('keeps one folder per view, each with its own kernel mode', () => {
-    expect(MODES).toEqual(['cartesian', 'trig', 'polar', 'parametric', 'space', 'complex', 'complexSpace'])
+    expect(MODES).toEqual(['cartesian', 'polar', 'parametric', 'space', 'complex', 'complexSpace'])
     expect(new Set(MODES.map((mode) => viewOf(mode).kernel)).size).toBe(MODES.length)
     expect(defaultDocument().sheets.complexSpace.map((row) => row.text)).toEqual(['w = (z^2 - 4) / 4', 'Re(z^2) / 5', '1 + 2i', ''])
     expect(normalizeDocument({ version: 1, sheets: {} }).sheets.complexSpace).toHaveLength(4)
+  })
+
+  it('turns the old trigonometric sheet into Cartesian with π axes', () => {
+    const row = (id: string, text: string) => ({ id, text, color: 'palette:red' })
+    const examples = normalizeDocument({ version: 1, mode: 'trig', sheets: { cartesian: [row('a', 'y = x')], trig: ['sin(x)', 'cos(x)', 'y = A sin(k x)', 'A = 2', 'k = 0.5'].map((text, at) => row(`t${at}`, text)) } })
+    expect(examples.mode).toBe('cartesian')
+    expect(unitsOf(examples, 'cartesian')).toBe('pi')
+    expect(examples.sheets.cartesian.map((entry) => entry.text)).toEqual(['y = x', ''])
+    const own = normalizeDocument({ version: 1, mode: 'polar', units: { polar: 'decimal' }, sheets: { cartesian: [row('a', 'y = x')], trig: [row('a', 'tan x'), row('b', '')] } })
+    expect(own.mode).toBe('polar')
+    expect(unitsOf(own, 'cartesian')).toBe('decimal')
+    expect(unitsOf(own, 'polar')).toBe('decimal')
+    expect(unitsOf(own, 'space')).toBeNull()
+    expect(own.sheets.cartesian.map((entry) => entry.text)).toEqual(['y = x', 'tan x', ''])
+    expect(new Set(own.sheets.cartesian.map((entry) => entry.id)).size).toBe(3)
   })
 
   it('typesets input the way it is read', () => {
@@ -58,6 +72,7 @@ describe('sheets', () => {
     expect(parseMath('e^(i π/3)')).toMatchObject({ k: 'pow', exp: { k: 'frac', bottom: { k: 'num', text: '3' } } })
     expect(parseMath('|z + 2')).toMatchObject({ k: 'group', open: '|', closed: false })
     expect(() => parseMath(')) ^^ ,, (( sin^ |')).not.toThrow()
+    expect(parseMath('A = -1.3')).toMatchObject({ k: 'seq', items: [{ k: 'var' }, { k: 'op', relation: true }, { k: 'op', text: '−', sign: true }, { k: 'num', text: '1.3' }] })
   })
 
   it('writes slider values at the precision of their step', () => {

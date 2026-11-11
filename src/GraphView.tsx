@@ -4,7 +4,7 @@ import { colorOf, drawArrows, drawHover, drawPaths, findHit, readTheme, toScreen
 import type { PlotEngine, RowAnalysis, SamplePath, Viewport } from './engine'
 import { Fit, Minus, Plus } from './icons'
 import { uiText } from './localization'
-import type { Row } from './model'
+import { unitsOf, type AxisUnits, type Row } from './model'
 import { getStore, useGrapher } from './store'
 import { SpaceCanvas } from './Space'
 import { viewOf, type PlaneView } from './views'
@@ -26,6 +26,7 @@ function zoomed(view: Viewport, size: Size, factor: number, px: number, py: numb
 
 interface CanvasProps {
   view: PlaneView
+  units: AxisUnits
   rows: readonly Row[]
   analyses: readonly RowAnalysis[]
   engine: PlotEngine | null
@@ -35,7 +36,7 @@ interface CanvasProps {
  * The graph: drag to pan, scroll or pinch to zoom about the pointer, hover a graph to trace it. Sampling runs
  * in the Rust kernel whenever the view or the rows change; drawing reads colours from the theme each frame.
  */
-export const GraphCanvas = ({ view: plane, rows, analyses, engine }: CanvasProps): ReactElement => {
+export const GraphCanvas = ({ view: plane, units, rows, analyses, engine }: CanvasProps): ReactElement => {
   const mode = plane.id
   const store = getStore()
   const wrapRef = React.useRef<HTMLDivElement>(null)
@@ -46,8 +47,8 @@ export const GraphCanvas = ({ view: plane, rows, analyses, engine }: CanvasProps
   const pointerRef = React.useRef<{ x: number; y: number } | null>(null)
   const dragRef = React.useRef<{ id: number; x: number; y: number; view: Viewport } | null>(null)
   const frameRef = React.useRef<{ id: number | null; resample: boolean }>({ id: null, resample: true })
-  const inputs = React.useRef({ plane, mode, rows, analyses, engine })
-  inputs.current = { plane, mode, rows, analyses, engine }
+  const inputs = React.useRef({ plane, units, mode, rows, analyses, engine })
+  inputs.current = { plane, units, mode, rows, analyses, engine }
 
   const hoverAt = React.useCallback((x: number, y: number): Hover | null => {
     const { mode, rows, analyses, engine } = inputs.current
@@ -77,7 +78,7 @@ export const GraphCanvas = ({ view: plane, rows, analyses, engine }: CanvasProps
     const ctx = canvas?.getContext('2d')
     const size = sizeRef.current
     if (!canvas || !ctx || size.width <= 0 || size.height <= 0) return
-    const { plane, mode, rows, analyses, engine } = inputs.current
+    const { plane, units, mode, rows, analyses, engine } = inputs.current
     const view = viewRef.current ?? (viewRef.current = homeView(plane, size))
     if (frame.resample) {
       frame.resample = false
@@ -90,7 +91,7 @@ export const GraphCanvas = ({ view: plane, rows, analyses, engine }: CanvasProps
     const dpr = canvas.ownerDocument.defaultView?.devicePixelRatio || 1
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
     const theme = readTheme(canvas)
-    plane.grid(ctx, view, size, theme)
+    plane.grid(ctx, view, size, theme, units)
     const colors = rows.map((row) => colorOf(row.color))
     drawPaths(ctx, pathsRef.current, colors, theme, rows.map((_, index) => Boolean(analyses[index]?.strict)))
     if (plane.complex) {
@@ -123,6 +124,7 @@ export const GraphCanvas = ({ view: plane, rows, analyses, engine }: CanvasProps
   }, [mode, store, invalidate])
 
   React.useEffect(() => { invalidate(true) }, [rows, engine, invalidate])
+  React.useEffect(() => { invalidate(false) }, [units, invalidate])
 
   React.useEffect(() => {
     const wrap = wrapRef.current
@@ -267,7 +269,7 @@ export const GraphTab = (): ReactElement => {
       </div>
       {engineProblem ? <p role="alert" className="grapher-alert">{uiText('problem.engine', { message: engineProblem.message })}</p> : null}
       <div className="grapher-stage">
-        {view.canvas === 'space' ? <SpaceCanvas view={view} rows={rows} engine={engine} /> : <GraphCanvas key={view.id} view={view} rows={rows} analyses={analyses} engine={engine} />}
+        {view.canvas === 'space' ? <SpaceCanvas view={view} rows={rows} engine={engine} /> : <GraphCanvas key={view.id} view={view} units={unitsOf(document, mode) ?? view.units} rows={rows} analyses={analyses} engine={engine} />}
       </div>
     </div>
   )

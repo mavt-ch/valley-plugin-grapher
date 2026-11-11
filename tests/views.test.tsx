@@ -21,6 +21,15 @@ afterEach(async () => {
   document.head.querySelectorAll('style[id]').forEach((style) => style.remove())
 })
 
+type Mock = ReturnType<typeof createMockValleyApi>
+
+/** Opens the header's view picker and picks a view by name, as the host's menu would. */
+async function pick(mock: Mock, name: string): Promise<void> {
+  fireEvent.click(await screen.findByRole('button', { name: /^View:/ }))
+  const items = mock.menus[mock.menus.length - 1] as { label?: string; onSelect?: () => void }[]
+  act(() => { items.find((item) => item.label === name)?.onSelect?.() })
+}
+
 function mount(files: Record<string, string> = {}) {
   const mock = createMockValleyApi({ manifest: declared, wasm: { modules: [module] }, files })
   disposers.push(plugin.register(mock.api))
@@ -28,16 +37,27 @@ function mount(files: Record<string, string> = {}) {
 }
 
 describe('the sidebar', () => {
-  it('switches coordinate systems from its header', async () => {
-    mount()
+  it('picks the view from a dropdown and switches the axis labels beside it', async () => {
+    const mock = mount()
     render(<Sidebar />)
-    const radios = await screen.findAllByRole('radio')
-    expect(radios.map((radio) => radio.getAttribute('aria-label'))).toEqual(['Cartesian', 'Trigonometric', 'Polar', 'Parametric', '3D', 'Complex', 'Complex 3D'])
-    expect(radios[0].getAttribute('aria-checked')).toBe('true')
+    expect(await screen.findByRole('button', { name: 'View: Cartesian' })).toBeTruthy()
     expect(screen.getByDisplayValue('y = x^2 - 2')).toBeTruthy()
-    fireEvent.click(radios[2])
+    fireEvent.click(screen.getByRole('button', { name: 'View: Cartesian' }))
+    const items = mock.menus[0] as { label?: string; checked?: boolean }[]
+    expect(items.map((item) => item.label)).toEqual(['Cartesian', 'Polar', 'Parametric', '3D', 'Complex', 'Complex 3D'])
+    expect(items[0].checked).toBe(true)
+    const real = screen.getByRole('radio', { name: 'Axes in real numbers' })
+    const pi = screen.getByRole('radio', { name: /^Axes in multiples of π/ })
+    expect(real.getAttribute('aria-checked')).toBe('true')
+    fireEvent.click(pi)
+    expect(pi.getAttribute('aria-checked')).toBe('true')
+    await waitFor(async () => expect(await mock.api.data.files.readText('graphs.json')).toContain('"cartesian": "pi"'), { timeout: 2000 })
+    await pick(mock, 'Polar')
     expect(await screen.findByDisplayValue('r = 1 + cos(θ)')).toBeTruthy()
-    expect(screen.getAllByRole('radio')[2].getAttribute('aria-checked')).toBe('true')
+    expect(screen.getByRole('radio', { name: /^Axes in multiples of π/ }).getAttribute('aria-checked')).toBe('true')
+    await pick(mock, '3D')
+    expect(await screen.findByDisplayValue('z = (x^2 + y^2) / 5 - 6')).toBeTruthy()
+    expect(screen.queryByRole('radiogroup', { name: 'Axis labels' })).toBeNull()
   })
 
   it('offers sliders for undefined names and saves the sheet', async () => {
@@ -97,18 +117,18 @@ describe('the sidebar', () => {
 
 describe('the graph tab', () => {
   it('switches to the 3D sheet and its orbit canvas', async () => {
-    mount()
+    const mock = mount()
     render(<><Sidebar /><GraphTab /></>)
-    fireEvent.click((await screen.findAllByRole('radio'))[4])
+    await pick(mock, '3D')
     expect(await screen.findByDisplayValue('z = (x^2 + y^2) / 5 - 6')).toBeTruthy()
     expect(await screen.findByLabelText(/^3D graph/)).toBeTruthy()
     expect(screen.getByDisplayValue('6π')).toBeTruthy()
   })
 
   it('draws w = f(z) over the complex plane in the complex 3D view', async () => {
-    mount()
+    const mock = mount()
     render(<><Sidebar /><GraphTab /></>)
-    fireEvent.click((await screen.findAllByRole('radio'))[6])
+    await pick(mock, 'Complex 3D')
     expect(await screen.findByDisplayValue('w = (z^2 - 4) / 4')).toBeTruthy()
     expect(await screen.findByLabelText(/^Complex 3D graph/)).toBeTruthy()
   })

@@ -2,7 +2,7 @@ import type { ValleyPluginApi } from '@valley/plugin-sdk'
 import type { FileBaseline } from '@valley/plugin-sdk/types'
 import { React, api } from './runtime'
 import { loadPlotEngine, type Camera, type PlotEngine, type Viewport } from './engine'
-import { defaultDocument, normalizeDocument, withTrailingRow, type GrapherDocument, type Mode, type Row } from './model'
+import { defaultDocument, normalizeDocument, withTrailingRow, type AxisUnits, type GrapherDocument, type Mode, type Row } from './model'
 
 /** The sheets live in `.valley/plugins/data/grapher/graphs.json`. */
 export const GRAPHS_FILE = 'graphs.json'
@@ -133,6 +133,12 @@ export class GrapherStore {
   setMode(mode: Mode): void {
     if (mode === this.snapshot.document.mode) return
     this.change({ ...this.snapshot.document, mode })
+  }
+
+  setUnits(mode: Mode, units: AxisUnits): void {
+    const document = this.snapshot.document
+    if (document.units[mode] === units) return
+    this.change({ ...document, units: { ...document.units, [mode]: units } })
   }
 
   updateRows(mode: Mode, edit: (rows: Row[]) => Row[]): void {

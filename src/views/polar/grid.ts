@@ -19,8 +19,8 @@ function rayExit(ox: number, oy: number, dx: number, dy: number, size: Size): [n
   return exit > enter && Number.isFinite(exit) ? [ox + dx * exit, oy + dy * exit] : null
 }
 
-/** Circles at the decimal steps, rays every π/12 labelled every π/6. */
-export const polarGrid: GridPainter = (ctx, view, size, theme) => {
+/** Circles at the decimal steps, rays every π/12 labelled every π/6, as fractions of π or as decimal radians. */
+export const polarGrid: GridPainter = (ctx, view, size, theme, units) => {
   ctx.fillStyle = theme.background
   ctx.fillRect(0, 0, size.width, size.height)
   const ox = toScreenX(view, size, 0)
@@ -72,6 +72,7 @@ export const polarGrid: GridPainter = (ctx, view, size, theme) => {
     const angle = (k * Math.PI) / 6
     const at = rayExit(ox, oy, Math.cos(angle), -Math.sin(angle), size)
     // The 0 and π labels sit just above the horizontal axis, not on its line.
-    if (at) haloText(ctx, theme, formatPi(k, 6), at[0], k % 6 === 0 ? at[1] - 9 : at[1])
+    const text = units === 'pi' ? formatPi(k, 6) : formatNumber((k * Math.PI) / 6, 2)
+    if (at) haloText(ctx, theme, text, at[0], k % 6 === 0 ? at[1] - 9 : at[1])
   }
 }

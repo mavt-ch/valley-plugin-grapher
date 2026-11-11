@@ -53,3 +53,7 @@ export const Grip = (p: IconProps): ReactElement => (
 export const Warning = (p: IconProps): ReactElement => (
   <Svg {...p}><path d="M12 3.5L2.5 20h19z" /><path d="M12 10v4.5M12 17.5v.01" /></Svg>
 )
+
+export const ChevronDown = (p: IconProps): ReactElement => (
+  <Svg {...p}><path d="M6 9l6 6 6-6" /></Svg>
+)

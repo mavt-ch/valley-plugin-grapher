@@ -3,16 +3,27 @@
 const CSS = `
 .grapher-panel, .grapher-tab { display:flex; flex-direction:column; height:100%; min-height:0; }
 
-/* The sidebar header: the shared 38px panel-header holding the coordinate-system switch. */
+/* The sidebar header: the shared 38px panel-header with the view picker and, on flat views, the ℝ | π switch. */
 .grapher-header { gap:var(--space-2); }
-.grapher-modes { display:flex; align-items:center; gap:2px; min-width:0; -webkit-app-region:no-drag; }
-.grapher-mode { display:inline-flex; align-items:center; justify-content:center; width:28px; height:26px; flex:0 0 auto;
-  padding:0; border:none; border-radius:var(--radius-sm); background:transparent; color:var(--text-secondary); cursor:pointer;
+.grapher-header-spacer { flex:1 1 auto; }
+.grapher-view-picker { display:inline-flex; align-items:center; gap:6px; min-width:0; height:26px; padding:0 6px 0 7px;
+  border:none; border-radius:var(--radius-sm); background:transparent; color:var(--text-color); font:inherit;
+  font-size:var(--smaller-font-size); font-weight:500; cursor:pointer; -webkit-app-region:no-drag;
+  transition:background-color var(--duration-fast) var(--ease-out); }
+.grapher-view-picker:hover, .grapher-view-picker[aria-expanded='true'] { background:var(--hover-bg); }
+.grapher-view-picker:focus-visible { outline:2px solid var(--accent-color); outline-offset:-2px; }
+.grapher-view-icon { width:16px; height:16px; flex:0 0 auto; color:var(--accent-tint-text); }
+.grapher-view-name { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.grapher-view-chevron { width:12px; height:12px; flex:0 0 auto; color:var(--text-tertiary); }
+.grapher-units { display:inline-flex; align-items:center; flex:0 0 auto; height:24px; padding:2px; box-sizing:border-box;
+  border-radius:var(--radius-sm); background:var(--container-color-light); -webkit-app-region:no-drag; }
+.grapher-unit { display:inline-flex; align-items:center; justify-content:center; min-width:24px; height:20px; padding:0 5px;
+  border:none; border-radius:calc(var(--radius-sm) - 1px); background:transparent; color:var(--text-secondary);
+  font-family:'Times New Roman', 'STIX Two Math', serif; font-size:0.875rem; line-height:1; cursor:pointer;
   transition:background-color var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out); }
-.grapher-mode svg { width:16px; height:16px; }
-.grapher-mode:hover { background:var(--hover-bg); color:var(--text-color); }
-.grapher-mode.active { background:var(--accent-tint-bg); color:var(--accent-tint-text); }
-.grapher-mode:focus-visible { outline:2px solid var(--accent-color); outline-offset:-2px; }
+.grapher-unit:hover { color:var(--text-color); }
+.grapher-unit.active { background:var(--surface-color-alt); color:var(--text-color); box-shadow:0 0 0 1px var(--border-light); }
+.grapher-unit:focus-visible { outline:2px solid var(--accent-color); outline-offset:-2px; }
 
 .grapher-alert { flex:0 0 auto; margin:0; padding:var(--space-2) var(--space-3); border-bottom:1px solid var(--border-light);
   background:var(--danger-tint-bg); color:var(--danger-tint-text); font-size:var(--smaller-font-size); overflow-wrap:anywhere; }
@@ -20,29 +31,32 @@ const CSS = `
 /* ---- the expression list ---- */
 .grapher-list { position:relative; flex:1 1 auto; min-height:0; overflow-y:auto; }
 .grapher-list[data-dragging] { cursor:grabbing; user-select:none; }
-.grapher-row { display:grid; grid-template-columns:16px 26px minmax(0, 1fr) 26px; align-items:start;
+.grapher-row { display:grid; grid-template-columns:46px minmax(0, 1fr) 28px; align-items:start;
   border-bottom:1px solid var(--border-light); }
 .grapher-row:focus-within { background:var(--hover-bg); }
 .grapher-row[data-dragging] { opacity:0.45; }
-.grapher-gutter { display:flex; flex-direction:column; align-items:center; gap:3px; padding-top:5px; min-height:34px; box-sizing:border-box; }
+.grapher-gutter { display:flex; align-items:center; height:36px; padding-left:4px; box-sizing:border-box; }
 
-/* The drag handle at the left edge of every typed row; the marker shows the gap a dropped row lands in. */
-.grapher-grip, .grapher-grip-spacer { width:16px; height:34px; }
-.grapher-grip { display:inline-flex; align-items:center; justify-content:center; padding:0 0 0 2px; border:none; background:none;
-  color:var(--text-tertiary); cursor:grab; opacity:0.45; touch-action:none;
-  transition:opacity var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out); }
-.grapher-grip svg { width:12px; height:12px; }
-.grapher-row:hover .grapher-grip, .grapher-row[data-dragging] .grapher-grip { opacity:1; }
-.grapher-grip:hover { color:var(--text-color); }
-.grapher-list[data-dragging] .grapher-grip { cursor:grabbing; }
+/* Gutter, all on the expression's first line: the row number, which turns into the drag grip on hover, then the
+   colour swatch (or a warning). The marker shows the gap a dropped row lands in. */
+.grapher-handle { position:relative; display:inline-flex; align-items:center; justify-content:center; width:18px; height:36px;
+  flex:0 0 auto; padding:0; border:none; background:none; color:var(--text-tertiary); touch-action:none; }
+button.grapher-handle { cursor:grab; }
+.grapher-list[data-dragging] button.grapher-handle { cursor:grabbing; }
+.grapher-grip-icon { position:absolute; width:12px; height:12px; opacity:0; transition:opacity var(--duration-fast) var(--ease-out); }
+.grapher-handle .grapher-index { transition:opacity var(--duration-fast) var(--ease-out); }
+.grapher-row:hover button.grapher-handle .grapher-index, .grapher-row[data-dragging] .grapher-handle .grapher-index { opacity:0; }
+.grapher-row:hover .grapher-grip-icon, .grapher-row[data-dragging] .grapher-grip-icon { opacity:1; }
+button.grapher-handle:hover { color:var(--text-color); }
+.grapher-mark { display:inline-flex; align-items:center; justify-content:center; width:22px; height:36px; flex:0 0 auto; }
 .grapher-drop-marker { position:absolute; left:0; right:0; height:2px; margin-top:-1.5px; background:var(--accent-color); pointer-events:none; z-index:1; }
 .grapher-warning { display:inline-flex; color:var(--danger-tint-text); }
 .grapher-warning svg { width:15px; height:15px; }
 .grapher-swatch-hue { border-color:transparent;
   background:conic-gradient(hsl(0,70%,55%), hsl(60,70%,55%), hsl(120,70%,55%), hsl(180,70%,55%), hsl(240,70%,55%), hsl(300,70%,55%), hsl(360,70%,55%)); }
 .grapher-swatch-hue[aria-pressed='false'] { background:transparent; border-color:var(--text-tertiary); }
-.grapher-index { font-size:0.625rem; line-height:1; font-variant-numeric:tabular-nums; color:var(--text-tertiary); }
-.grapher-swatch { width:16px; height:16px; padding:0; border:2px solid var(--swatch); border-radius:50%;
+.grapher-index { font-size:0.6875rem; line-height:1; font-variant-numeric:tabular-nums; color:var(--text-tertiary); }
+.grapher-swatch { width:14px; height:14px; padding:0; border:2px solid var(--swatch); border-radius:50%;
   background:var(--swatch); cursor:pointer; transition:background-color var(--duration-fast) var(--ease-out); }
 .grapher-swatch[aria-pressed='false'] { background:transparent; }
 .grapher-swatch:focus-visible { outline:2px solid var(--accent-color); outline-offset:2px; }
@@ -64,6 +78,8 @@ const CSS = `
 .gm-num, .gm-sym, .gm-fn { font-style:normal; }
 .gm-fn { padding-right:0.18em; }
 .gm-call { display:inline-flex; align-items:center; }
+.gm-var + .gm-call, .gm-num + .gm-call, .gm-pow + .gm-call, .gm-group + .gm-call { margin-left:0.16em; }
+.gm-sign { padding-right:0.04em; }
 .gm-call > .gm-sup { margin-left:-0.14em; margin-right:0.14em; }
 .gm-op { padding:0 0.22em; }
 .gm-rel { padding:0 0.3em; }
@@ -83,7 +99,7 @@ const CSS = `
 .gm-root-index { font-size:0.6em; margin-right:-0.35em; align-self:flex-start; }
 .gm-radical { display:inline-flex; align-items:flex-end; }
 .gm-radicand { display:inline-flex; align-items:center; border-top:1px solid currentColor; padding:0.06em 0.12em 0 0.06em; margin-top:0.08em; }
-.grapher-delete, .grapher-row-spacer { width:26px; height:34px; }
+.grapher-delete, .grapher-row-spacer { width:28px; height:36px; }
 .grapher-delete { display:inline-flex; align-items:center; justify-content:center; padding:0; border:none; background:none;
   color:var(--text-tertiary); cursor:pointer; opacity:0; transition:opacity var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out); }
 .grapher-delete svg { width:14px; height:14px; }
@@ -142,7 +158,7 @@ const CSS = `
 .grapher-zoom-button:focus-visible { outline:2px solid var(--accent-color); outline-offset:2px; }
 
 @media (prefers-reduced-motion: reduce) {
-  .grapher-mode, .grapher-swatch, .grapher-delete, .grapher-grip, .grapher-zoom-button { transition:none; }
+  .grapher-view-picker, .grapher-unit, .grapher-swatch, .grapher-delete, .grapher-grip-icon, .grapher-handle .grapher-index, .grapher-zoom-button { transition:none; }
 }
 `
 

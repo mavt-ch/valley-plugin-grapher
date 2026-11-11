@@ -141,23 +141,24 @@ export function labels(ctx: CanvasRenderingContext2D, x: Axis, y: Axis | null, v
   }
 }
 
+/** Axis labels in decimal numbers or in fractions and multiples of π. */
+export type AxisUnits = 'decimal' | 'pi'
+
 /** Paints a view's background grid, axes and labels. */
-export type GridPainter = (ctx: CanvasRenderingContext2D, view: Viewport, size: Size, theme: Theme) => void
+export type GridPainter = (ctx: CanvasRenderingContext2D, view: Viewport, size: Size, theme: Theme, units: AxisUnits) => void
 
 export interface PlaneGridOptions {
-  /** `pi` labels the x-axis in fractions and multiples of π. */
-  xAxis?: 'decimal' | 'pi'
   /** The Gaussian plane: the vertical axis in multiples of i, with `Re` and `Im` names. */
   imaginary?: boolean
 }
 
-/** A rectangular grid; each plane view picks its axis labelling. */
-export const planeGrid = ({ xAxis = 'decimal', imaginary = false }: PlaneGridOptions = {}): GridPainter => (ctx, view, size, theme) => {
+/** A rectangular grid; `units` labels the x-axis in decimals or in multiples of π. */
+export const planeGrid = ({ imaginary = false }: PlaneGridOptions = {}): GridPainter => (ctx, view, size, theme, units) => {
   ctx.fillStyle = theme.background
   ctx.fillRect(0, 0, size.width, size.height)
   const lo = toWorldX(view, size, 0)
   const hi = toWorldX(view, size, size.width)
-  const x = xAxis === 'pi' ? piAxis(lo, hi, view.scale) : decimalAxis(lo, hi, view.scale)
+  const x = units === 'pi' ? piAxis(lo, hi, view.scale) : decimalAxis(lo, hi, view.scale)
   const real = decimalAxis(toWorldY(view, size, size.height), toWorldY(view, size, 0), view.scale)
   const y = imaginary ? { ...real, labels: real.labels.map((label) => ({ ...label, text: formatImaginary(label.text) })) } : real
   ctx.lineWidth = 1

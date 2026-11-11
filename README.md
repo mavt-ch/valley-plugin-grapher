@@ -1,16 +1,15 @@
 # Grapher
 
-Plot functions in Cartesian, trigonometric, polar and parametric coordinates, with live sliders and a zoomable graph.
+Plot functions in Cartesian, polar, parametric, 3D and complex coordinates, with live sliders and a zoomable graph.
 
 ## Use
 
-Open **Grapher** in the left sidebar. The header switches the coordinate system; each one keeps its own expressions:
+Open **Grapher** in the left sidebar. The dropdown in the header picks the view; each one keeps its own expressions. On flat views the **ℝ | π** switch beside it labels the axes in real numbers or in multiples of π (π/2, π, 2π …); only the labels change, so trigonometric functions use the Cartesian view with π selected (an older Trigonometric sheet opens there):
 
 | System | Grid | Typical rows |
 | --- | --- | --- |
-| Cartesian | decimal | `y = x^2`, `x = y^2`, `f(x) = sin x`, `x^2 + y^2 = 4`, `(1, 2)` |
-| Trigonometric | x-axis in multiples of π, radians | `sin(x)`, `tan x`, `y = A sin(k x)` |
-| Polar | circles and rays labelled in radians | `r = 1 + cos(θ)` (type `theta` or `t` for θ) |
+| Cartesian | decimal, or the x-axis in multiples of π | `y = x^2`, `x = y^2`, `f(x) = sin x`, `tan x`, `x^2 + y^2 = 4`, `(1, 2)` |
+| Polar | circles and rays labelled in radians (fractions of π or decimals) | `r = 1 + cos(θ)` (type `theta` or `t` for θ) |
 | Parametric | decimal | `(cos(3t), sin(2t))` |
 | 3D | cube with floor grid, drag to orbit | `z = x^2 + y^2` or just `x^2 + y^2`, `x = y z`, `(cos t, sin t, t)`, `(1, 2, 3)` |
 | Complex | Gaussian plane, imaginary axis in multiples of i | `3 - 2i`, `w = 2e^(iπ/3)`, `r(cos φ + i sin φ)`, `\|z + 2\| < 3`, `Re(z) ≥ 1`, `arg(z) < π/4`, `\|z - i\| = \|z + 1\|` |
@@ -18,7 +17,7 @@ Open **Grapher** in the left sidebar. The header switches the coordinate system;
 
 On the complex 3D sheet `w = f(z)` (or a bare expression in `z`, or `f(z) = …`) rises to |f(z)| and is coloured by arg f(z) around the colour wheel, red for positive real values; a real-valued row such as `Re(z^2) / 5` or `x y / 4` rises to its signed value instead, and a number sits on the floor as a point.
 
-Rows not being edited are typeset as in a textbook: `x^2/3` shows a stacked fraction with a superscript, `sqrt(x)` a radical, `theta` θ, `<=` ≤, function names upright and variables italic; clicking a row shows the text to edit. Drag the handle at the left edge of a row to move it up or down.
+Rows not being edited are typeset as in a textbook: `x^2/3` shows a stacked fraction with a superscript, `sqrt(x)` a radical, `theta` θ, `<=` ≤, function names upright and variables italic; clicking a row shows the text to edit. Each row's gutter shows its number, which turns into a grip on hover: drag it to move the row up or down. The colour swatch beside it shows or hides the graph and its context menu picks the colour; the × on the right deletes the row.
 
 Inequalities such as `y > x^2` or `x^2 + y^2 ≤ 4` shade their region, with a dashed boundary when it is excluded. On the complex sheet every number is drawn as an arrow from 0 and shown in both forms (`1 + 1.732i = 2·e^(iπ/3)`), `Re`, `Im`, `conj` and `arg` are available, and a relation in `z` (or its parts `x` and `y`) draws its region, or only its boundary with `=`. A row `a = 1` becomes a slider, and every undefined name offers one. Polar and parametric rows set their range below the input (default 0 to 2π). Rows may use `π`, `e`, `|x|`, `x!`, `sqrt`, `cbrt`, `ln`, `log`, `exp`, the trigonometric, inverse and hyperbolic functions, `min`, `max`, `mod`, `floor`, `ceil`, `round` and `sign`; `2x`, `sin 2x`, `sin^2 x` and `sin^-1 x` read as usual. Input is forgiving: Greek letters and constants may be typed as words in any case (`theta`, `Phi`, `PI`, `inf`), `30°` or `30deg` is in degrees, `log_2 x`, `root(x, 3)`, `∛x`, `x⁻¹` and `f(x) := …` work, parentheses and bars left open at the end close themselves, stray closing parentheses at the end are ignored, `0,5` outside parentheses is a decimal comma, and `x2` means `x²` for the plot variables `x`, `y`, `t` and `θ`. Enter adds a row, Backspace on an empty row removes it, the swatch shows or hides a graph and its context menu picks the colour.
 
@@ -38,4 +37,4 @@ The plotting kernel lives in `src/wasm` (Rust): the lexer and parser, the sheet 
 RUSTFLAGS="-Cdebuginfo=0" cargo test
 ```
 
-The TypeScript side (`src/`) holds the store, the sidebar and its typesetting (`MathText.tsx`), the plane and 3D canvases, the axis ticks and the localization in five languages. Each view has its own folder under `src/views/` (`cartesian`, `trig`, `polar`, `parametric`, `space`, `complex`, `complexSpace`) with its icon, example rows, kernel mode and grid or axis names, registered in `src/views/index.ts`. A new view adds its id to `src/views/types.ts`, a folder, a registry entry, a kernel mode in `src/wasm/src/sheet.rs` and the locale keys `mode.<id>`, `mode.<id>.hint` and `hint.<id>`.
+The TypeScript side (`src/`) holds the store, the sidebar and its typesetting (`MathText.tsx`), the plane and 3D canvases, the axis ticks and the localization in five languages. Each view has its own folder under `src/views/` (`cartesian`, `polar`, `parametric`, `space`, `complex`, `complexSpace`) with its icon, example rows, kernel mode, grid and default axis labels or 3D axis names, registered in `src/views/index.ts`. A new view adds its id to `src/views/types.ts`, a folder, a registry entry, a kernel mode in `src/wasm/src/sheet.rs` and the locale keys `mode.<id>`, `mode.<id>.hint` and `hint.<id>`.

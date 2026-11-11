@@ -1,8 +1,8 @@
 import { normalizePaletteValue, paletteRef } from '@valley/plugin-sdk/palette'
-import { MODES, viewOf, type Example, type Mode } from './views'
+import { MODES, viewOf, type AxisUnits, type Example, type Mode } from './views'
 
 /** The view of a sheet (see `src/views/`). Each keeps its own rows. */
-export { MODES, type Mode }
+export { MODES, type AxisUnits, type Mode }
 
 export interface Slider {
   min: number
@@ -26,7 +26,12 @@ export interface GrapherDocument {
   version: 1
   mode: Mode
   sheets: Record<Mode, Row[]>
+  /** Axis labels chosen with the header switch, per plane view; a view not listed uses its own default. */
+  units: Partial<Record<Mode, AxisUnits>>
 }
+
+/** The rows a fresh trigonometric sheet had before it became Cartesian with π axes. */
+const LEGACY_TRIG_EXAMPLES = ['sin(x)', 'cos(x)', 'y = A sin(k x)', 'A = 2', 'k = 0.5']
 
 export const COLORS = ['red', 'blue', 'green', 'purple', 'orange', 'magenta', 'cyan'] as const
 export const DEFAULT_SLIDER: Slider = { min: -10, max: 10, step: 0.1 }
@@ -71,7 +76,13 @@ export function defaultSheet(mode: Mode): Row[] {
 }
 
 export function defaultDocument(): GrapherDocument {
-  return { version: 1, mode: 'cartesian', sheets: Object.fromEntries(MODES.map((mode) => [mode, defaultSheet(mode)])) as Record<Mode, Row[]> }
+  return { version: 1, mode: 'cartesian', sheets: Object.fromEntries(MODES.map((mode) => [mode, defaultSheet(mode)])) as Record<Mode, Row[]>, units: {} }
+}
+
+/** The axis labels a plane view shows: the user's choice, else the view's default; 3D views have none. */
+export function unitsOf(document: GrapherDocument, mode: Mode): AxisUnits | null {
+  const view = viewOf(mode)
+  return view.canvas === 'plane' ? document.units[mode] ?? view.units : null
 }
 
 /** Moves the row at `from` into the gap before row `to` (gaps 0…length); other rows keep their order. */
@@ -107,12 +118,11 @@ function normalizeRow(value: unknown, rows: readonly Row[]): Row | null {
 /** Reads a stored `graphs.json`; throws when it is not a Grapher document, so the caller never overwrites it. */
 export function normalizeDocument(value: unknown): GrapherDocument {
   if (!value || typeof value !== 'object' || (value as { version?: unknown }).version !== 1) throw new Error('graphs.json is not a Grapher document (version 1).')
-  const record = value as { mode?: unknown; sheets?: unknown }
+  const record = value as { mode?: unknown; sheets?: unknown; units?: unknown }
   const sheets = (record.sheets && typeof record.sheets === 'object' ? record.sheets : {}) as Record<string, unknown>
   const document = defaultDocument()
-  for (const mode of MODES) {
-    const stored = sheets[mode]
-    if (!Array.isArray(stored)) continue
+  const readRows = (stored: unknown): Row[] | null => {
+    if (!Array.isArray(stored)) return null
     const rows: Row[] = []
     const ids = new Set<string>()
     for (const entry of stored.slice(0, 500)) {
@@ -122,9 +132,29 @@ export function normalizeDocument(value: unknown): GrapherDocument {
       ids.add(row.id)
       rows.push(row)
     }
-    document.sheets[mode] = withTrailingRow(rows)
+    return rows
   }
-  document.mode = MODES.includes(record.mode as Mode) ? (record.mode as Mode) : 'cartesian'
+  for (const mode of MODES) {
+    const rows = readRows(sheets[mode])
+    if (rows) document.sheets[mode] = withTrailingRow(rows)
+  }
+  const units = (record.units && typeof record.units === 'object' ? record.units : {}) as Record<string, unknown>
+  for (const mode of MODES) {
+    if (units[mode] === 'decimal' || units[mode] === 'pi') document.units[mode] = units[mode]
+  }
+  // The trigonometric sheet is now the Cartesian one with π axes: its own rows join Cartesian, its examples do not.
+  const trig = (readRows(sheets.trig) ?? []).filter((row) => row.text.trim())
+  if (trig.length && trig.map((row) => row.text).join('\n') !== LEGACY_TRIG_EXAMPLES.join('\n')) {
+    const ids = new Set(document.sheets.cartesian.map((row) => row.id))
+    const kept = document.sheets.cartesian.filter((row) => row.text.trim())
+    document.sheets.cartesian = withTrailingRow([...kept, ...trig.map((row) => (ids.has(row.id) ? { ...row, id: rowId() } : row))])
+  }
+  if (record.mode === 'trig') {
+    document.mode = 'cartesian'
+    document.units.cartesian ??= 'pi'
+  } else {
+    document.mode = MODES.includes(record.mode as Mode) ? (record.mode as Mode) : 'cartesian'
+  }
   return document
 }
 

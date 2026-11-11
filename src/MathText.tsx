@@ -18,7 +18,7 @@ type Tok =
 type MNode =
   | { k: 'num' | 'var' | 'sym'; text: string; sub?: string }
   | { k: 'fn'; text: string; sub?: string; exp?: MNode; arg?: MNode }
-  | { k: 'op'; text: string; relation?: boolean }
+  | { k: 'op'; text: string; relation?: boolean; sign?: boolean }
   | { k: 'seq'; items: MNode[] }
   | { k: 'frac'; top: MNode; bottom: MNode }
   | { k: 'pow'; base: MNode; exp: MNode }
@@ -210,7 +210,7 @@ class Parser {
   private unary(): MNode {
     if (this.isOp('-') || this.isOp('−') || this.isOp('+')) {
       const sign = OPERATORS[(this.tokens[this.at++] as { v: string }).v]
-      return seq([{ k: 'op', text: sign === '+' ? '+' : '−', relation: false }, this.unary()])
+      return seq([{ k: 'op', text: sign === '+' ? '+' : '−', sign: true }, this.unary()])
     }
     return this.power()
   }
@@ -227,7 +227,7 @@ class Parser {
   private exponent(): MNode {
     if (this.isOp('-') || this.isOp('−')) {
       this.at++
-      return seq([{ k: 'op', text: '−' }, this.exponent()])
+      return seq([{ k: 'op', text: '−', sign: true }, this.exponent()])
     }
     return this.ungroup(this.power())
   }
@@ -340,7 +340,7 @@ function render(node: MNode, key: string | number = 0): ReactNode {
     case 'var':
       return <span key={key} className="gm-var">{node.text}{node.sub ? <sub className="gm-sub">{node.sub}</sub> : null}</span>
     case 'op':
-      return <span key={key} className={node.relation ? 'gm-op gm-rel' : node.text === ',' ? 'gm-comma' : 'gm-op'}>{node.text}</span>
+      return <span key={key} className={node.relation ? 'gm-op gm-rel' : node.sign ? 'gm-sign' : node.text === ',' ? 'gm-comma' : 'gm-op'}>{node.text}</span>
     case 'seq': return <React.Fragment key={key}>{node.items.map((item, index) => render(item, index))}</React.Fragment>
     case 'frac':
       return (

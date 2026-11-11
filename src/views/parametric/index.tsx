@@ -18,5 +18,6 @@ export const parametric: PlaneView = {
   placeholder: '(cos t, sin(2t))',
   examples: ['(cos(3t), sin(2t))', ['(0.2t cos t, 0.2t sin t)', '0', '6π']],
   homeSpan: 10,
-  grid: planeGrid()
+  grid: planeGrid(),
+  units: 'decimal'
 }

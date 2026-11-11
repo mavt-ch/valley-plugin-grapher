@@ -1,12 +1,14 @@
 import type { ReactElement } from 'react'
-import type { GridPainter } from '../draw'
+import type { AxisUnits, GridPainter } from '../draw'
+
+export type { AxisUnits }
 
 /**
  * Every view of Grapher, one folder each under `src/views/<id>/`. A new view adds its id here, its folder with a
  * `ViewDefinition`, an entry in `src/views/index.ts`, a kernel mode in `src/wasm/src/sheet.rs` and its locale keys
  * (`mode.<id>`, `mode.<id>.hint`, `hint.<id>`).
  */
-export type Mode = 'cartesian' | 'trig' | 'polar' | 'parametric' | 'space' | 'complex' | 'complexSpace'
+export type Mode = 'cartesian' | 'polar' | 'parametric' | 'space' | 'complex' | 'complexSpace'
 
 /** An example row of a fresh sheet: its text, or its text with a parameter range. */
 export type Example = string | readonly [text: string, from: string, to: string]
@@ -27,6 +29,8 @@ export interface PlaneView extends CommonView {
   /** Units across the width of a fresh view. */
   homeSpan: number
   grid: GridPainter
+  /** The axis labels a fresh sheet uses; the header switch flips between decimal numbers and multiples of π. */
+  units: AxisUnits
   /** Complex numbers as arrows from 0 and readouts as `a + bi`. */
   complex?: boolean
 }

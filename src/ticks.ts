@@ -1,6 +1,6 @@
 /**
  * Grid lines and axis labels. Decimal axes step 1, 2 or 5 × 10ⁿ with four or five minor lines between labels;
- * the trigonometric x-axis steps in fractions and multiples of π and labels them exactly (π/2, 3π/2, −2π).
+ * an x-axis in π steps in fractions and multiples of π and labels them exactly (π/2, 3π/2, −2π).
  */
 
 export interface GridLine {

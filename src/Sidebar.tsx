@@ -3,10 +3,10 @@ import type { ChangeEvent, KeyboardEvent, MouseEvent, PointerEvent, ReactElement
 import { paletteCssValue, paletteRef } from '@valley/plugin-sdk/palette'
 import type { UiMenuItem } from '@valley/plugin-sdk'
 import type { RowAnalysis } from './engine'
-import { Eye, EyeOff, Grip, Slider, Trash, Warning, X } from './icons'
+import { ChevronDown, Eye, EyeOff, Grip, Slider, Trash, Warning, X } from './icons'
 import { uiText } from './localization'
 import { MathText } from './MathText'
-import { COLORS, MODES, createRow, moveRow, rangeVariable, type Mode, type Row } from './model'
+import { COLORS, MODES, createRow, moveRow, rangeVariable, unitsOf, type AxisUnits, type Mode, type Row } from './model'
 import { getStore, useGrapher } from './store'
 import { formatComplex, formatNumber, formatPolar } from './ticks'
 import { viewOf } from './views'
@@ -25,38 +25,53 @@ export function sliderText(name: string, value: number, step: number): string {
   return `${name} = ${Number(value.toFixed(stepDigits(step)))}`
 }
 
-const ModeSwitch = ({ mode }: { mode: Mode }): ReactElement => {
+/** The header's view picker: the active view's icon and name, opening a menu of every view. */
+const ViewPicker = ({ mode }: { mode: Mode }): ReactElement => {
   const store = getStore()
-  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
-    const delta = event.key === 'ArrowRight' ? 1 : event.key === 'ArrowLeft' ? -1 : 0
-    if (!delta) return
-    event.preventDefault()
-    const next = MODES[(MODES.indexOf(mode) + delta + MODES.length) % MODES.length]
-    store.setMode(next)
-    event.currentTarget.querySelector<HTMLButtonElement>(`[data-mode="${next}"]`)?.focus()
+  const Icon = viewOf(mode).icon
+  const open = (event: MouseEvent<HTMLButtonElement>): void => {
+    const items = MODES.map((candidate): UiMenuItem => {
+      const CandidateIcon = viewOf(candidate).icon
+      return {
+        id: `view:${candidate}`,
+        type: 'radio',
+        checked: candidate === mode,
+        label: uiText(`mode.${candidate}`),
+        description: uiText(`mode.${candidate}.hint`),
+        icon: <CandidateIcon />,
+        onSelect: () => store.setMode(candidate)
+      }
+    })
+    void api.ui.openMenu(items, { anchor: event.currentTarget, align: 'start', gap: 4 })
   }
   return (
-    <div className="grapher-modes" role="radiogroup" aria-label={uiText('mode.label')} onKeyDown={onKeyDown}>
-      {MODES.map((candidate) => {
-        const Icon = viewOf(candidate).icon
-        const active = candidate === mode
-        return (
-          <button
-            key={candidate}
-            type="button"
-            role="radio"
-            aria-checked={active}
-            tabIndex={active ? 0 : -1}
-            data-mode={candidate}
-            className={active ? 'grapher-mode active' : 'grapher-mode'}
-            onClick={() => store.setMode(candidate)}
-            {...api.ui.tooltip(`${uiText(`mode.${candidate}`)} — ${uiText(`mode.${candidate}.hint`)}`)}
-            aria-label={uiText(`mode.${candidate}`)}
-          >
-            <Icon />
-          </button>
-        )
-      })}
+    <button type="button" className="grapher-view-picker" aria-haspopup="menu" aria-label={uiText('view.choose', { mode: uiText(`mode.${mode}`) })} onClick={open}>
+      <Icon className="grapher-view-icon" />
+      <span className="grapher-view-name">{uiText(`mode.${mode}`)}</span>
+      <ChevronDown className="grapher-view-chevron" />
+    </button>
+  )
+}
+
+/** Beside the picker on flat views: label the axes in real numbers or in multiples of π; only the labels change. */
+const UnitsSwitch = ({ mode, units }: { mode: Mode; units: AxisUnits }): ReactElement => {
+  const store = getStore()
+  return (
+    <div className="grapher-units" role="radiogroup" aria-label={uiText('units.label')}>
+      {(['decimal', 'pi'] as const).map((candidate) => (
+        <button
+          key={candidate}
+          type="button"
+          role="radio"
+          aria-checked={units === candidate}
+          className={units === candidate ? 'grapher-unit active' : 'grapher-unit'}
+          aria-label={uiText(`units.${candidate}`)}
+          {...api.ui.tooltip(uiText(`units.${candidate}`))}
+          onClick={() => store.setUnits(mode, candidate)}
+        >
+          {candidate === 'pi' ? 'π' : 'ℝ'}
+        </button>
+      ))}
     </div>
   )
 }
@@ -230,20 +245,21 @@ const ExpressionRow = (props: RowProps): ReactElement => {
   }
   return (
     <div className="grapher-row" role="listitem" data-row-index={index} data-kind={analysis?.kind ?? 'empty'} data-hidden={row.hidden || undefined} data-dragging={props.dragging || undefined}>
-      {trailing ? <span className="grapher-grip-spacer" /> : (
-        <button
-          type="button"
-          className="grapher-grip"
-          tabIndex={-1}
-          aria-label={uiText('row.drag')}
-          title={uiText('row.drag')}
-          onPointerDown={props.startDrag}
-        >
-          <Grip />
-        </button>
-      )}
       <div className="grapher-gutter">
-        <span className="grapher-index">{index + 1}</span>
+        {trailing ? <span className="grapher-handle"><span className="grapher-index">{index + 1}</span></span> : (
+          <button
+            type="button"
+            className="grapher-handle"
+            tabIndex={-1}
+            aria-label={uiText('row.drag')}
+            title={uiText('row.drag')}
+            onPointerDown={props.startDrag}
+          >
+            <span className="grapher-index">{index + 1}</span>
+            <Grip className="grapher-grip-icon" />
+          </button>
+        )}
+        <span className="grapher-mark">
         {error ? (
           <span className="grapher-warning" role="img" aria-label={error} {...api.ui.tooltip(error)}><Warning /></span>
         ) : drawn ? (
@@ -258,6 +274,7 @@ const ExpressionRow = (props: RowProps): ReactElement => {
             onContextMenu={openMenu}
           />
         ) : null}
+        </span>
       </div>
       <div className="grapher-row-main">
         <div className="grapher-field" data-typeset={typeset || undefined}>
@@ -299,6 +316,7 @@ export const Sidebar = (): ReactElement => {
   const { loaded, document, engine, problems } = useGrapher()
   const mode = document.mode
   const rows = document.sheets[mode]
+  const units = unitsOf(document, mode)
   const analyses = React.useMemo(() => (engine ? engine.analyze(mode, rows) : []), [engine, mode, rows])
   const editRow = (id: string) => (change: (row: Row) => Row): void => {
     store.updateRows(mode, (current) => current.map((row) => (row.id === id ? change(row) : row)))
@@ -371,7 +389,9 @@ export const Sidebar = (): ReactElement => {
   return (
     <div className="grapher-panel">
       <div className="panel-header grapher-header">
-        <ModeSwitch mode={mode} />
+        <ViewPicker mode={mode} />
+        {units ? <UnitsSwitch mode={mode} units={units} /> : null}
+        <span className="grapher-header-spacer" />
         <button
           type="button"
           className="plugin-open-page"

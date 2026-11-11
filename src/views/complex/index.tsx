@@ -19,5 +19,6 @@ export const complex: PlaneView = {
   examples: ['w = 2e^(iπ/3)', 'cos(φ) + i sin(φ)', 'φ = 0.8', '|z + 2| < 3'],
   homeSpan: 12,
   grid: planeGrid({ imaginary: true }),
+  units: 'decimal',
   complex: true
 }

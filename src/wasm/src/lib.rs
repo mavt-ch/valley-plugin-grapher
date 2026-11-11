@@ -1,7 +1,7 @@
 //! Grapher's plotting kernel. JavaScript writes the active sheet's rows into the buffer `plot_input(len)`
 //! returns, calls `plot_analyze(mode)` and reads the per-row outcomes from `plot_text()`; then, once per
 //! viewport, `plot_sample(width, height, cx, cy, scale)` fills the `f64` path stream at `plot_samples()` and
-//! `plot_eval(row, value)` traces a function under the pointer. A 3D sheet renders with
+//! `plot_eval(row, value)` traces a function under the pointer. A 3D or complex 3D sheet renders with
 //! `plot_space(width, height, yaw, pitch, range)` into the same `plot_samples()` buffer. Addresses point into the host-owned
 //! `env.memory` and stay valid until the next call. The Valley ABI exports are present because the host
 //! requires them of every module; `valley_call` answers no method.
@@ -59,7 +59,8 @@ pub extern "C" fn plot_input(len: u32) -> u32 {
     })
 }
 
-/// Analyses the rows in the input buffer for `mode` (0 Cartesian, 1 trigonometric, 2 polar, 3 parametric);
+/// Analyses the rows in the input buffer for `mode` (0 Cartesian, 1 trigonometric, 2 polar, 3 parametric, 4 3D,
+/// 5 complex, 6 complex 3D);
 /// the byte length of the outcome text.
 #[unsafe(no_mangle)]
 pub extern "C" fn plot_analyze(mode: u32) -> u32 {

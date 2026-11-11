@@ -2,42 +2,12 @@ import { React } from './runtime'
 import type { ReactElement, ReactNode } from 'react'
 
 /** Inline stroke icons drawn with the host's React; monochrome through currentColor. */
-type IconProps = { className?: string }
+export type IconProps = { className?: string }
 
-const Svg = ({ className, children }: IconProps & { children: ReactNode }): ReactElement => (
+export const Svg = ({ className, children }: IconProps & { children: ReactNode }): ReactElement => (
   <svg className={className} width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
     {children}
   </svg>
-)
-
-/** Axes with a parabola. */
-export const Cartesian = (p: IconProps): ReactElement => (
-  <Svg {...p}><path d="M4 3v17h17" /><path d="M7.5 5c1.5 6 3.3 9 5.2 9s3.7-3 5.3-9" /></Svg>
-)
-
-/** One period of a sine over its axis. */
-export const Trig = (p: IconProps): ReactElement => (
-  <Svg {...p}><path d="M2 12h20" opacity={0.45} /><path d="M2 12c1.5-5 3.5-7 5-7s3.5 2 5 7s3.5 7 5 7s3.5-2 5-7" /></Svg>
-)
-
-/** Concentric circles and a ray. */
-export const Polar = (p: IconProps): ReactElement => (
-  <Svg {...p}><circle cx="12" cy="12" r="9" /><circle cx="12" cy="12" r="4.5" /><path d="M12 12l6.4-6.4" /></Svg>
-)
-
-/** A closed plane curve. */
-export const Parametric = (p: IconProps): ReactElement => (
-  <Svg {...p}><path d="M9.828 9.172a4 4 0 1 0 0 5.656a10 10 0 0 0 2.172 -2.828a10 10 0 0 1 2.172 -2.828a4 4 0 1 1 0 5.656a10 10 0 0 1 -2.172 -2.828a10 10 0 0 0 -2.172 -2.828" /></Svg>
-)
-
-/** A cube in perspective. */
-export const Space = (p: IconProps): ReactElement => (
-  <Svg {...p}><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z" /><path d="M12 12l8-4.5M12 12v9M12 12L4 7.5" /></Svg>
-)
-
-/** The Gaussian plane: axes and a complex number as an arrow. */
-export const Complex = (p: IconProps): ReactElement => (
-  <Svg {...p}><path d="M4 20V3M4 20h17" opacity={0.45} /><path d="M4 20L15.5 8.5" /><path d="M11 8h5v5" /></Svg>
 )
 
 export const X = (p: IconProps): ReactElement => (
@@ -71,4 +41,15 @@ export const Trash = (p: IconProps): ReactElement => (
 
 export const Slider = (p: IconProps): ReactElement => (
   <Svg {...p}><path d="M4 12h16" /><circle cx="9" cy="12" r="2.5" /></Svg>
+)
+
+/** Six dots: the handle that drags a row to a new place. */
+export const Grip = (p: IconProps): ReactElement => (
+  <svg className={p.className} width="1em" height="1em" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+    <circle cx="9" cy="6" r="1.6" /><circle cx="15" cy="6" r="1.6" /><circle cx="9" cy="12" r="1.6" /><circle cx="15" cy="12" r="1.6" /><circle cx="9" cy="18" r="1.6" /><circle cx="15" cy="18" r="1.6" />
+  </svg>
+)
+
+export const Warning = (p: IconProps): ReactElement => (
+  <Svg {...p}><path d="M12 3.5L2.5 20h19z" /><path d="M12 10v4.5M12 17.5v.01" /></Svg>
 )

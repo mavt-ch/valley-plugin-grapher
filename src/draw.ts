@@ -1,7 +1,9 @@
 import { readPaletteColor } from '@valley/plugin-sdk/palette'
-import { STRIDE, type SamplePath, type Viewport } from './engine'
-import type { Mode } from './model'
-import { decimalAxis, decimalStep, formatComplex, formatImaginary, formatNumber, formatPi, piAxis, type Axis } from './ticks'
+import type { SamplePath, Viewport } from './engine'
+import { decimalAxis, formatComplex, formatImaginary, formatNumber, piAxis, type Axis } from './ticks'
+
+/** Values per sampled point in the kernel's path stream: screen x, screen y, world x, world y, parameter. */
+export const STRIDE = 5
 
 export interface Size {
   width: number
@@ -30,7 +32,7 @@ export interface Hover {
 
 // Canvas coordinates far outside the view are clamped; Chromium drops paths with huge coordinates.
 const CLAMP = 1e5
-const clamp = (value: number): number => Math.max(-CLAMP, Math.min(CLAMP, value))
+export const clamp = (value: number): number => Math.max(-CLAMP, Math.min(CLAMP, value))
 
 export const toScreenX = (view: Viewport, size: Size, x: number): number => (x - view.cx) * view.scale + size.width / 2
 export const toScreenY = (view: Viewport, size: Size, y: number): number => size.height / 2 - (y - view.cy) * view.scale
@@ -80,7 +82,7 @@ function horizontals(ctx: CanvasRenderingContext2D, axis: Axis, view: Viewport, 
   ctx.stroke()
 }
 
-function haloText(ctx: CanvasRenderingContext2D, theme: Theme, text: string, x: number, y: number): void {
+export function haloText(ctx: CanvasRenderingContext2D, theme: Theme, text: string, x: number, y: number): void {
   ctx.lineWidth = 3
   ctx.strokeStyle = theme.background
   ctx.strokeText(text, x, y)
@@ -88,7 +90,7 @@ function haloText(ctx: CanvasRenderingContext2D, theme: Theme, text: string, x: 
   ctx.fillText(text, x, y)
 }
 
-function axes(ctx: CanvasRenderingContext2D, view: Viewport, size: Size, theme: Theme): void {
+export function axes(ctx: CanvasRenderingContext2D, view: Viewport, size: Size, theme: Theme): void {
   const ox = crisp(toScreenX(view, size, 0))
   const oy = crisp(toScreenY(view, size, 0))
   ctx.strokeStyle = theme.axis
@@ -102,7 +104,7 @@ function axes(ctx: CanvasRenderingContext2D, view: Viewport, size: Size, theme: 
 }
 
 /** Labels sit beside their axis, or pinned to the nearest edge when the axis is out of view. */
-function labels(ctx: CanvasRenderingContext2D, x: Axis, y: Axis | null, view: Viewport, size: Size, theme: Theme): void {
+export function labels(ctx: CanvasRenderingContext2D, x: Axis, y: Axis | null, view: Viewport, size: Size, theme: Theme): void {
   ctx.font = theme.font
   const ox = toScreenX(view, size, 0)
   const oy = toScreenY(view, size, 0)
@@ -139,13 +141,25 @@ function labels(ctx: CanvasRenderingContext2D, x: Axis, y: Axis | null, view: Vi
   }
 }
 
-function cartesianGrid(ctx: CanvasRenderingContext2D, mode: Mode, view: Viewport, size: Size, theme: Theme): void {
+/** Paints a view's background grid, axes and labels. */
+export type GridPainter = (ctx: CanvasRenderingContext2D, view: Viewport, size: Size, theme: Theme) => void
+
+export interface PlaneGridOptions {
+  /** `pi` labels the x-axis in fractions and multiples of π. */
+  xAxis?: 'decimal' | 'pi'
+  /** The Gaussian plane: the vertical axis in multiples of i, with `Re` and `Im` names. */
+  imaginary?: boolean
+}
+
+/** A rectangular grid; each plane view picks its axis labelling. */
+export const planeGrid = ({ xAxis = 'decimal', imaginary = false }: PlaneGridOptions = {}): GridPainter => (ctx, view, size, theme) => {
+  ctx.fillStyle = theme.background
+  ctx.fillRect(0, 0, size.width, size.height)
   const lo = toWorldX(view, size, 0)
   const hi = toWorldX(view, size, size.width)
-  const x = mode === 'trig' ? piAxis(lo, hi, view.scale) : decimalAxis(lo, hi, view.scale)
+  const x = xAxis === 'pi' ? piAxis(lo, hi, view.scale) : decimalAxis(lo, hi, view.scale)
   const real = decimalAxis(toWorldY(view, size, size.height), toWorldY(view, size, 0), view.scale)
-  // The Gaussian plane labels its vertical axis with multiples of i.
-  const y = mode === 'complex' ? { ...real, labels: real.labels.map((label) => ({ ...label, text: formatImaginary(label.text) })) } : real
+  const y = imaginary ? { ...real, labels: real.labels.map((label) => ({ ...label, text: formatImaginary(label.text) })) } : real
   ctx.lineWidth = 1
   ctx.strokeStyle = theme.minor
   verticals(ctx, x, view, size, false)
@@ -155,7 +169,7 @@ function cartesianGrid(ctx: CanvasRenderingContext2D, mode: Mode, view: Viewport
   horizontals(ctx, y, view, size, true)
   axes(ctx, view, size, theme)
   labels(ctx, x, y, view, size, theme)
-  if (mode === 'complex') axisNames(ctx, view, size, theme)
+  if (imaginary) axisNames(ctx, view, size, theme)
 }
 
 /** `Re` at the right end of the real axis and `Im` at the top of the imaginary one, pinned inside the view. */
@@ -201,85 +215,6 @@ export function drawArrows(ctx: CanvasRenderingContext2D, arrows: readonly { x: 
     ctx.textBaseline = uy >= 0 ? 'top' : 'bottom'
     haloText(ctx, theme, formatComplex(arrow.x, arrow.y), tx + (ux >= 0 ? 7 : -7), ty + (uy >= 0 ? 5 : -5))
   }
-}
-
-/** Where a ray from the origin leaves the view (inset for its label), or null when it misses it. */
-function rayExit(ox: number, oy: number, dx: number, dy: number, size: Size): [number, number] | null {
-  const box = [[22, size.width - 22], [12, size.height - 12]] as const
-  let enter = 0
-  let exit = Infinity
-  for (const [origin, direction, [min, max]] of [[ox, dx, box[0]], [oy, dy, box[1]]] as const) {
-    if (Math.abs(direction) < 1e-12) {
-      if (origin < min || origin > max) return null
-      continue
-    }
-    const a = (min - origin) / direction
-    const b = (max - origin) / direction
-    enter = Math.max(enter, Math.min(a, b))
-    exit = Math.min(exit, Math.max(a, b))
-  }
-  return exit > enter && Number.isFinite(exit) ? [ox + dx * exit, oy + dy * exit] : null
-}
-
-function polarGrid(ctx: CanvasRenderingContext2D, view: Viewport, size: Size, theme: Theme): void {
-  const ox = toScreenX(view, size, 0)
-  const oy = toScreenY(view, size, 0)
-  const corners = [[0, 0], [size.width, 0], [0, size.height], [size.width, size.height]]
-  const far = Math.max(...corners.map(([x, y]) => Math.hypot(x - ox, y - oy)))
-  const inside = ox >= 0 && ox <= size.width && oy >= 0 && oy <= size.height
-  const nearX = Math.max(0, Math.min(size.width, ox))
-  const nearY = Math.max(0, Math.min(size.height, oy))
-  const near = inside ? 0 : Math.hypot(nearX - ox, nearY - oy)
-  const { major, divisions } = decimalStep(view.scale)
-  const minor = major / divisions
-  const first = Math.max(1, Math.floor(near / view.scale / minor))
-  const last = Math.ceil(far / view.scale / minor)
-  ctx.lineWidth = 1
-  if (last - first < 600) {
-    for (const wantMajor of [false, true]) {
-      ctx.strokeStyle = wantMajor ? theme.major : theme.minor
-      ctx.beginPath()
-      for (let k = first; k <= last; k++) {
-        if ((k % divisions === 0) !== wantMajor) continue
-        const radius = k * minor * view.scale
-        ctx.moveTo(ox + radius, oy)
-        ctx.arc(ox, oy, radius, 0, Math.PI * 2)
-      }
-      ctx.stroke()
-    }
-  }
-  // Rays every π/12, stronger every π/6; the 0 and π/2 rays are the axes.
-  for (let k = 0; k < 12; k++) {
-    if (k % 6 === 0) continue
-    const angle = (k * Math.PI) / 12
-    ctx.strokeStyle = k % 2 === 0 ? theme.major : theme.minor
-    ctx.beginPath()
-    ctx.moveTo(ox - Math.cos(angle) * far, oy + Math.sin(angle) * far)
-    ctx.lineTo(ox + Math.cos(angle) * far, oy - Math.sin(angle) * far)
-    ctx.stroke()
-  }
-  axes(ctx, view, size, theme)
-  const lo = toWorldX(view, size, 0)
-  const hi = toWorldX(view, size, size.width)
-  const radii = decimalAxis(lo, hi, view.scale)
-  // Radii read as distances; the outermost ones would sit under the 0 and π angle labels.
-  const clear = (label: { value: number }): boolean => { const sx = toScreenX(view, size, label.value); return sx > 44 && sx < size.width - 44 }
-  labels(ctx, { ...radii, labels: radii.labels.filter(clear).map((label) => ({ ...label, text: formatNumber(Math.abs(label.value), 6) })) }, null, view, size, theme)
-  ctx.textAlign = 'center'
-  ctx.textBaseline = 'middle'
-  for (let k = 0; k < 12; k++) {
-    const angle = (k * Math.PI) / 6
-    const at = rayExit(ox, oy, Math.cos(angle), -Math.sin(angle), size)
-    // The 0 and π labels sit just above the horizontal axis, not on its line.
-    if (at) haloText(ctx, theme, formatPi(k, 6), at[0], k % 6 === 0 ? at[1] - 9 : at[1])
-  }
-}
-
-export function drawGrid(ctx: CanvasRenderingContext2D, mode: Mode, view: Viewport, size: Size, theme: Theme): void {
-  ctx.fillStyle = theme.background
-  ctx.fillRect(0, 0, size.width, size.height)
-  if (mode === 'polar') polarGrid(ctx, view, size, theme)
-  else cartesianGrid(ctx, mode, view, size, theme)
 }
 
 /** Regions are filled first, translucent and once per row so neighbouring cells never double up; `dashed` marks

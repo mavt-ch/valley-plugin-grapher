@@ -3,16 +3,22 @@
 //! everything is projected orthographically, shaded by its normal and returned back to front so the canvas only
 //! has to fill in order. The frame (box, floor grid, axes, tick labels) comes first in the same stream.
 //!
+//! The complex 3D sheet uses the same frame with the complex plane as the floor: `w = f(z)` rises to |f(z)| and
+//! each cell is coloured by arg f(z).
+//!
 //! Records: `[kind, row or axis, shade or value, count]`, then `count` screen points `[x, y]`.
 
 use std::f64::consts::TAU;
 
+use crate::complex::{self, C64, CExpr, CUserFn};
 use crate::eval::{Expr, UserFn, eval};
-use crate::sheet::{Axis3, Plot, Sheet, T, X, Y, Z};
+use crate::sheet::{Axis3, Height, Plot, Sheet, T, X, Y, Z};
 
 pub const POLYGON: f64 = 0.0;
 pub const SEGMENT: f64 = 1.0;
 pub const POINT: f64 = 2.0;
+/// A domain-coloured cell: the value is `32 · shade` rounded, plus the hue in [0, 1).
+pub const HUE_POLYGON: f64 = 3.0;
 pub const BOX: f64 = 10.0;
 pub const GRID: f64 = 11.0;
 pub const GRID_MAJOR: f64 = 12.0;
@@ -181,6 +187,8 @@ struct Scene<'a> {
     projector: Projector,
     env: &'a mut [f64],
     functions: &'a [UserFn],
+    cenv: &'a mut [C64],
+    cfunctions: &'a [CUserFn],
     items: Vec<Item>,
 }
 
@@ -207,6 +215,49 @@ impl Scene<'_> {
                 grid[j * stride + i] = p;
             }
         }
+        self.mesh(row, &grid, w, None);
+    }
+
+    /// `w = f(z)` over the complex plane, one hue per cell from arg of `hue` at the cell's centre.
+    fn complex_surface(&mut self, row: f64, expr: &CExpr, hue: &CExpr, height: Height) {
+        let range = self.camera.range;
+        let at = |i: f64| -range + 2.0 * range * i / CELLS as f64;
+        let stride = CELLS + 1;
+        let mut grid = vec![[0.0; 3]; stride * stride];
+        let value = |scene: &mut Self, x: f64, y: f64, expr: &CExpr| -> C64 {
+            scene.cenv[Z] = C64::new(x, y);
+            scene.cenv[X] = C64::real(x);
+            scene.cenv[Y] = C64::real(y);
+            complex::eval(expr, scene.cenv, scene.cfunctions)
+        };
+        for j in 0..=CELLS {
+            for i in 0..=CELLS {
+                let (x, y) = (at(i as f64), at(j as f64));
+                let w = value(self, x, y, expr);
+                let h = match height {
+                    Height::Modulus => w.abs(),
+                    Height::Real if w.is_real() => w.re,
+                    Height::Real => f64::NAN,
+                };
+                grid[j * stride + i] = [x, y, h];
+            }
+        }
+        let mut hues = vec![0.0; CELLS * CELLS];
+        for j in 0..CELLS {
+            for i in 0..CELLS {
+                let w = value(self, at(i as f64 + 0.5), at(j as f64 + 0.5), hue);
+                let turn = (w.arg() / TAU).rem_euclid(1.0);
+                hues[j * CELLS + i] = if turn.is_finite() { turn.min(0.999) } else { 0.0 };
+            }
+        }
+        self.mesh(row, &grid, 2, Some(&hues));
+    }
+
+    /// The cells of a sampled grid, clipped to the cube and shaded by their normal; `w` is the coordinate the
+    /// surface gives. With `hues`, cells are domain-coloured records.
+    fn mesh(&mut self, row: f64, grid: &[Vec3], w: usize, hues: Option<&[f64]>) {
+        let range = self.camera.range;
+        let stride = CELLS + 1;
         let light = normalize(LIGHT).unwrap_or([0.0, 0.0, 1.0]);
         for j in 0..CELLS {
             for i in 0..CELLS {
@@ -224,7 +275,10 @@ impl Scene<'_> {
                 }
                 let normal = normalize(cross(sub(quad[2], quad[0]), sub(quad[3], quad[1])));
                 let shade = normal.map_or(0.6, |n| 0.3 + 0.7 * dot(normalize(self.projector.view(n)).unwrap_or(n), light).abs());
-                self.push(POLYGON, row, shade, &clipped);
+                match hues {
+                    Some(hues) => self.push(HUE_POLYGON, row, (shade * 32.0).round() + hues[j * CELLS + i], &clipped),
+                    None => self.push(POLYGON, row, shade, &clipped),
+                }
             }
         }
     }
@@ -318,8 +372,16 @@ pub fn render(sheet: &mut Sheet, camera: Camera) -> Vec<f64> {
     }
     let projector = Projector::new(&camera);
     frame(&mut out, &camera, &projector);
-    let Sheet { env, functions, rows, .. } = sheet;
-    let mut scene = Scene { camera, projector, env: env.as_mut_slice(), functions: functions.as_slice(), items: Vec::new() };
+    let Sheet { env, functions, cenv, cfunctions, rows } = sheet;
+    let mut scene = Scene {
+        camera,
+        projector,
+        env: env.as_mut_slice(),
+        functions: functions.as_slice(),
+        cenv: cenv.as_mut_slice(),
+        cfunctions: cfunctions.as_slice(),
+        items: Vec::new(),
+    };
     for (index, row) in rows.iter().enumerate() {
         let Some(plot) = row.plot().filter(|_| !row.hidden) else { continue };
         let index = index as f64;
@@ -327,6 +389,8 @@ pub fn render(sheet: &mut Sheet, camera: Camera) -> Vec<f64> {
             Plot::Surface { expr, axis } => scene.surface(index, expr, *axis),
             Plot::Curve3 { x, y, z, from, to } => scene.curve(index, (x, y, z), *from, *to),
             Plot::Point3 { x, y, z } => scene.point(index, [*x, *y, *z]),
+            Plot::ComplexSurface { expr, hue, height } => scene.complex_surface(index, expr, hue, *height),
+            Plot::ComplexPoint { re, im, .. } => scene.point(index, [*re, *im, 0.0]),
             _ => {}
         }
     }
@@ -353,8 +417,12 @@ mod tests {
     }
 
     fn records(texts: &[&str], camera: Camera) -> Vec<Record> {
+        records_in(Mode::Space, texts, camera)
+    }
+
+    fn records_in(mode: Mode, texts: &[&str], camera: Camera) -> Vec<Record> {
         let inputs: Vec<RowInput> = texts.iter().map(|text| RowInput { text: text.to_string(), ..RowInput::default() }).collect();
-        let mut sheet = analyze(Mode::Space, &inputs);
+        let mut sheet = analyze(mode, &inputs);
         let data = render(&mut sheet, camera);
         let mut out = Vec::new();
         let mut at = 0;
@@ -409,6 +477,25 @@ mod tests {
         let segments = found.iter().filter(|r| r.kind == SEGMENT && r.row == 3.0).count();
         assert!(segments > 300, "{segments} segments");
         assert_eq!(found.iter().filter(|r| r.kind == POINT).map(|r| r.row).collect::<Vec<_>>(), [4.0]);
+    }
+
+    #[test]
+    fn complex_surfaces_are_domain_coloured_over_the_plane() {
+        let found = records_in(Mode::ComplexSpace, &["w = z^2 - 4", "f(z) = 1 / z", "Re(z^2)", "2 + 3i", "a = 1"], CAMERA);
+        let cells = |row: f64| found.iter().filter(move |r| r.kind == HUE_POLYGON && r.row == row);
+        // |z² − 4| stays inside the cube only near the origin; 1/z almost everywhere.
+        for (row, least) in [(0.0, 200), (1.0, 3000), (2.0, 500)] {
+            assert!(cells(row).count() > least, "row {row}: {}", cells(row).count());
+        }
+        for cell in cells(0.0) {
+            let (shade, hue) = (cell.value.floor() / 32.0, cell.value.fract());
+            assert!((0.25..=1.0).contains(&shade) && (0.0..1.0).contains(&hue), "{}", cell.value);
+        }
+        // z² − 4 takes every argument, so its cells span the whole colour wheel.
+        let hues: Vec<f64> = cells(0.0).map(|cell| cell.value.fract()).collect();
+        assert!(hues.iter().any(|hue| *hue < 0.1) && hues.iter().any(|hue| (0.45..0.55).contains(hue)) && hues.iter().any(|hue| *hue > 0.9));
+        assert_eq!(found.iter().filter(|r| r.kind == POINT).map(|r| r.row).collect::<Vec<_>>(), [3.0]);
+        assert!(found.iter().all(|r| r.kind != POLYGON));
     }
 
     #[test]

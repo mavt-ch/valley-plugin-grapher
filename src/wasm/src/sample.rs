@@ -495,7 +495,7 @@ pub fn sample(sheet: &mut Sheet, view: View) -> Vec<f64> {
             }
             Plot::Implicit(field) => graph.implicit(field),
             Plot::Region { field, relation } => graph.region(field, *relation),
-            Plot::Surface { .. } | Plot::Curve3 { .. } | Plot::Point3 { .. } => {}
+            Plot::Surface { .. } | Plot::Curve3 { .. } | Plot::Point3 { .. } | Plot::ComplexSurface { .. } => {}
         }
     }
     out.data

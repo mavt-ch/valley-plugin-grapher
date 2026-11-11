@@ -42,8 +42,8 @@ export class GrapherStore {
   private readonly offs: (() => void)[] = []
   /** Session-only view of each sheet, so switching modes or reopening the tab keeps the camera. */
   readonly viewports: Partial<Record<Mode, Viewport>> = {}
-  /** Session-only camera of the 3D sheet. */
-  camera: Camera | null = null
+  /** Session-only camera of each 3D sheet. */
+  readonly cameras: Partial<Record<Mode, Camera>> = {}
 
   constructor(private readonly api: ValleyPluginApi) {}
 

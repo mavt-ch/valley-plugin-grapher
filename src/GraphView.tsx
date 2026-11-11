@@ -1,20 +1,19 @@
 import { React } from './runtime'
 import type { KeyboardEvent, PointerEvent, ReactElement } from 'react'
-import { colorOf, drawArrows, drawGrid, drawHover, drawPaths, findHit, readTheme, toScreenY, toWorldX, toWorldY, type Hover, type Size } from './draw'
+import { colorOf, drawArrows, drawHover, drawPaths, findHit, readTheme, toScreenY, toWorldX, toWorldY, type Hover, type Size } from './draw'
 import type { PlotEngine, RowAnalysis, SamplePath, Viewport } from './engine'
 import { Fit, Minus, Plus } from './icons'
 import { uiText } from './localization'
-import type { Mode, Row } from './model'
+import type { Row } from './model'
 import { getStore, useGrapher } from './store'
 import { SpaceCanvas } from './Space'
+import { viewOf, type PlaneView } from './views'
 
-/** Units across the width of a fresh view, per coordinate system. */
-const HOME_SPAN: Record<Exclude<Mode, 'space'>, number> = { cartesian: 20, trig: 4 * Math.PI + 1, polar: 8, parametric: 10, complex: 12 }
 const MIN_SCALE = 1e-3
 const MAX_SCALE = 1e7
 
-export function homeView(mode: Mode, size: Size): Viewport {
-  const span = mode === 'space' ? HOME_SPAN.cartesian : HOME_SPAN[mode]
+export function homeView(view: PlaneView, size: Size): Viewport {
+  const span = view.homeSpan
   return { cx: 0, cy: 0, scale: Math.max(MIN_SCALE, Math.min(size.width / span, size.height / (span * 0.6))) }
 }
 
@@ -26,7 +25,7 @@ function zoomed(view: Viewport, size: Size, factor: number, px: number, py: numb
 }
 
 interface CanvasProps {
-  mode: Mode
+  view: PlaneView
   rows: readonly Row[]
   analyses: readonly RowAnalysis[]
   engine: PlotEngine | null
@@ -36,7 +35,8 @@ interface CanvasProps {
  * The graph: drag to pan, scroll or pinch to zoom about the pointer, hover a graph to trace it. Sampling runs
  * in the Rust kernel whenever the view or the rows change; drawing reads colours from the theme each frame.
  */
-export const GraphCanvas = ({ mode, rows, analyses, engine }: CanvasProps): ReactElement => {
+export const GraphCanvas = ({ view: plane, rows, analyses, engine }: CanvasProps): ReactElement => {
+  const mode = plane.id
   const store = getStore()
   const wrapRef = React.useRef<HTMLDivElement>(null)
   const canvasRef = React.useRef<HTMLCanvasElement>(null)
@@ -46,8 +46,8 @@ export const GraphCanvas = ({ mode, rows, analyses, engine }: CanvasProps): Reac
   const pointerRef = React.useRef<{ x: number; y: number } | null>(null)
   const dragRef = React.useRef<{ id: number; x: number; y: number; view: Viewport } | null>(null)
   const frameRef = React.useRef<{ id: number | null; resample: boolean }>({ id: null, resample: true })
-  const inputs = React.useRef({ mode, rows, analyses, engine })
-  inputs.current = { mode, rows, analyses, engine }
+  const inputs = React.useRef({ plane, mode, rows, analyses, engine })
+  inputs.current = { plane, mode, rows, analyses, engine }
 
   const hoverAt = React.useCallback((x: number, y: number): Hover | null => {
     const { mode, rows, analyses, engine } = inputs.current
@@ -77,8 +77,8 @@ export const GraphCanvas = ({ mode, rows, analyses, engine }: CanvasProps): Reac
     const ctx = canvas?.getContext('2d')
     const size = sizeRef.current
     if (!canvas || !ctx || size.width <= 0 || size.height <= 0) return
-    const { mode, rows, analyses, engine } = inputs.current
-    const view = viewRef.current ?? (viewRef.current = homeView(mode, size))
+    const { plane, mode, rows, analyses, engine } = inputs.current
+    const view = viewRef.current ?? (viewRef.current = homeView(plane, size))
     if (frame.resample) {
       frame.resample = false
       try {
@@ -90,17 +90,17 @@ export const GraphCanvas = ({ mode, rows, analyses, engine }: CanvasProps): Reac
     const dpr = canvas.ownerDocument.defaultView?.devicePixelRatio || 1
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
     const theme = readTheme(canvas)
-    drawGrid(ctx, mode, view, size, theme)
+    plane.grid(ctx, view, size, theme)
     const colors = rows.map((row) => colorOf(row.color))
     drawPaths(ctx, pathsRef.current, colors, theme, rows.map((_, index) => Boolean(analyses[index]?.strict)))
-    if (mode === 'complex') {
+    if (plane.complex) {
       const arrows = analyses.flatMap((analysis, index) => analysis.kind === 'cpoint' && !rows[index]?.hidden && analysis.x !== undefined && analysis.y !== undefined
         ? [{ x: analysis.x, y: analysis.y, color: colors[index] ?? theme.axis }] : [])
       drawArrows(ctx, arrows, view, size, theme)
     }
     const pointer = pointerRef.current
     const hover = pointer && !dragRef.current ? hoverAt(pointer.x, pointer.y) : null
-    if (hover) drawHover(ctx, hover, colors[hover.row] ?? theme.axis, size, theme, mode === 'complex')
+    if (hover) drawHover(ctx, hover, colors[hover.row] ?? theme.axis, size, theme, plane.complex)
   }, [hoverAt])
 
   const invalidate = React.useCallback((resample: boolean): void => {
@@ -205,7 +205,7 @@ export const GraphCanvas = ({ mode, rows, analyses, engine }: CanvasProps): Reac
 
   const reset = (): void => {
     delete store.viewports[inputs.current.mode]
-    setView(homeView(inputs.current.mode, sizeRef.current))
+    setView(homeView(inputs.current.plane, sizeRef.current))
   }
 
   const onKeyDown = (event: KeyboardEvent<HTMLCanvasElement>): void => {
@@ -256,6 +256,7 @@ export const GraphCanvas = ({ mode, rows, analyses, engine }: CanvasProps): Reac
 export const GraphTab = (): ReactElement => {
   const { document, engine, problems } = useGrapher()
   const mode = document.mode
+  const view = viewOf(mode)
   const rows = document.sheets[mode]
   const analyses = React.useMemo(() => (engine ? engine.analyze(mode, rows) : []), [engine, mode, rows])
   const engineProblem = problems.find((problem) => problem.key === 'problem.engine')
@@ -266,7 +267,7 @@ export const GraphTab = (): ReactElement => {
       </div>
       {engineProblem ? <p role="alert" className="grapher-alert">{uiText('problem.engine', { message: engineProblem.message })}</p> : null}
       <div className="grapher-stage">
-        {mode === 'space' ? <SpaceCanvas rows={rows} engine={engine} /> : <GraphCanvas mode={mode} rows={rows} analyses={analyses} engine={engine} />}
+        {view.canvas === 'space' ? <SpaceCanvas view={view} rows={rows} engine={engine} /> : <GraphCanvas key={view.id} view={view} rows={rows} analyses={analyses} engine={engine} />}
       </div>
     </div>
   )

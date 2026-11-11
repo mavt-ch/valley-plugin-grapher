@@ -1,13 +1,8 @@
 import { normalizePaletteValue, paletteRef } from '@valley/plugin-sdk/palette'
+import { MODES, viewOf, type Example, type Mode } from './views'
 
-/**
- * The coordinate system of a sheet. Each keeps its own rows; trigonometric is Cartesian with π on the x-axis and
- * space is the 3D sheet and complex the Gaussian plane.
- */
-export type Mode = 'cartesian' | 'trig' | 'polar' | 'parametric' | 'space' | 'complex'
-export const MODES: readonly Mode[] = ['cartesian', 'trig', 'polar', 'parametric', 'space', 'complex']
-/** The kernel's mode numbers (`plot_analyze`). */
-export const MODE_INDEX: Record<Mode, number> = { cartesian: 0, trig: 1, polar: 2, parametric: 3, space: 4, complex: 5 }
+/** The view of a sheet (see `src/views/`). Each keeps its own rows. */
+export { MODES, type Mode }
 
 export interface Slider {
   min: number
@@ -62,7 +57,7 @@ export function withTrailingRow(rows: readonly Row[]): Row[] {
   return next
 }
 
-function examples(texts: readonly (string | [string, string, string])[]): Row[] {
+function examples(texts: readonly Example[]): Row[] {
   const rows: Row[] = []
   for (const entry of texts) {
     const [text, from, to] = typeof entry === 'string' ? [entry, '', ''] : entry
@@ -72,18 +67,20 @@ function examples(texts: readonly (string | [string, string, string])[]): Row[] 
 }
 
 export function defaultSheet(mode: Mode): Row[] {
-  switch (mode) {
-    case 'cartesian': return examples(['y = x^2 - 2', 'y = a x + b', 'a = 1', 'b = 0'])
-    case 'trig': return examples(['sin(x)', 'cos(x)', 'y = A sin(k x)', 'A = 2', 'k = 0.5'])
-    case 'polar': return examples(['r = 1 + cos(θ)', 'r = 2 sin(3θ)'])
-    case 'parametric': return examples(['(cos(3t), sin(2t))', ['(0.2t cos t, 0.2t sin t)', '0', '6π']])
-    case 'space': return examples(['z = (x^2 + y^2) / 5 - 6', ['(6cos t, 6sin t, t / 2)', '0', '6π']])
-    case 'complex': return examples(['w = 2e^(iπ/3)', 'cos(φ) + i sin(φ)', 'φ = 0.8', '|z + 2| < 3'])
-  }
+  return examples(viewOf(mode).examples)
 }
 
 export function defaultDocument(): GrapherDocument {
-  return { version: 1, mode: 'cartesian', sheets: { cartesian: defaultSheet('cartesian'), trig: defaultSheet('trig'), polar: defaultSheet('polar'), parametric: defaultSheet('parametric'), space: defaultSheet('space'), complex: defaultSheet('complex') } }
+  return { version: 1, mode: 'cartesian', sheets: Object.fromEntries(MODES.map((mode) => [mode, defaultSheet(mode)])) as Record<Mode, Row[]> }
+}
+
+/** Moves the row at `from` into the gap before row `to` (gaps 0…length); other rows keep their order. */
+export function moveRow(rows: readonly Row[], from: number, to: number): Row[] {
+  if (from < 0 || from >= rows.length || to < 0 || to > rows.length || to === from || to === from + 1) return [...rows]
+  const next = [...rows]
+  const [row] = next.splice(from, 1)
+  next.splice(to > from ? to - 1 : to, 0, row)
+  return next
 }
 
 const text = (value: unknown, fallback = ''): string => (typeof value === 'string' ? value.slice(0, LIMIT) : fallback)

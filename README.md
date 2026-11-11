@@ -14,6 +14,11 @@ Open **Grapher** in the left sidebar. The header switches the coordinate system;
 | Parametric | decimal | `(cos(3t), sin(2t))` |
 | 3D | cube with floor grid, drag to orbit | `z = x^2 + y^2` or just `x^2 + y^2`, `x = y z`, `(cos t, sin t, t)`, `(1, 2, 3)` |
 | Complex | Gaussian plane, imaginary axis in multiples of i | `3 - 2i`, `w = 2e^(iπ/3)`, `r(cos φ + i sin φ)`, `\|z + 2\| < 3`, `Re(z) ≥ 1`, `arg(z) < π/4`, `\|z - i\| = \|z + 1\|` |
+| Complex 3D | complex plane as the floor of the cube, drag to orbit | `w = (z^2 - 4) / 4`, `f(z) = 1/z`, `Re(z^2)`, `Im(e^z)`, `1 + 2i` |
+
+On the complex 3D sheet `w = f(z)` (or a bare expression in `z`, or `f(z) = …`) rises to |f(z)| and is coloured by arg f(z) around the colour wheel, red for positive real values; a real-valued row such as `Re(z^2) / 5` or `x y / 4` rises to its signed value instead, and a number sits on the floor as a point.
+
+Rows not being edited are typeset as in a textbook: `x^2/3` shows a stacked fraction with a superscript, `sqrt(x)` a radical, `theta` θ, `<=` ≤, function names upright and variables italic; clicking a row shows the text to edit. Drag the handle at the left edge of a row to move it up or down.
 
 Inequalities such as `y > x^2` or `x^2 + y^2 ≤ 4` shade their region, with a dashed boundary when it is excluded. On the complex sheet every number is drawn as an arrow from 0 and shown in both forms (`1 + 1.732i = 2·e^(iπ/3)`), `Re`, `Im`, `conj` and `arg` are available, and a relation in `z` (or its parts `x` and `y`) draws its region, or only its boundary with `=`. A row `a = 1` becomes a slider, and every undefined name offers one. Polar and parametric rows set their range below the input (default 0 to 2π). Rows may use `π`, `e`, `|x|`, `x!`, `sqrt`, `cbrt`, `ln`, `log`, `exp`, the trigonometric, inverse and hyperbolic functions, `min`, `max`, `mod`, `floor`, `ceil`, `round` and `sign`; `2x`, `sin 2x`, `sin^2 x` and `sin^-1 x` read as usual. Input is forgiving: Greek letters and constants may be typed as words in any case (`theta`, `Phi`, `PI`, `inf`), `30°` or `30deg` is in degrees, `log_2 x`, `root(x, 3)`, `∛x`, `x⁻¹` and `f(x) := …` work, parentheses and bars left open at the end close themselves, stray closing parentheses at the end are ignored, `0,5` outside parentheses is a decimal comma, and `x2` means `x²` for the plot variables `x`, `y`, `t` and `θ`. Enter adds a row, Backspace on an empty row removes it, the swatch shows or hides a graph and its context menu picks the colour.
 
@@ -33,4 +38,4 @@ The plotting kernel lives in `src/wasm` (Rust): the lexer and parser, the sheet 
 RUSTFLAGS="-Cdebuginfo=0" cargo test
 ```
 
-The TypeScript side (`src/`) holds the store, the sidebar, the canvas drawing, the axis ticks and the localization in five languages.
+The TypeScript side (`src/`) holds the store, the sidebar and its typesetting (`MathText.tsx`), the plane and 3D canvases, the axis ticks and the localization in five languages. Each view has its own folder under `src/views/` (`cartesian`, `trig`, `polar`, `parametric`, `space`, `complex`, `complexSpace`) with its icon, example rows, kernel mode and grid or axis names, registered in `src/views/index.ts`. A new view adds its id to `src/views/types.ts`, a folder, a registry entry, a kernel mode in `src/wasm/src/sheet.rs` and the locale keys `mode.<id>`, `mode.<id>.hint` and `hint.<id>`.

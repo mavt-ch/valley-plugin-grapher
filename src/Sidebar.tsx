@@ -1,16 +1,17 @@
 import { React, api } from './runtime'
-import type { ChangeEvent, KeyboardEvent, MouseEvent, ReactElement } from 'react'
+import type { ChangeEvent, KeyboardEvent, MouseEvent, PointerEvent, ReactElement } from 'react'
 import { paletteCssValue, paletteRef } from '@valley/plugin-sdk/palette'
 import type { UiMenuItem } from '@valley/plugin-sdk'
 import type { RowAnalysis } from './engine'
-import { Cartesian, Complex, Eye, EyeOff, Parametric, Polar, Slider, Space, Trash, Trig, X } from './icons'
+import { Eye, EyeOff, Grip, Slider, Trash, Warning, X } from './icons'
 import { uiText } from './localization'
-import { COLORS, MODES, createRow, rangeVariable, type Mode, type Row } from './model'
+import { MathText } from './MathText'
+import { COLORS, MODES, createRow, moveRow, rangeVariable, type Mode, type Row } from './model'
 import { getStore, useGrapher } from './store'
 import { formatComplex, formatNumber, formatPolar } from './ticks'
+import { viewOf } from './views'
 
-const MODE_ICONS: Record<Mode, (props: { className?: string }) => ReactElement> = { cartesian: Cartesian, trig: Trig, polar: Polar, parametric: Parametric, space: Space, complex: Complex }
-const PLACEHOLDERS: Record<Mode, string> = { cartesian: 'y = x^2', trig: 'y = sin(2x)', polar: 'r = 2cos(3θ)', parametric: '(cos t, sin(2t))', space: 'z = x^2 + y^2', complex: '|z - 1| < 2' }
+const DRAWN = new Set(['function', 'polar', 'curve', 'point', 'implicit', 'surface', 'curve3', 'point3', 'region', 'cpoint', 'csurface'])
 
 /** The row whose input takes focus on its next render (after Enter adds a row or Backspace removes one). */
 let pendingFocus: string | null = null
@@ -37,7 +38,7 @@ const ModeSwitch = ({ mode }: { mode: Mode }): ReactElement => {
   return (
     <div className="grapher-modes" role="radiogroup" aria-label={uiText('mode.label')} onKeyDown={onKeyDown}>
       {MODES.map((candidate) => {
-        const Icon = MODE_ICONS[candidate]
+        const Icon = viewOf(candidate).icon
         const active = candidate === mode
         return (
           <button
@@ -70,6 +71,8 @@ interface RowProps {
   insertAfter: () => void
   remove: (focus: 'previous' | 'next') => void
   addSlider: (name: string) => void
+  dragging: boolean
+  startDrag: (event: PointerEvent<HTMLButtonElement>) => void
 }
 
 const SliderControl = ({ row, analysis, edit }: Pick<RowProps, 'row' | 'analysis' | 'edit'>): ReactElement | null => {
@@ -178,6 +181,7 @@ const Details = (props: RowProps): ReactElement | null => {
 const ExpressionRow = (props: RowProps): ReactElement => {
   const { mode, row, index, trailing, analysis, edit } = props
   const inputRef = React.useRef<HTMLInputElement>(null)
+  const [editing, setEditing] = React.useState(false)
   React.useEffect(() => {
     if (pendingFocus !== row.id) return
     pendingFocus = null
@@ -185,7 +189,9 @@ const ExpressionRow = (props: RowProps): ReactElement => {
     input?.focus()
     input?.setSelectionRange(input.value.length, input.value.length)
   })
-  const drawn = analysis ? ['function', 'polar', 'curve', 'point', 'implicit', 'surface', 'curve3', 'point3', 'region', 'cpoint'].includes(analysis.kind) : false
+  const drawn = analysis ? DRAWN.has(analysis.kind) : false
+  const typeset = !editing && row.text.trim() !== ''
+  const error = analysis?.kind === 'error' && analysis.error ? uiText(analysis.error.key, { name: analysis.error.param }) : null
   const color = paletteCssValue(row.color)
   const openMenu = (event: MouseEvent<HTMLElement>): void => {
     event.preventDefault()
@@ -223,13 +229,27 @@ const ExpressionRow = (props: RowProps): ReactElement => {
     else if (event.key === 'ArrowDown') move(1)
   }
   return (
-    <div className="grapher-row" role="listitem" data-kind={analysis?.kind ?? 'empty'} data-hidden={row.hidden || undefined}>
+    <div className="grapher-row" role="listitem" data-row-index={index} data-kind={analysis?.kind ?? 'empty'} data-hidden={row.hidden || undefined} data-dragging={props.dragging || undefined}>
+      {trailing ? <span className="grapher-grip-spacer" /> : (
+        <button
+          type="button"
+          className="grapher-grip"
+          tabIndex={-1}
+          aria-label={uiText('row.drag')}
+          title={uiText('row.drag')}
+          onPointerDown={props.startDrag}
+        >
+          <Grip />
+        </button>
+      )}
       <div className="grapher-gutter">
         <span className="grapher-index">{index + 1}</span>
-        {drawn ? (
+        {error ? (
+          <span className="grapher-warning" role="img" aria-label={error} {...api.ui.tooltip(error)}><Warning /></span>
+        ) : drawn ? (
           <button
             type="button"
-            className="grapher-swatch"
+            className={analysis?.kind === 'csurface' ? 'grapher-swatch grapher-swatch-hue' : 'grapher-swatch'}
             style={{ ['--swatch' as string]: color }}
             aria-pressed={!row.hidden}
             aria-label={uiText(row.hidden ? 'row.show' : 'row.hide')}
@@ -240,12 +260,14 @@ const ExpressionRow = (props: RowProps): ReactElement => {
         ) : null}
       </div>
       <div className="grapher-row-main">
+        <div className="grapher-field" data-typeset={typeset || undefined}>
+        {typeset ? <div className="grapher-typeset"><MathText text={row.text} /></div> : null}
         <input
           ref={inputRef}
           data-row-input=""
           className="grapher-input"
           value={row.text}
-          placeholder={trailing ? PLACEHOLDERS[mode] : ''}
+          placeholder={trailing ? viewOf(mode).placeholder : ''}
           spellCheck={false}
           autoComplete="off"
           aria-label={uiText('row.input', { index: index + 1 })}
@@ -255,8 +277,11 @@ const ExpressionRow = (props: RowProps): ReactElement => {
             edit((current) => ({ ...current, text }))
           }}
           onKeyDown={onKeyDown}
+          onFocus={() => setEditing(true)}
+          onBlur={() => setEditing(false)}
           onContextMenu={trailing ? undefined : openMenu}
         />
+        </div>
         <Details {...props} />
       </div>
       {trailing ? <span className="grapher-row-spacer" /> : (
@@ -292,6 +317,51 @@ export const Sidebar = (): ReactElement => {
       return current.filter((_, at) => at !== index)
     })
   }
+  const listRef = React.useRef<HTMLDivElement>(null)
+  const dragRef = React.useRef<{ pointer: number; from: number; to: number } | null>(null)
+  const [drag, setDrag] = React.useState<{ from: number; to: number; marker: number } | null>(null)
+  /** The gap (0 … typed rows) nearest the pointer, and the y of its separator line inside the list. */
+  const gapAt = (clientY: number): { gap: number; marker: number } | null => {
+    const list = listRef.current
+    if (!list) return null
+    const elements = Array.from(list.querySelectorAll<HTMLElement>('[data-row-index]')).slice(0, rows.length - 1)
+    if (!elements.length) return null
+    let gap = 0
+    elements.forEach((element, at) => {
+      const rect = element.getBoundingClientRect()
+      if (clientY > rect.top + rect.height / 2) gap = at + 1
+    })
+    const marker = gap < elements.length ? elements[gap].offsetTop : elements[gap - 1].offsetTop + elements[gap - 1].offsetHeight
+    return { gap, marker }
+  }
+  const startDrag = (index: number) => (event: PointerEvent<HTMLButtonElement>): void => {
+    if (event.button !== 0) return
+    event.preventDefault()
+    event.currentTarget.setPointerCapture(event.pointerId)
+    const found = gapAt(event.clientY)
+    dragRef.current = { pointer: event.pointerId, from: index, to: index }
+    setDrag({ from: index, to: index, marker: found?.marker ?? 0 })
+  }
+  const moveDrag = (event: PointerEvent<HTMLDivElement>): void => {
+    const current = dragRef.current
+    const list = listRef.current
+    if (!current || current.pointer !== event.pointerId || !list) return
+    const bounds = list.getBoundingClientRect()
+    if (event.clientY < bounds.top + 24) list.scrollTop -= 8
+    else if (event.clientY > bounds.bottom - 24) list.scrollTop += 8
+    const found = gapAt(event.clientY)
+    if (!found) return
+    current.to = found.gap
+    setDrag({ from: current.from, to: found.gap, marker: found.marker })
+  }
+  const endDrag = (commit: boolean) => (event: PointerEvent<HTMLDivElement>): void => {
+    const current = dragRef.current
+    if (!current || current.pointer !== event.pointerId) return
+    dragRef.current = null
+    setDrag(null)
+    if (commit && current.to !== current.from && current.to !== current.from + 1) store.updateRows(mode, (all) => moveRow(all, current.from, Math.min(current.to, all.length - 1)))
+  }
+  const showMarker = drag !== null && drag.to !== drag.from && drag.to !== drag.from + 1
   const addSlider = (name: string): void => {
     store.updateRows(mode, (current) => {
       const filled = current.filter((row) => row.text.trim())
@@ -314,7 +384,16 @@ export const Sidebar = (): ReactElement => {
         <p key={problem.key} role="alert" className="grapher-alert">{uiText(problem.key, { message: problem.message })}</p>
       ))}
       {loaded ? (
-        <div className="grapher-list" role="list" aria-label={uiText('list.label', { mode: uiText(`mode.${mode}`) })}>
+        <div
+          ref={listRef}
+          className="grapher-list"
+          role="list"
+          aria-label={uiText('list.label', { mode: uiText(`mode.${mode}`) })}
+          data-dragging={drag ? '' : undefined}
+          onPointerMove={moveDrag}
+          onPointerUp={endDrag(true)}
+          onPointerCancel={endDrag(false)}
+        >
           {rows.map((row, index) => (
             <ExpressionRow
               key={row.id}
@@ -327,8 +406,11 @@ export const Sidebar = (): ReactElement => {
               insertAfter={insertAfter(index)}
               remove={remove(index)}
               addSlider={addSlider}
+              dragging={drag?.from === index}
+              startDrag={startDrag(index)}
             />
           ))}
+          {showMarker ? <div className="grapher-drop-marker" style={{ top: drag.marker }} aria-hidden /> : null}
           <p className="grapher-hint">{uiText(`hint.${mode}`)}</p>
         </div>
       ) : (

@@ -7,6 +7,7 @@ use std::collections::hash_map::Entry;
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::f64::consts::TAU;
 
+use crate::builtins::Builtin;
 use crate::complex::{self, C64, CExpr, CUserFn};
 use crate::error::MathError;
 use crate::eval::{Expr, Scope, UserFn, compile, constant, eval};
@@ -35,6 +36,8 @@ pub enum Mode {
     Parametric,
     Space,
     Complex,
+    /// The complex plane as the floor of a 3D sheet: `w = f(z)` rises to |f(z)|, coloured by arg f(z).
+    ComplexSpace,
 }
 
 impl Mode {
@@ -45,6 +48,7 @@ impl Mode {
             3 => Self::Parametric,
             4 => Self::Space,
             5 => Self::Complex,
+            6 => Self::ComplexSpace,
             _ => Self::Cartesian,
         }
     }
@@ -78,6 +82,24 @@ pub enum Plot {
     Surface { expr: Expr, axis: Axis3 },
     Curve3 { x: Expr, y: Expr, z: Expr, from: f64, to: f64 },
     Point3 { x: f64, y: f64, z: f64 },
+    /// `w = f(z)` over the complex plane: the height is |f(z)|, or the value itself when the row is real-valued
+    /// (`Re(z^2) / 5`), and `hue` is the complex value whose argument colours the surface.
+    ComplexSurface { expr: CExpr, hue: CExpr, height: Height },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Height {
+    Modulus,
+    Real,
+}
+
+impl Height {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Modulus => "modulus",
+            Self::Real => "real",
+        }
+    }
 }
 
 /// `left - right` of a relation over the plane: real in `x` and `y`, or complex in `z`, which counts only where
@@ -213,6 +235,31 @@ fn rename(node: &mut Node, from: &str, to: &str) {
             rename(right, from, to);
         }
         Node::Call(_, args) | Node::Tuple(args) => args.iter_mut().for_each(|arg| rename(arg, from, to)),
+    }
+}
+
+const TO_REAL: [Builtin; 4] = [Builtin::Real, Builtin::Imag, Builtin::Abs, Builtin::Arg];
+
+/// Real wherever it is defined: built from numbers, `x`, `y`, parameters and `Re`, `Im`, `abs` or `arg` of anything.
+fn real_valued(node: &Node) -> bool {
+    match node {
+        Node::Num(_) => true,
+        Node::Var(name) => !matches!(name.as_str(), "z" | "i"),
+        Node::Neg(arg) | Node::Fact(arg) => real_valued(arg),
+        Node::Bin(_, left, right) => real_valued(left) && real_valued(right),
+        Node::Call(Callee::Builtin(builtin), args) => TO_REAL.contains(builtin) || args.iter().all(real_valued),
+        Node::Call(Callee::User(_), _) | Node::Tuple(_) => false,
+    }
+}
+
+/// The first complex argument of `Re`, `Im`, `abs` or `arg` inside a real-valued row.
+fn complex_part(node: &Node) -> Option<&Node> {
+    match node {
+        Node::Call(Callee::Builtin(builtin), args) if TO_REAL.contains(builtin) && args.len() == 1 => Some(&args[0]),
+        Node::Neg(arg) | Node::Fact(arg) => complex_part(arg),
+        Node::Bin(_, left, right) => complex_part(left).or_else(|| complex_part(right)),
+        Node::Call(_, args) | Node::Tuple(args) => args.iter().find_map(complex_part),
+        _ => None,
     }
 }
 
@@ -405,6 +452,10 @@ impl Analysis<'_> {
 
     fn plot(&mut self, mode: Mode, row: usize, input: &RowInput) -> Result<Outcome, MathError> {
         let statement = self.statement(row).clone();
+        // `w = f(z)` names its surface; only the right side has to resolve.
+        if mode == Mode::ComplexSpace {
+            return self.plot_complex_space(&statement);
+        }
         let mut nodes = vec![&statement.right];
         if let Some(left) = &statement.left {
             nodes.push(left);
@@ -520,6 +571,36 @@ impl Analysis<'_> {
         }
     }
 
+    /// Rows of the complex 3D sheet: `w = f(z)` or a bare expression in `z` (or `x` and `y`) becomes a surface over
+    /// the plane, and a number becomes a point on the floor.
+    fn plot_complex_space(&mut self, statement: &Statement) -> Result<Outcome, MathError> {
+        if statement.relation != Relation::Eq {
+            return Err(MathError::new("error.unsupported", ""));
+        }
+        let body = match (&statement.left, &statement.right) {
+            (None, Node::Tuple(_)) => return Err(MathError::new("error.tuple", "")),
+            (None, expr) => expr,
+            (Some(Node::Var(name)), right) if !matches!(name.as_str(), "x" | "y" | "z") => {
+                if constant(name).is_some() || name == "i" {
+                    return Err(MathError::new("error.reserved", name.clone()));
+                }
+                right
+            }
+            _ => return Err(MathError::new("error.unsupported", "")),
+        };
+        self.require(&[body], &[])?;
+        if plane_free(body) {
+            let value = self.constant_c(body)?;
+            return Ok(Outcome::Plotted(Plot::ComplexPoint { re: value.re, im: if value.is_real() { 0.0 } else { value.im }, name: String::new() }));
+        }
+        let allow = |name: &str| !is_reserved(name) || matches!(name, "x" | "y" | "z");
+        // A real-valued row such as `Re(z^2) / 5` rises to its signed value, coloured by the complex value inside.
+        let (height, hue) = if real_valued(body) { (Height::Real, complex_part(body).unwrap_or(body)) } else { (Height::Modulus, body) };
+        let expr = self.compile_c(body, &allow)?;
+        let hue = self.compile_c(hue, &allow)?;
+        Ok(Outcome::Plotted(Plot::ComplexSurface { expr, hue, height }))
+    }
+
     /// Rows of a 3D sheet: surfaces over two axes, space curves and points.
     fn plot_space(&mut self, statement: &Statement, input: &RowInput) -> Result<Outcome, MathError> {
         if statement.relation != Relation::Eq {
@@ -573,7 +654,8 @@ impl Analysis<'_> {
 }
 
 pub fn analyze(mode: Mode, inputs: &[RowInput]) -> Sheet {
-    COMPLEX_NAMES.with(|flag| flag.set(mode == Mode::Complex));
+    let complex_names = matches!(mode, Mode::Complex | Mode::ComplexSpace);
+    COMPLEX_NAMES.with(|flag| flag.set(complex_names));
     let tokens: Vec<Option<Result<Vec<Tok>, MathError>>> =
         inputs.iter().map(|input| (!input.text.trim().is_empty()).then(|| tokenize(&input.text))).collect();
     let user_functions: HashSet<String> = tokens.iter().flatten().flatten().filter_map(|tokens| defined_function(tokens)).collect();
@@ -654,7 +736,7 @@ pub fn analyze(mode: Mode, inputs: &[RowInput]) -> Sheet {
         function_index,
         env,
         functions,
-        complex: mode == Mode::Complex,
+        complex: complex_names,
         cenv,
         cfunctions,
         state: HashMap::new(),
@@ -682,6 +764,10 @@ pub fn analyze(mode: Mode, inputs: &[RowInput]) -> Sheet {
                             _ => false,
                         },
                     },
+                    Definition::Function { param, .. } if param == "z" && mode == Mode::ComplexSpace => {
+                        let body = analysis.cfunctions[analysis.function_index[name]].body.clone();
+                        Outcome::Plotted(Plot::ComplexSurface { expr: body.clone(), hue: body, height: Height::Modulus })
+                    }
                     Definition::Function { param, .. } if param == "x" && !analysis.complex => {
                         let index = analysis.function_index[name];
                         Outcome::Plotted(Plot::FunctionX(analysis.functions[index].body.clone()))
@@ -720,6 +806,19 @@ mod tests {
             Outcome::Error(error) => error,
             other => panic!("row {row} has no error: {other:?}"),
         }
+    }
+
+    #[test]
+    fn complex_3d_rows_become_surfaces_and_floor_points() {
+        let sheet = sheet(Mode::ComplexSpace, &["w = z^2", "f(z) = conj(z)", "Re(z^3) / 5 - 1", "w_1 = 1 + i", "abs(z) < 1", "z = 2", "r e^(iθ)", "r = 2", "θ = 1", "x y / 4"]);
+        assert!(matches!(sheet.rows[0].plot(), Some(Plot::ComplexSurface { height: Height::Modulus, .. })), "{:?}", sheet.rows[0].outcome);
+        assert!(matches!(sheet.rows[1].plot(), Some(Plot::ComplexSurface { height: Height::Modulus, .. })));
+        assert!(matches!(sheet.rows[2].plot(), Some(Plot::ComplexSurface { height: Height::Real, .. })));
+        assert!(matches!(sheet.rows[3].plot(), Some(Plot::ComplexPoint { re, im, .. }) if *re == 1.0 && *im == 1.0));
+        assert_eq!(error(&sheet, 4).key, "error.unsupported");
+        assert_eq!(error(&sheet, 5).key, "error.unsupported");
+        assert!(matches!(sheet.rows[6].plot(), Some(Plot::ComplexPoint { .. })));
+        assert!(matches!(sheet.rows[9].plot(), Some(Plot::ComplexSurface { height: Height::Real, .. })));
     }
 
     #[test]

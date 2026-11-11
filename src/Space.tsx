@@ -7,13 +7,13 @@ import { uiText } from './localization'
 import type { Row } from './model'
 import { getStore } from './store'
 import { formatNumber } from './ticks'
+import type { SpaceView } from './views'
 
 /** x towards the lower right, y towards the upper right, z up, the cube [-10, 10]³ in view. */
 export const HOME_CAMERA: Camera = { yaw: -0.6, pitch: 0.45, range: 10 }
 const MIN_RANGE = 1e-3
 const MAX_RANGE = 1e5
 const MAX_PITCH = Math.PI / 2 - 0.01
-const AXIS_NAMES = ['x', 'y', 'z']
 
 /** A resolved colour as RGB, for shading; null when the format is unknown. */
 export function rgb(color: string): [number, number, number] | null {
@@ -42,7 +42,14 @@ function trace(ctx: CanvasRenderingContext2D, points: Float64Array): void {
   }
 }
 
-export function drawSpace(ctx: CanvasRenderingContext2D, records: readonly SpaceRecord[], colors: readonly string[], size: Size, theme: Theme): void {
+/** A domain-coloured cell: the record's value is `32 · shade` rounded plus the hue in [0, 1); red is a positive real value. */
+export function hueFill(value: number): string {
+  const shade = Math.max(0, Math.min(1, Math.floor(value) / 32))
+  const hue = value - Math.floor(value)
+  return `hsl(${Math.round(hue * 360)}, 70%, ${Math.round(18 + shade * 46)}%)`
+}
+
+export function drawSpace(ctx: CanvasRenderingContext2D, records: readonly SpaceRecord[], colors: readonly string[], size: Size, theme: Theme, axisNames: readonly string[] = ['x', 'y', 'z']): void {
   ctx.fillStyle = theme.background
   ctx.fillRect(0, 0, size.width, size.height)
   ctx.lineJoin = 'round'
@@ -58,8 +65,8 @@ export function drawSpace(ctx: CanvasRenderingContext2D, records: readonly Space
   }
   for (const record of records) {
     const color = colors[record.row] ?? theme.axis
-    if (record.kind === SPACE.polygon) {
-      const fill = shaded(color, record.value)
+    if (record.kind === SPACE.polygon || record.kind === SPACE.huePolygon) {
+      const fill = record.kind === SPACE.huePolygon ? hueFill(record.value) : shaded(color, record.value)
       ctx.fillStyle = fill
       // A hairline in the same colour closes the seams between neighbouring cells.
       ctx.strokeStyle = fill
@@ -92,7 +99,7 @@ export function drawSpace(ctx: CanvasRenderingContext2D, records: readonly Space
       ctx.stroke()
     } else if (record.kind === SPACE.tick || record.kind === SPACE.axisName) {
       const name = record.kind === SPACE.axisName
-      const text = name ? AXIS_NAMES[record.row] ?? '' : formatNumber(record.value, 6)
+      const text = name ? axisNames[record.row] ?? '' : formatNumber(record.value, 6)
       ctx.font = name ? `600 13px ${theme.font.replace(/^\S+\s+/, '')}` : theme.font
       ctx.textAlign = name ? 'center' : 'left'
       ctx.textBaseline = name ? 'middle' : 'top'
@@ -108,21 +115,22 @@ export function drawSpace(ctx: CanvasRenderingContext2D, records: readonly Space
 }
 
 interface SpaceProps {
+  view: SpaceView
   rows: readonly Row[]
   engine: PlotEngine | null
 }
 
 /** The 3D graph: drag to orbit, scroll or pinch to zoom; the kernel projects and orders everything per frame. */
-export const SpaceCanvas = ({ rows, engine }: SpaceProps): ReactElement => {
+export const SpaceCanvas = ({ view, rows, engine }: SpaceProps): ReactElement => {
   const store = getStore()
   const wrapRef = React.useRef<HTMLDivElement>(null)
   const canvasRef = React.useRef<HTMLCanvasElement>(null)
   const sizeRef = React.useRef<Size>({ width: 0, height: 0 })
-  const cameraRef = React.useRef<Camera>(store.camera ?? HOME_CAMERA)
+  const cameraRef = React.useRef<Camera>(store.cameras[view.id] ?? HOME_CAMERA)
   const dragRef = React.useRef<{ id: number; x: number; y: number; camera: Camera } | null>(null)
   const frameRef = React.useRef<number | null>(null)
-  const inputs = React.useRef({ rows, engine })
-  inputs.current = { rows, engine }
+  const inputs = React.useRef({ view, rows, engine })
+  inputs.current = { view, rows, engine }
 
   const draw = React.useCallback((): void => {
     frameRef.current = null
@@ -130,16 +138,16 @@ export const SpaceCanvas = ({ rows, engine }: SpaceProps): ReactElement => {
     const ctx = canvas?.getContext('2d')
     const size = sizeRef.current
     if (!canvas || !ctx || size.width <= 0 || size.height <= 0) return
-    const { rows, engine } = inputs.current
+    const { view, rows, engine } = inputs.current
     let records: SpaceRecord[] = []
     try {
-      records = engine ? engine.space(rows, size.width, size.height, cameraRef.current) : []
+      records = engine ? engine.space(view.id, rows, size.width, size.height, cameraRef.current) : []
     } catch {
       records = []
     }
     const dpr = canvas.ownerDocument.defaultView?.devicePixelRatio || 1
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
-    drawSpace(ctx, records, rows.map((row) => colorOf(row.color)), size, readTheme(canvas))
+    drawSpace(ctx, records, rows.map((row) => colorOf(row.color)), size, readTheme(canvas), view.axisNames)
   }, [])
 
   const invalidate = React.useCallback((): void => {
@@ -150,9 +158,15 @@ export const SpaceCanvas = ({ rows, engine }: SpaceProps): ReactElement => {
   const setCamera = React.useCallback((next: Camera): void => {
     const camera = { yaw: next.yaw, pitch: Math.max(-MAX_PITCH, Math.min(MAX_PITCH, next.pitch)), range: Math.max(MIN_RANGE, Math.min(MAX_RANGE, next.range)) }
     cameraRef.current = camera
-    store.camera = camera
+    store.cameras[inputs.current.view.id] = camera
     invalidate()
   }, [invalidate, store])
+
+  // Each 3D sheet keeps its own camera.
+  React.useEffect(() => {
+    cameraRef.current = store.cameras[view.id] ?? HOME_CAMERA
+    invalidate()
+  }, [view, store, invalidate])
 
   React.useEffect(() => { invalidate() }, [rows, engine, invalidate])
 
@@ -240,7 +254,7 @@ export const SpaceCanvas = ({ rows, engine }: SpaceProps): ReactElement => {
         ref={canvasRef}
         className="grapher-canvas grapher-canvas-space"
         tabIndex={0}
-        aria-label={uiText('graph.canvas3d', { mode: uiText('mode.space') })}
+        aria-label={uiText('graph.canvas3d', { mode: uiText(`mode.${view.id}`) })}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={endDrag}

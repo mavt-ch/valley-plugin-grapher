@@ -4,7 +4,7 @@
 //! In: `text, from, to, hidden` per row. Out, per row, a kind and its fields:
 //! `empty` · `error key param missing,names` · `param name value slider` · `value number` · `function x|y` ·
 //! `definition name` · `polar from to` · `curve from to` · `point x y` · `implicit` · `surface x|y|z` ·
-//! `curve3 from to` · `point3 x y z` · `region strict|loose` · `cpoint re im name`.
+//! `curve3 from to` · `point3 x y z` · `region strict|loose` · `cpoint re im name` · `csurface modulus|real`.
 
 use crate::sheet::{Outcome, Plot, RowInput, Sheet};
 
@@ -58,6 +58,7 @@ pub fn write_outcomes(sheet: &Sheet) -> String {
                 Outcome::Plotted(Plot::Surface { axis, .. }) => vec!["surface".into(), axis.name().into()],
                 Outcome::Plotted(Plot::Curve3 { from, to, .. }) => vec!["curve3".into(), number(*from), number(*to)],
                 Outcome::Plotted(Plot::Point3 { x, y, z }) => vec!["point3".into(), number(*x), number(*y), number(*z)],
+                Outcome::Plotted(Plot::ComplexSurface { height, .. }) => vec!["csurface".into(), height.name().into()],
             };
             fields.join(&field)
         })

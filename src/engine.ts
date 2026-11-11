@@ -1,14 +1,15 @@
 import type { ValleyPluginApi } from '@valley/plugin-sdk'
-import { MODE_INDEX, type Mode, type Row } from './model'
+import { STRIDE } from './draw'
+import type { Row } from './model'
+import { viewOf, type Mode } from './views'
+
+export { STRIDE }
 
 /** The Rust kernel (`src/wasm`, declared as `plot` in config.json): parsing, analysis and sampling. */
 const MODULE_ID = 'plot'
 const RECORD = '\u001e'
 const FIELD = '\u001f'
-/** Values per sampled point: screen x, screen y, world x, world y, parameter. */
-export const STRIDE = 5
-
-export type RowKind = 'empty' | 'error' | 'param' | 'value' | 'function' | 'definition' | 'polar' | 'curve' | 'point' | 'implicit' | 'surface' | 'curve3' | 'point3' | 'region' | 'cpoint'
+export type RowKind = 'empty' | 'error' | 'param' | 'value' | 'function' | 'definition' | 'polar' | 'curve' | 'point' | 'implicit' | 'surface' | 'curve3' | 'point3' | 'region' | 'cpoint' | 'csurface'
 
 export interface RowError {
   key: string
@@ -69,11 +70,11 @@ export interface SpaceRecord {
   points: Float64Array
 }
 
-export const SPACE = { polygon: 0, segment: 1, point: 2, box: 10, grid: 11, gridMajor: 12, axis: 13, tick: 14, axisName: 15 } as const
+export const SPACE = { polygon: 0, segment: 1, point: 2, huePolygon: 3, box: 10, grid: 11, gridMajor: 12, axis: 13, tick: 14, axisName: 15 } as const
 
 export interface PlotEngine {
   analyze(mode: Mode, rows: readonly Row[]): RowAnalysis[]
-  space(rows: readonly Row[], width: number, height: number, camera: Camera): SpaceRecord[]
+  space(mode: Mode, rows: readonly Row[], width: number, height: number, camera: Camera): SpaceRecord[]
   sample(mode: Mode, rows: readonly Row[], width: number, height: number, view: Viewport): SamplePath[]
   /** `f(value)` of a function row, for tracing under the pointer. */
   evaluate(mode: Mode, rows: readonly Row[], row: number, value: number): number
@@ -110,6 +111,7 @@ export function decodeOutcomes(text: string, count: number): RowAnalysis[] {
       case 'point3': return { kind, x: Number(a), y: Number(b), z: Number(c) }
       case 'region': return { kind, strict: a === 'strict' }
       case 'cpoint': return { kind, x: Number(a), y: Number(b), ...(c ? { name: c } : {}) }
+      case 'csurface': return { kind }
       case 'definition': return { kind, name: a }
       case 'polar':
       case 'curve': return { kind, from: Number(a), to: Number(b) }
@@ -161,13 +163,14 @@ export function createPlotEngine(exports: PlotExports, memory: WebAssembly.Memor
   const decoder = new TextDecoder()
   const load = (mode: Mode, rows: readonly Row[]): RowAnalysis[] => {
     const input = encodeRows(rows)
-    const next = `${MODE_INDEX[mode]}${RECORD}${input}`
+    const kernel = viewOf(mode).kernel
+    const next = `${kernel}${RECORD}${input}`
     if (next === key) return analyses
     const bytes = encoder.encode(input)
     // Every call may grow the memory and detach earlier buffers, so each view is taken after its call.
     const target = exports.plot_input(bytes.length)
     new Uint8Array(memory.buffer, target, bytes.length).set(bytes)
-    const length = exports.plot_analyze(MODE_INDEX[mode])
+    const length = exports.plot_analyze(kernel)
     const text = decoder.decode(new Uint8Array(memory.buffer, exports.plot_text(), length).slice())
     analyses = decodeOutcomes(text, rows.length)
     key = next
@@ -181,8 +184,8 @@ export function createPlotEngine(exports: PlotExports, memory: WebAssembly.Memor
       const at = exports.plot_samples()
       return decodePaths(new Float64Array(memory.buffer, at, count).slice())
     },
-    space(rows, width, height, camera) {
-      load('space', rows)
+    space(mode, rows, width, height, camera) {
+      load(mode, rows)
       const count = exports.plot_space(width, height, camera.yaw, camera.pitch, camera.range)
       const at = exports.plot_samples()
       return decodeSpace(new Float64Array(memory.buffer, at, count).slice())

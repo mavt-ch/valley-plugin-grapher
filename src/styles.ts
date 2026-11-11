@@ -18,11 +18,29 @@ const CSS = `
   background:var(--danger-tint-bg); color:var(--danger-tint-text); font-size:var(--smaller-font-size); overflow-wrap:anywhere; }
 
 /* ---- the expression list ---- */
-.grapher-list { flex:1 1 auto; min-height:0; overflow-y:auto; }
-.grapher-row { display:grid; grid-template-columns:34px minmax(0, 1fr) 26px; align-items:start;
+.grapher-list { position:relative; flex:1 1 auto; min-height:0; overflow-y:auto; }
+.grapher-list[data-dragging] { cursor:grabbing; user-select:none; }
+.grapher-row { display:grid; grid-template-columns:16px 26px minmax(0, 1fr) 26px; align-items:start;
   border-bottom:1px solid var(--border-light); }
 .grapher-row:focus-within { background:var(--hover-bg); }
+.grapher-row[data-dragging] { opacity:0.45; }
 .grapher-gutter { display:flex; flex-direction:column; align-items:center; gap:3px; padding-top:5px; min-height:34px; box-sizing:border-box; }
+
+/* The drag handle at the left edge of every typed row; the marker shows the gap a dropped row lands in. */
+.grapher-grip, .grapher-grip-spacer { width:16px; height:34px; }
+.grapher-grip { display:inline-flex; align-items:center; justify-content:center; padding:0 0 0 2px; border:none; background:none;
+  color:var(--text-tertiary); cursor:grab; opacity:0.45; touch-action:none;
+  transition:opacity var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out); }
+.grapher-grip svg { width:12px; height:12px; }
+.grapher-row:hover .grapher-grip, .grapher-row[data-dragging] .grapher-grip { opacity:1; }
+.grapher-grip:hover { color:var(--text-color); }
+.grapher-list[data-dragging] .grapher-grip { cursor:grabbing; }
+.grapher-drop-marker { position:absolute; left:0; right:0; height:2px; margin-top:-1.5px; background:var(--accent-color); pointer-events:none; z-index:1; }
+.grapher-warning { display:inline-flex; color:var(--danger-tint-text); }
+.grapher-warning svg { width:15px; height:15px; }
+.grapher-swatch-hue { border-color:transparent;
+  background:conic-gradient(hsl(0,70%,55%), hsl(60,70%,55%), hsl(120,70%,55%), hsl(180,70%,55%), hsl(240,70%,55%), hsl(300,70%,55%), hsl(360,70%,55%)); }
+.grapher-swatch-hue[aria-pressed='false'] { background:transparent; border-color:var(--text-tertiary); }
 .grapher-index { font-size:0.625rem; line-height:1; font-variant-numeric:tabular-nums; color:var(--text-tertiary); }
 .grapher-swatch { width:16px; height:16px; padding:0; border:2px solid var(--swatch); border-radius:50%;
   background:var(--swatch); cursor:pointer; transition:background-color var(--duration-fast) var(--ease-out); }
@@ -34,6 +52,37 @@ const CSS = `
 .grapher-input { box-sizing:border-box; width:100%; min-width:0; height:24px; margin:0; padding:0 2px; border:none; outline:none;
   background:transparent; color:var(--text-color); font-family:var(--mono-font); font-size:0.8125rem; }
 .grapher-input::placeholder { color:var(--text-tertiary); }
+
+/* A row not being edited shows its typeset form; the transparent input lies on top, so a click edits it. */
+.grapher-field { position:relative; min-width:0; }
+.grapher-field[data-typeset] .grapher-input { position:absolute; inset:0; height:100%; opacity:0; }
+.grapher-typeset { display:flex; align-items:center; min-height:24px; padding:0 2px; overflow:hidden; pointer-events:none; }
+.gm-math { display:inline-flex; align-items:center; flex-wrap:nowrap; white-space:nowrap; color:var(--text-color);
+  font-family:'Times New Roman', 'STIX Two Math', 'Cambria Math', serif; font-size:1rem; line-height:1.25; }
+.grapher-row[data-hidden] .gm-math { color:var(--text-secondary); }
+.gm-var { font-style:italic; padding-right:0.04em; }
+.gm-num, .gm-sym, .gm-fn { font-style:normal; }
+.gm-fn { padding-right:0.18em; }
+.gm-call { display:inline-flex; align-items:center; }
+.gm-call > .gm-sup { margin-left:-0.14em; margin-right:0.14em; }
+.gm-op { padding:0 0.22em; }
+.gm-rel { padding:0 0.3em; }
+.gm-comma { padding-right:0.25em; }
+.gm-sub { font-size:0.7em; vertical-align:-0.25em; font-style:normal; }
+.gm-pow { display:inline-flex; align-items:flex-start; }
+.gm-sup { font-size:0.72em; line-height:1; align-self:flex-start; margin-top:-0.15em; }
+.gm-frac { display:inline-flex; flex-direction:column; align-items:center; vertical-align:middle; margin:0 0.12em; font-size:0.86em; }
+.gm-frac-top, .gm-frac-bottom { display:inline-flex; align-items:center; padding:0 0.15em; }
+.gm-frac-top { border-bottom:1px solid currentColor; padding-bottom:0.08em; }
+.gm-frac-bottom { padding-top:0.08em; }
+.gm-group { display:inline-flex; align-items:center; }
+.gm-paren { display:inline-block; }
+.gm-paren-tall { transform:scaleY(1.9); }
+.gm-ghost { opacity:0.35; }
+.gm-root { display:inline-flex; align-items:stretch; }
+.gm-root-index { font-size:0.6em; margin-right:-0.35em; align-self:flex-start; }
+.gm-radical { display:inline-flex; align-items:flex-end; }
+.gm-radicand { display:inline-flex; align-items:center; border-top:1px solid currentColor; padding:0.06em 0.12em 0 0.06em; margin-top:0.08em; }
 .grapher-delete, .grapher-row-spacer { width:26px; height:34px; }
 .grapher-delete { display:inline-flex; align-items:center; justify-content:center; padding:0; border:none; background:none;
   color:var(--text-tertiary); cursor:pointer; opacity:0; transition:opacity var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out); }
@@ -93,7 +142,7 @@ const CSS = `
 .grapher-zoom-button:focus-visible { outline:2px solid var(--accent-color); outline-offset:2px; }
 
 @media (prefers-reduced-motion: reduce) {
-  .grapher-mode, .grapher-swatch, .grapher-delete, .grapher-zoom-button { transition:none; }
+  .grapher-mode, .grapher-swatch, .grapher-delete, .grapher-grip, .grapher-zoom-button { transition:none; }
 }
 `
 

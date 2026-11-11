@@ -32,7 +32,7 @@ describe('the sidebar', () => {
     mount()
     render(<Sidebar />)
     const radios = await screen.findAllByRole('radio')
-    expect(radios.map((radio) => radio.getAttribute('aria-label'))).toEqual(['Cartesian', 'Trigonometric', 'Polar', 'Parametric', '3D', 'Complex'])
+    expect(radios.map((radio) => radio.getAttribute('aria-label'))).toEqual(['Cartesian', 'Trigonometric', 'Polar', 'Parametric', '3D', 'Complex', 'Complex 3D'])
     expect(radios[0].getAttribute('aria-checked')).toBe('true')
     expect(screen.getByDisplayValue('y = x^2 - 2')).toBeTruthy()
     fireEvent.click(radios[2])
@@ -51,6 +51,37 @@ describe('the sidebar', () => {
     expect(await screen.findByDisplayValue('m = 1')).toBeTruthy()
     expect(await screen.findByRole('slider', { name: 'Value of m' })).toBeTruthy()
     await waitFor(async () => expect(await mock.api.data.files.readText('graphs.json')).toContain('"m = 1"'), { timeout: 2000 })
+  })
+
+  it('typesets rows that are not being edited', async () => {
+    mount()
+    const { container } = render(<Sidebar />)
+    await screen.findByDisplayValue('y = x^2 - 2')
+    const first = container.querySelector('.grapher-typeset')
+    expect(first?.textContent).toBe('y=x2−2')
+    expect(first?.querySelector('.gm-sup')?.textContent).toBe('2')
+    const input = screen.getAllByRole('textbox', { name: /Expression/ })[0]
+    fireEvent.focus(input)
+    expect(input.closest('.grapher-field')?.querySelector('.grapher-typeset')).toBeNull()
+  })
+
+  it('moves a row by dragging its handle', async () => {
+    mount()
+    const { container } = render(<Sidebar />)
+    await screen.findByDisplayValue('y = x^2 - 2')
+    const list = container.querySelector<HTMLElement>('.grapher-list')!
+    const rows = Array.from(container.querySelectorAll<HTMLElement>('[data-row-index]'))
+    rows.forEach((row, index) => {
+      row.getBoundingClientRect = () => ({ top: index * 40, bottom: index * 40 + 40, height: 40, left: 0, right: 200, width: 200, x: 0, y: index * 40, toJSON: () => ({}) })
+    })
+    list.getBoundingClientRect = () => ({ top: -100, bottom: 1000, height: 1100, left: 0, right: 200, width: 200, x: 0, y: -100, toJSON: () => ({}) })
+    const grips = screen.getAllByRole('button', { name: 'Drag to move' })
+    expect(grips).toHaveLength(4)
+    fireEvent.pointerDown(grips[0], { button: 0, pointerId: 1, clientY: 20 })
+    fireEvent.pointerMove(list, { pointerId: 1, clientY: 150 })
+    expect(container.querySelector('.grapher-drop-marker')).toBeTruthy()
+    fireEvent.pointerUp(list, { pointerId: 1, clientY: 150 })
+    await waitFor(() => expect(screen.getAllByRole('textbox', { name: /Expression/ }).map((input) => (input as HTMLInputElement).value)).toEqual(['y = a x + b', 'a = 1', 'b = 0', 'y = x^2 - 2', '']))
   })
 
   it('leaves a file it cannot read untouched', async () => {
@@ -72,6 +103,14 @@ describe('the graph tab', () => {
     expect(await screen.findByDisplayValue('z = (x^2 + y^2) / 5 - 6')).toBeTruthy()
     expect(await screen.findByLabelText(/^3D graph/)).toBeTruthy()
     expect(screen.getByDisplayValue('6π')).toBeTruthy()
+  })
+
+  it('draws w = f(z) over the complex plane in the complex 3D view', async () => {
+    mount()
+    render(<><Sidebar /><GraphTab /></>)
+    fireEvent.click((await screen.findAllByRole('radio'))[6])
+    expect(await screen.findByDisplayValue('w = (z^2 - 4) / 4')).toBeTruthy()
+    expect(await screen.findByLabelText(/^Complex 3D graph/)).toBeTruthy()
   })
 
   it('names the active coordinate system and offers zoom controls', async () => {

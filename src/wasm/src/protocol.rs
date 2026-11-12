@@ -1,10 +1,11 @@
 //! The text the JavaScript side exchanges with the module. Rows are separated by U+001E and fields by U+001F,
 //! which an expression never contains (the plugin strips both before encoding).
 //!
-//! In: `text, from, to, hidden` per row. Out, per row, a kind and its fields:
+//! In: `text, from, to, hidden, from2, to2` per row (the second range is optional). Out, per row, a kind and its fields:
 //! `empty` · `error key param missing,names` · `param name value slider` · `value number` · `function x|y` ·
 //! `definition name` · `polar from to` · `curve from to` · `point x y` · `implicit` · `surface x|y|z` ·
-//! `curve3 from to` · `point3 x y z` · `region strict|loose` · `cpoint re im name` · `csurface modulus|real`.
+//! `curve3 from to` · `point3 x y z` · `region strict|loose` · `cpoint re im name` · `csurface modulus|real` ·
+//! `coords given u v ufrom uto vfrom vto` (a surface in curvilinear coordinates; the names are its coordinates).
 
 use crate::sheet::{Outcome, Plot, RowInput, Sheet};
 
@@ -19,8 +20,8 @@ pub fn read_rows(text: &str) -> Vec<RowInput> {
         .map(|record| {
             let mut fields = record.split(FIELD);
             let mut next = || fields.next().unwrap_or_default().to_string();
-            let (text, from, to, hidden) = (next(), next(), next(), next());
-            RowInput { text, from, to, hidden: hidden == "1" }
+            let (text, from, to, hidden, from2, to2) = (next(), next(), next(), next(), next(), next());
+            RowInput { text, from, to, hidden: hidden == "1", from2, to2 }
         })
         .collect()
 }
@@ -59,6 +60,10 @@ pub fn write_outcomes(sheet: &Sheet) -> String {
                 Outcome::Plotted(Plot::Curve3 { from, to, .. }) => vec!["curve3".into(), number(*from), number(*to)],
                 Outcome::Plotted(Plot::Point3 { x, y, z }) => vec!["point3".into(), number(*x), number(*y), number(*z)],
                 Outcome::Plotted(Plot::ComplexSurface { height, .. }) => vec!["csurface".into(), height.name().into()],
+                Outcome::Plotted(Plot::CoordSurface { system, given, u, v, .. }) => {
+                    let names = system.names();
+                    vec!["coords".into(), names[*given].into(), names[u.coord].into(), names[v.coord].into(), number(u.from), number(u.to), number(v.from), number(v.to)]
+                }
             };
             fields.join(&field)
         })
@@ -86,5 +91,17 @@ mod tests {
         assert_eq!(records[4], "error\u{1f}error.unknown\u{1f}k\u{1f}k");
         assert!(read_rows("").is_empty());
         assert_eq!(number(f64::NEG_INFINITY), "-Infinity");
+    }
+
+    #[test]
+    fn surfaces_in_coordinates_read_a_second_range() {
+        let rows = read_rows("r = 2\u{1f}\u{1f}π\u{1f}0\u{1f}-1\u{1f}3\u{1e}z = r^2\u{1f}\u{1f}\u{1f}0");
+        assert_eq!((rows[0].from2.as_str(), rows[0].to2.as_str()), ("-1", "3"));
+        assert!(rows[1].from2.is_empty() && rows[1].to2.is_empty());
+        let text = write_outcomes(&analyze(Mode::Cylindrical, &rows));
+        let records: Vec<&str> = text.split(RECORD).collect();
+        assert!(records[0].starts_with("coords\u{1f}r\u{1f}φ\u{1f}z\u{1f}0\u{1f}3.14159"), "{}", records[0]);
+        assert!(records[0].ends_with("\u{1f}-1\u{1f}3"));
+        assert_eq!(records[1], "coords\u{1f}z\u{1f}φ\u{1f}r\u{1f}0\u{1f}6.283185307179586\u{1f}0\u{1f}Infinity");
     }
 }

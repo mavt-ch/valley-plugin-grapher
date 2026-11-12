@@ -4,7 +4,8 @@
 //! has to fill in order. The frame (box, floor grid, axes, tick labels) comes first in the same stream.
 //!
 //! The complex 3D sheet uses the same frame with the complex plane as the floor: `w = f(z)` rises to |f(z)| and
-//! each cell is coloured by arg f(z).
+//! each cell is coloured by arg f(z). Surfaces in cylindrical coordinates are sampled over their two parameter
+//! coordinates, converted to (x, y, z) and clipped to the cube on all three axes.
 //!
 //! Records: `[kind, row or axis, shade or value, count]`, then `count` screen points `[x, y]`.
 
@@ -12,7 +13,7 @@ use std::f64::consts::TAU;
 
 use crate::complex::{self, C64, CExpr, CUserFn};
 use crate::eval::{Expr, UserFn, eval};
-use crate::sheet::{Axis3, Height, Plot, Sheet, T, X, Y, Z};
+use crate::sheet::{Axis3, Height, Plot, Sheet, Span, System, T, X, Y, Z};
 
 pub const POLYGON: f64 = 0.0;
 pub const SEGMENT: f64 = 1.0;
@@ -153,6 +154,11 @@ fn clip(polygon: &[Vec3], axis: usize, limit: f64, upper: bool) -> Vec<Vec3> {
     out
 }
 
+/// The part of a polygon inside the cube [-range, range] along each of `axes`.
+fn clip_cube(polygon: &[Vec3], axes: &[usize], range: f64) -> Vec<Vec3> {
+    axes.iter().fold(polygon.to_vec(), |polygon, axis| clip(&clip(&polygon, *axis, range, true), *axis, -range, false))
+}
+
 /// The part of a segment inside the cube (Liang–Barsky).
 fn clip_segment(a: Vec3, b: Vec3, range: f64) -> Option<(Vec3, Vec3)> {
     let (mut t0, mut t1) = (0.0_f64, 1.0_f64);
@@ -215,7 +221,49 @@ impl Scene<'_> {
                 grid[j * stride + i] = p;
             }
         }
-        self.mesh(row, &grid, w, None);
+        self.mesh(row, &grid, &[w], None);
+    }
+
+    /// The points of a surface sampled on a (CELLS + 1)² grid over `u` × `v`; `point` maps parameter values to (x, y, z).
+    fn sample_grid(&mut self, u: (f64, f64), v: (f64, f64), point: impl Fn(&mut Self, f64, f64) -> Vec3) -> Vec<Vec3> {
+        let stride = CELLS + 1;
+        let mut grid = Vec::with_capacity(stride * stride);
+        for j in 0..=CELLS {
+            let b = v.0 + (v.1 - v.0) * j as f64 / CELLS as f64;
+            for i in 0..=CELLS {
+                let a = u.0 + (u.1 - u.0) * i as f64 / CELLS as f64;
+                grid.push(point(self, a, b));
+            }
+        }
+        grid
+    }
+
+    /// A surface in curvilinear coordinates: `given` as a function of the coordinates `u` and `v`. Angles keep their
+    /// range; radii and heights are cut to the part of their range that can reach into the cube.
+    fn coord_surface(&mut self, row: f64, expr: &Expr, system: System, given: usize, u: Span, v: Span) {
+        let range = self.camera.range;
+        let reach = |span: Span| -> (f64, f64) {
+            if system.is_angle(span.coord) {
+                return (span.from, span.to);
+            }
+            let limit = system.reach(span.coord) * range;
+            (span.from.clamp(-limit, limit), span.to.clamp(-limit, limit))
+        };
+        let (a, b) = (reach(u), reach(v));
+        if a.0 == a.1 || b.0 == b.1 {
+            return;
+        }
+        let slots = system.slots();
+        let grid = self.sample_grid(a, b, |scene, first, second| {
+            let mut c = [0.0; 3];
+            c[u.coord] = first;
+            c[v.coord] = second;
+            scene.env[slots[u.coord]] = first;
+            scene.env[slots[v.coord]] = second;
+            c[given] = eval(expr, scene.env, scene.functions);
+            system.cartesian(c)
+        });
+        self.mesh(row, &grid, &[0, 1, 2], None);
     }
 
     /// `w = f(z)` over the complex plane, one hue per cell from arg of `hue` at the cell's centre.
@@ -250,26 +298,27 @@ impl Scene<'_> {
                 hues[j * CELLS + i] = if turn.is_finite() { turn.min(0.999) } else { 0.0 };
             }
         }
-        self.mesh(row, &grid, 2, Some(&hues));
+        self.mesh(row, &grid, &[2], Some(&hues));
     }
 
-    /// The cells of a sampled grid, clipped to the cube and shaded by their normal; `w` is the coordinate the
-    /// surface gives. With `hues`, cells are domain-coloured records.
-    fn mesh(&mut self, row: f64, grid: &[Vec3], w: usize, hues: Option<&[f64]>) {
+    /// The cells of a sampled grid, clipped to the cube along `axes` and shaded by their normal: the coordinate a
+    /// graph surface gives, or all three for a surface whose grid is not the floor. With `hues`, cells are
+    /// domain-coloured records.
+    fn mesh(&mut self, row: f64, grid: &[Vec3], axes: &[usize], hues: Option<&[f64]>) {
         let range = self.camera.range;
         let stride = CELLS + 1;
         let light = normalize(LIGHT).unwrap_or([0.0, 0.0, 1.0]);
         for j in 0..CELLS {
             for i in 0..CELLS {
                 let quad = [grid[j * stride + i], grid[j * stride + i + 1], grid[(j + 1) * stride + i + 1], grid[(j + 1) * stride + i]];
-                if quad.iter().any(|p| !p[w].is_finite()) {
+                if quad.iter().any(|p| p.iter().any(|value| !value.is_finite())) {
                     continue;
                 }
-                // A cell rising through the whole cube straddles an asymptote, not a surface.
-                if quad.iter().any(|p| p[w] > range) && quad.iter().any(|p| p[w] < -range) {
+                // A cell reaching through the whole cube straddles an asymptote, not a surface.
+                if axes.iter().any(|w| quad.iter().any(|p| p[*w] > range) && quad.iter().any(|p| p[*w] < -range)) {
                     continue;
                 }
-                let clipped = clip(&clip(&quad, w, range, true), w, -range, false);
+                let clipped = clip_cube(&quad, axes, range);
                 if clipped.len() < 3 {
                     continue;
                 }
@@ -391,6 +440,7 @@ pub fn render(sheet: &mut Sheet, camera: Camera) -> Vec<f64> {
             Plot::Point3 { x, y, z } => scene.point(index, [*x, *y, *z]),
             Plot::ComplexSurface { expr, hue, height } => scene.complex_surface(index, expr, hue, *height),
             Plot::ComplexPoint { re, im, .. } => scene.point(index, [*re, *im, 0.0]),
+            Plot::CoordSurface { expr, system, given, u, v } => scene.coord_surface(index, expr, *system, *given, *u, *v),
             _ => {}
         }
     }
@@ -496,6 +546,37 @@ mod tests {
         assert!(hues.iter().any(|hue| *hue < 0.1) && hues.iter().any(|hue| (0.45..0.55).contains(hue)) && hues.iter().any(|hue| *hue > 0.9));
         assert_eq!(found.iter().filter(|r| r.kind == POINT).map(|r| r.row).collect::<Vec<_>>(), [3.0]);
         assert!(found.iter().all(|r| r.kind != POLYGON));
+    }
+
+    #[test]
+    fn a_polygon_is_clipped_to_the_cube_on_every_axis() {
+        let square = [[-15.0, -15.0, 12.0], [15.0, -15.0, 0.0], [15.0, 15.0, -12.0], [-15.0, 15.0, 0.0]];
+        let clipped = clip_cube(&square, &[0, 1, 2], 10.0);
+        assert!(clipped.len() >= 3);
+        assert!(clipped.iter().all(|p| p.iter().all(|value| value.abs() <= 10.0 + 1e-9)), "{clipped:?}");
+        assert!(clip_cube(&[[20.0, 0.0, 0.0], [21.0, 0.0, 0.0], [20.0, 1.0, 0.0]], &[0, 1, 2], 10.0).is_empty());
+    }
+
+    #[test]
+    fn cylindrical_surfaces_are_shaded_and_stay_inside_the_cube() {
+        let found = records_in(Mode::Cylindrical, &["r = 2", "z = r^2 / 4", "r = 1 + cos(φ)", "z = φ / 2", "φ = π/4", "r = 30"], CAMERA);
+        for row in 0..5 {
+            let polygons: Vec<&Record> = found.iter().filter(|r| r.kind == POLYGON && r.row == row as f64).collect();
+            assert!(polygons.len() > 1000, "row {row}: {}", polygons.len());
+            assert!(polygons.iter().all(|p| (0.3..=1.0).contains(&p.value) && p.points.len() >= 3));
+        }
+        // A cylinder wider than the cube's diagonal never reaches into it.
+        assert!(found.iter().all(|r| r.row != 5.0 || r.kind >= BOX));
+        // Seen from above, the cylinder r = 2 projects onto the circle of radius 2 about the axis.
+        let top = Camera { pitch: std::f64::consts::FRAC_PI_2, ..CAMERA };
+        let projector = Projector::new(&top);
+        let (cx, cy, _) = projector.screen([0.0, 0.0, 0.0]);
+        let radius = 2.0 * projector.scale;
+        for record in records_in(Mode::Cylindrical, &["r = 2"], top).iter().filter(|r| r.kind == POLYGON) {
+            for (x, y) in &record.points {
+                assert!((((x - cx).powi(2) + (y - cy).powi(2)).sqrt() - radius).abs() < 0.5, "{x}, {y}");
+            }
+        }
     }
 
     #[test]

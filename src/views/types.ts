@@ -8,10 +8,10 @@ export type { AxisUnits }
  * `ViewDefinition`, an entry in `src/views/index.ts`, a kernel mode in `src/wasm/src/sheet.rs` and its locale keys
  * (`mode.<id>`, `mode.<id>.hint`, `hint.<id>`).
  */
-export type Mode = 'cartesian' | 'polar' | 'parametric' | 'space' | 'complex' | 'complexSpace'
+export type Mode = 'cartesian' | 'polar' | 'parametric' | 'space' | 'cylindrical' | 'complex' | 'complexSpace'
 
-/** An example row of a fresh sheet: its text, or its text with a parameter range. */
-export type Example = string | readonly [text: string, from: string, to: string]
+/** An example row of a fresh sheet: its text, or its text with a parameter range (and a second one for a surface). */
+export type Example = string | readonly [text: string, from: string, to: string] | readonly [text: string, from: string, to: string, from2: string, to2: string]
 
 interface CommonView {
   id: Mode
@@ -39,6 +39,10 @@ export interface PlaneView extends CommonView {
 export interface SpaceView extends CommonView {
   canvas: 'space'
   axisNames: readonly [string, string, string]
+  /** Half the edge of the cube a fresh or reset view shows; 10 when not given. */
+  homeRange?: number
+  /** Surfaces in curvilinear coordinates: the placeholders of each coordinate's empty range fields. */
+  ranges?: Readonly<Record<string, readonly [from: string, to: string]>>
 }
 
 export type ViewDefinition = PlaneView | SpaceView

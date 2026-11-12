@@ -9,7 +9,7 @@ export { STRIDE }
 const MODULE_ID = 'plot'
 const RECORD = '\u001e'
 const FIELD = '\u001f'
-export type RowKind = 'empty' | 'error' | 'param' | 'value' | 'function' | 'definition' | 'polar' | 'curve' | 'point' | 'implicit' | 'surface' | 'curve3' | 'point3' | 'region' | 'cpoint' | 'csurface'
+export type RowKind = 'empty' | 'error' | 'param' | 'value' | 'function' | 'definition' | 'polar' | 'curve' | 'point' | 'implicit' | 'surface' | 'curve3' | 'point3' | 'region' | 'cpoint' | 'csurface' | 'coords'
 
 export interface RowError {
   key: string
@@ -35,6 +35,11 @@ export interface RowAnalysis {
   z?: number
   /** `region` rows: a strict inequality, drawn with a dashed boundary. */
   strict?: boolean
+  /** `coords` rows: the coordinate the expression gives and the two it runs over (`from`/`to`, then `from2`/`to2`). */
+  given?: string
+  over?: [string, string]
+  from2?: number
+  to2?: number
 }
 
 export type PathKind = 'line' | 'point' | 'region'
@@ -94,13 +99,13 @@ const EXPORTS: (keyof PlotExports)[] = ['plot_input', 'plot_analyze', 'plot_text
 const clean = (value: string): string => value.replace(/[\u001e\u001f]/g, ' ')
 
 export function encodeRows(rows: readonly Row[]): string {
-  return rows.map((row) => [clean(row.text), clean(row.from), clean(row.to), row.hidden ? '1' : '0'].join(FIELD)).join(RECORD)
+  return rows.map((row) => [clean(row.text), clean(row.from), clean(row.to), row.hidden ? '1' : '0', clean(row.from2), clean(row.to2)].join(FIELD)).join(RECORD)
 }
 
 export function decodeOutcomes(text: string, count: number): RowAnalysis[] {
   const records = count ? text.split(RECORD) : []
   return Array.from({ length: count }, (_, index): RowAnalysis => {
-    const [kind = 'empty', a = '', b = '', c = ''] = (records[index] ?? 'empty').split(FIELD)
+    const [kind = 'empty', a = '', b = '', c = '', ...rest] = (records[index] ?? 'empty').split(FIELD)
     switch (kind) {
       case 'error': return { kind, error: { key: a, param: b, missing: c ? c.split(',') : [] } }
       case 'param': return { kind, name: a, value: Number(b), slider: c === '1' }
@@ -112,6 +117,7 @@ export function decodeOutcomes(text: string, count: number): RowAnalysis[] {
       case 'region': return { kind, strict: a === 'strict' }
       case 'cpoint': return { kind, x: Number(a), y: Number(b), ...(c ? { name: c } : {}) }
       case 'csurface': return { kind }
+      case 'coords': return { kind, given: a, over: [b, c], from: Number(rest[0]), to: Number(rest[1]), from2: Number(rest[2]), to2: Number(rest[3]) }
       case 'definition': return { kind, name: a }
       case 'polar':
       case 'curve': return { kind, from: Number(a), to: Number(b) }

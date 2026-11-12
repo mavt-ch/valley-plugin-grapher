@@ -19,13 +19,19 @@ pub const Y: usize = 1;
 pub const T: usize = 2;
 pub const THETA: usize = 3;
 pub const Z: usize = 4;
+/// The radius r and the azimuth φ of cylindrical coordinates, named only on that sheet.
+pub const R: usize = 5;
+pub const PHI: usize = 6;
+const SLOTS: usize = 7;
 const RESERVED: [&str; 6] = ["x", "y", "z", "t", "θ", "r"];
 /// On the complex sheet `r`, `t` and θ are ordinary names (as in `r e^(iθ)`) and `i` is the imaginary unit.
 const RESERVED_COMPLEX: [&str; 4] = ["x", "y", "z", "i"];
+/// The cylindrical sheet reads (r, φ, z); θ and ρ are read as φ and r before analysis.
+const RESERVED_CYLINDRICAL: [&str; 5] = ["x", "y", "z", "r", "φ"];
 
 thread_local! {
     /// Set by `analyze` for the sheet being read.
-    static COMPLEX_NAMES: Cell<bool> = const { Cell::new(false) };
+    static SHEET_MODE: Cell<Mode> = const { Cell::new(Mode::Cartesian) };
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -38,6 +44,7 @@ pub enum Mode {
     Complex,
     /// The complex plane as the floor of a 3D sheet: `w = f(z)` rises to |f(z)|, coloured by arg f(z).
     ComplexSpace,
+    Cylindrical,
 }
 
 impl Mode {
@@ -49,9 +56,104 @@ impl Mode {
             4 => Self::Space,
             5 => Self::Complex,
             6 => Self::ComplexSpace,
+            7 => Self::Cylindrical,
             _ => Self::Cartesian,
         }
     }
+
+    fn reserved(self) -> &'static [&'static str] {
+        match self {
+            Self::Complex | Self::ComplexSpace => &RESERVED_COMPLEX,
+            Self::Cylindrical => &RESERVED_CYLINDRICAL,
+            _ => &RESERVED,
+        }
+    }
+
+    fn system(self) -> Option<System> {
+        match self {
+            Self::Cylindrical => Some(System::Cylindrical),
+            _ => None,
+        }
+    }
+}
+
+/// Curvilinear coordinates of a 3D sheet: cylindrical (r, φ, z) with the azimuth φ measured in the xy-plane from +x.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum System {
+    Cylindrical,
+}
+
+impl System {
+    /// The coordinates in order; a coordinate is its index here.
+    pub fn names(self) -> [&'static str; 3] {
+        match self {
+            Self::Cylindrical => ["r", "φ", "z"],
+        }
+    }
+
+    pub fn slots(self) -> [usize; 3] {
+        match self {
+            Self::Cylindrical => [R, PHI, Z],
+        }
+    }
+
+    /// The coordinate a bare expression gives: the height z, as on the 3D sheet.
+    fn bare(self) -> usize {
+        match self {
+            Self::Cylindrical => 2,
+        }
+    }
+
+    /// The two coordinates a surface runs over when `given` is the one its expression gives: angles first (azimuth,
+    /// then polar angle), then the radius, then the height; the first takes the row's range, the second its second range.
+    pub fn free(self, given: usize) -> [usize; 2] {
+        let order = match self {
+            Self::Cylindrical => [1, 0, 2],
+        };
+        let mut free = order.into_iter().filter(|coord| *coord != given);
+        [free.next().unwrap_or(0), free.next().unwrap_or(0)]
+    }
+
+    pub fn is_angle(self, coord: usize) -> bool {
+        match self {
+            Self::Cylindrical => coord == 1,
+        }
+    }
+
+    /// The range of a coordinate whose fields are empty: a full turn of the azimuth, radii from 0 and heights without
+    /// bound (both are cut to the visible cube when drawn).
+    pub fn default_span(self, coord: usize) -> (f64, f64) {
+        match (self, coord) {
+            (Self::Cylindrical, 1) => (0.0, TAU),
+            (Self::Cylindrical, 2) => (f64::NEG_INFINITY, f64::INFINITY),
+            _ => (0.0, f64::INFINITY),
+        }
+    }
+
+    /// How far a coordinate that is not an angle reaches into the cube [-1, 1]³: the height to its faces and the
+    /// cylindrical radius to its vertical edges.
+    pub fn reach(self, coord: usize) -> f64 {
+        match (self, coord) {
+            (Self::Cylindrical, 0) => std::f64::consts::SQRT_2,
+            _ => 1.0,
+        }
+    }
+
+    /// The point (x, y, z) of coordinates `c` given in this system's order.
+    pub fn cartesian(self, c: [f64; 3]) -> [f64; 3] {
+        match self {
+            Self::Cylindrical => [c[0] * c[1].cos(), c[0] * c[1].sin(), c[2]],
+        }
+    }
+}
+
+/// One parameter range of a surface: the coordinate and its bounds, which are infinite where a radius or height is
+/// left open to the edge of the cube.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Span {
+    pub coord: usize,
+    pub from: f64,
+    pub to: f64,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -61,6 +163,9 @@ pub struct RowInput {
     pub from: String,
     pub to: String,
     pub hidden: bool,
+    /// The second parameter range of a surface over two coordinates; empty means that coordinate's default.
+    pub from2: String,
+    pub to2: String,
 }
 
 #[derive(Clone, Debug)]
@@ -85,6 +190,9 @@ pub enum Plot {
     /// `w = f(z)` over the complex plane: the height is |f(z)|, or the value itself when the row is real-valued
     /// (`Re(z^2) / 5`), and `hue` is the complex value whose argument colours the surface.
     ComplexSurface { expr: CExpr, hue: CExpr, height: Height },
+    /// A surface in cylindrical or spherical coordinates: `given` is the coordinate the expression gives as a
+    /// function of the other two, which run over `u` (the row's range) and `v` (its second range).
+    CoordSurface { expr: Expr, system: System, given: usize, u: Span, v: Span },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -171,7 +279,7 @@ pub struct Sheet {
 }
 
 fn is_reserved(name: &str) -> bool {
-    if COMPLEX_NAMES.with(Cell::get) { RESERVED_COMPLEX.contains(&name) } else { RESERVED.contains(&name) }
+    SHEET_MODE.with(Cell::get).reserved().contains(&name)
 }
 
 /// Free of the plane's variables; the imaginary unit is a constant.
@@ -432,6 +540,11 @@ impl Analysis<'_> {
     }
 
     fn range(&mut self, input: &RowInput) -> Result<(f64, f64), MathError> {
+        self.bounds(&input.from, &input.to, (0.0, TAU), true)
+    }
+
+    /// A range typed into two fields, each falling back to its default when empty; only `finite` ranges refuse ±∞.
+    fn bounds(&mut self, from: &str, to: &str, fallback: (f64, f64), finite: bool) -> Result<(f64, f64), MathError> {
         let bound = |analysis: &mut Self, text: &str, fallback: f64| -> Result<f64, MathError> {
             if text.trim().is_empty() {
                 return Ok(fallback);
@@ -442,9 +555,10 @@ impl Analysis<'_> {
             }
             analysis.constant(&statement.right)
         };
-        let from = bound(self, &input.from, 0.0)?;
-        let to = bound(self, &input.to, TAU)?;
-        if !from.is_finite() || !to.is_finite() || from == to {
+        let from = bound(self, from, fallback.0)?;
+        let to = bound(self, to, fallback.1)?;
+        let valid = |value: f64| if finite { value.is_finite() } else { !value.is_nan() };
+        if !valid(from) || !valid(to) || from == to {
             return Err(MathError::new("error.range", ""));
         }
         Ok((from, to))
@@ -466,6 +580,9 @@ impl Analysis<'_> {
         }
         if mode == Mode::Space {
             return self.plot_space(&statement, input);
+        }
+        if let Some(system) = mode.system() {
+            return self.plot_coords(&statement, input, system);
         }
         if let (Some(left), right) = (&statement.left, &statement.right)
             && statement.relation != Relation::Eq
@@ -601,6 +718,53 @@ impl Analysis<'_> {
         Ok(Outcome::Plotted(Plot::ComplexSurface { expr, hue, height }))
     }
 
+    /// Rows of a cylindrical sheet: one coordinate as a function of the other two (or a bare expression for the height
+    /// z), and constant triples as points.
+    fn plot_coords(&mut self, statement: &Statement, input: &RowInput, system: System) -> Result<Outcome, MathError> {
+        if statement.relation != Relation::Eq {
+            return Err(MathError::new("error.unsupported", ""));
+        }
+        let names = system.names();
+        let free_names = |given: usize| system.free(given).map(|coord| names[coord]);
+        let (given, body) = match (&statement.left, &statement.right) {
+            (None, Node::Tuple(items)) => {
+                return match items.as_slice() {
+                    [a, b, c] if [a, b, c].iter().all(|item| variables(item).is_empty()) => {
+                        let [x, y, z] = system.cartesian([self.constant(a)?, self.constant(b)?, self.constant(c)?]);
+                        Ok(Outcome::Plotted(Plot::Point3 { x, y, z }))
+                    }
+                    _ => Err(MathError::new("error.unsupported", "")),
+                };
+            }
+            (None, expr) if variables(expr).is_empty() => return Ok(Outcome::Value(self.constant(expr)?)),
+            (None, expr) if only(expr, &free_names(system.bare())) => (system.bare(), expr),
+            (None, _) => return Err(MathError::new("error.unsupported", "")),
+            (Some(left), right) => {
+                if let Node::Var(name) = left
+                    && constant(name).is_some()
+                {
+                    return Err(MathError::new("error.reserved", name.clone()));
+                }
+                // `z = r` gives z; only when the left side is no coordinate does the right one name it.
+                let found = (0..3)
+                    .find(|coord| is_var(left, names[*coord]) && only(right, &free_names(*coord)))
+                    .map(|coord| (coord, right))
+                    .or_else(|| (0..3).find(|coord| is_var(right, names[*coord]) && only(left, &free_names(*coord))).map(|coord| (coord, left)));
+                found.ok_or_else(|| MathError::new("error.unsupported", ""))?
+            }
+        };
+        let [u, v] = system.free(given);
+        let over = free_names(given);
+        let expr = self.compile(body, &move |name| over.contains(&name) || !is_reserved(name))?;
+        let span = |analysis: &mut Self, coord: usize, from: &str, to: &str| -> Result<Span, MathError> {
+            let (from, to) = analysis.bounds(from, to, system.default_span(coord), system.is_angle(coord))?;
+            Ok(Span { coord, from, to })
+        };
+        let u = span(self, u, &input.from, &input.to)?;
+        let v = span(self, v, &input.from2, &input.to2)?;
+        Ok(Outcome::Plotted(Plot::CoordSurface { expr, system, given, u, v }))
+    }
+
     /// Rows of a 3D sheet: surfaces over two axes, space curves and points.
     fn plot_space(&mut self, statement: &Statement, input: &RowInput) -> Result<Outcome, MathError> {
         if statement.relation != Relation::Eq {
@@ -655,7 +819,14 @@ impl Analysis<'_> {
 
 pub fn analyze(mode: Mode, inputs: &[RowInput]) -> Sheet {
     let complex_names = matches!(mode, Mode::Complex | Mode::ComplexSpace);
-    COMPLEX_NAMES.with(|flag| flag.set(complex_names));
+    SHEET_MODE.with(|current| current.set(mode));
+    // Other spellings of a coordinate: t for θ on the polar sheet (except in a parametric pair), θ and ρ for φ and
+    // r on the cylindrical sheet.
+    let aliases: &[(&str, &str)] = match mode {
+        Mode::Polar => &[("t", "θ")],
+        Mode::Cylindrical => &[("θ", "φ"), ("ρ", "r")],
+        _ => &[],
+    };
     let tokens: Vec<Option<Result<Vec<Tok>, MathError>>> =
         inputs.iter().map(|input| (!input.text.trim().is_empty()).then(|| tokenize(&input.text))).collect();
     let user_functions: HashSet<String> = tokens.iter().flatten().flatten().filter_map(|tokens| defined_function(tokens)).collect();
@@ -664,11 +835,12 @@ pub fn analyze(mode: Mode, inputs: &[RowInput]) -> Sheet {
         .map(|tokens| {
             tokens.map(|tokens| {
                 tokens.and_then(|tokens| parse(&tokens, &user_functions)).map(|mut statement| {
-                    // In polar coordinates `t` is a second spelling of θ, except in a parametric pair.
-                    if mode == Mode::Polar && !matches!(statement.right, Node::Tuple(_)) {
-                        rename(&mut statement.right, "t", "θ");
-                        if let Some(left) = statement.left.as_mut() {
-                            rename(left, "t", "θ");
+                    if !(mode == Mode::Polar && matches!(statement.right, Node::Tuple(_))) {
+                        for (from, to) in aliases {
+                            rename(&mut statement.right, from, to);
+                            if let Some(left) = statement.left.as_mut() {
+                                rename(left, from, to);
+                            }
                         }
                     }
                     statement
@@ -704,8 +876,13 @@ pub fn analyze(mode: Mode, inputs: &[RowInput]) -> Sheet {
     }
 
     let mut slots: HashMap<String, usize> = [("x", X), ("y", Y), ("t", T), ("θ", THETA), ("z", Z)].map(|(name, slot)| (name.to_string(), slot)).into();
-    let mut env = vec![0.0; 5];
-    let mut cenv = vec![C64::real(0.0); 5];
+    if let Some(system) = mode.system() {
+        for (name, slot) in system.names().into_iter().zip(system.slots()) {
+            slots.insert(name.to_string(), slot);
+        }
+    }
+    let mut env = vec![0.0; SLOTS];
+    let mut cenv = vec![C64::real(0.0); SLOTS];
     let mut cfunctions = Vec::new();
     let mut function_index = HashMap::new();
     let mut functions = Vec::new();
@@ -784,6 +961,8 @@ pub fn analyze(mode: Mode, inputs: &[RowInput]) -> Sheet {
 
 #[cfg(test)]
 mod tests {
+    use std::f64::consts::PI;
+
     use super::*;
 
     fn sheet(mode: Mode, texts: &[&str]) -> Sheet {
@@ -869,8 +1048,8 @@ mod tests {
     fn polar_rows_accept_theta_and_t() {
         let inputs = [
             RowInput { text: "r = 1 + cos(θ)".into(), ..RowInput::default() },
-            RowInput { text: "2 sin(3t)".into(), from: "0".into(), to: "π".into(), hidden: true },
-            RowInput { text: "r = θ".into(), from: "1".into(), to: "1".into(), hidden: false },
+            RowInput { text: "2 sin(3t)".into(), from: "0".into(), to: "π".into(), hidden: true, ..RowInput::default() },
+            RowInput { text: "r = θ".into(), from: "1".into(), to: "1".into(), ..RowInput::default() },
         ];
         let mut sheet = analyze(Mode::Polar, &inputs);
         assert_eq!(at(&mut sheet, 0, THETA, 0.0), 2.0);
@@ -909,6 +1088,64 @@ mod tests {
         assert_eq!(error(&sheet, 6).key, "error.triple");
         assert_eq!(error(&sheet, 7).key, "error.unsupported");
         assert!(matches!(sheet.rows[8].outcome, Outcome::Value(value) if value == 7.0));
+    }
+
+    fn coords(sheet: &Sheet, row: usize) -> (usize, Span, Span) {
+        match sheet.rows[row].plot() {
+            Some(Plot::CoordSurface { given, u, v, .. }) => (*given, *u, *v),
+            other => panic!("row {row} is no coordinate surface: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn cylindrical_rows_give_one_coordinate_over_the_other_two() {
+        let mut sheet = sheet(Mode::Cylindrical, &[
+            "r = 2", "z = r^2", "r = 1 + cos(φ)", "z = phi / 2", "φ = π/4", "r^2 / 4", "z = r", "rho = 1 + cos(theta)", "r = a z", "a = 0.5", "x = 1",
+            "(2, π/2, 3)", "r < 2", "y = r", "f(u) = u^2", "r = f(φ)",
+        ]);
+        let (given, u, v) = coords(&sheet, 0);
+        assert_eq!((given, u, v), (0, Span { coord: 1, from: 0.0, to: TAU }, Span { coord: 2, from: f64::NEG_INFINITY, to: f64::INFINITY }));
+        assert_eq!(coords(&sheet, 1), (2, Span { coord: 1, from: 0.0, to: TAU }, Span { coord: 0, from: 0.0, to: f64::INFINITY }));
+        assert_eq!(coords(&sheet, 2).0, 0);
+        assert_eq!(coords(&sheet, 3).0, 2);
+        assert_eq!(coords(&sheet, 4), (1, Span { coord: 0, from: 0.0, to: f64::INFINITY }, Span { coord: 2, from: f64::NEG_INFINITY, to: f64::INFINITY }));
+        // A bare expression is the height, and `z = r` gives z rather than r.
+        assert_eq!(coords(&sheet, 5).0, 2);
+        assert_eq!(coords(&sheet, 6).0, 2);
+        // ρ and θ are other spellings of r and φ; parameters stay sliders.
+        assert_eq!(coords(&sheet, 7).0, 0);
+        assert_eq!(coords(&sheet, 8).0, 0);
+        assert!(matches!(&sheet.rows[9].outcome, Outcome::Parameter { name, slider: true, .. } if name == "a"));
+        assert_eq!(error(&sheet, 10).key, "error.unsupported");
+        assert!(matches!(sheet.rows[11].plot(), Some(Plot::Point3 { x, y, z }) if x.abs() < 1e-12 && (*y - 2.0).abs() < 1e-12 && *z == 3.0));
+        assert_eq!(error(&sheet, 12).key, "error.unsupported");
+        assert_eq!(error(&sheet, 13).key, "error.unsupported");
+        assert_eq!(coords(&sheet, 15).0, 0);
+        let Some(Plot::CoordSurface { expr, .. }) = sheet.rows[2].plot().cloned() else { unreachable!() };
+        sheet.env[PHI] = 0.0;
+        assert_eq!(eval(&expr, &mut sheet.env, &sheet.functions), 2.0);
+        let Some(Plot::CoordSurface { expr, .. }) = sheet.rows[15].plot().cloned() else { unreachable!() };
+        sheet.env[PHI] = 3.0;
+        assert_eq!(eval(&expr, &mut sheet.env, &sheet.functions), 9.0);
+    }
+
+    #[test]
+    fn cylindrical_ranges_take_angles_finite_and_heights_open() {
+        let input = |text: &str, from: &str, to: &str, from2: &str, to2: &str| RowInput { text: text.into(), from: from.into(), to: to.into(), from2: from2.into(), to2: to2.into(), hidden: false };
+        let sheet = analyze(Mode::Cylindrical, &[
+            input("r = 2", "0", "π", "-1", "3"),
+            input("r = 2", "", "", "-inf", "∞"),
+            input("r = 2", "0", "∞", "", ""),
+            input("z = φ / 2", "0", "4π", "", "k"),
+            input("r = 2", "", "", "1", "1"),
+        ]);
+        let (_, u, v) = coords(&sheet, 0);
+        assert_eq!((u.from, u.to, v.from, v.to), (0.0, PI, -1.0, 3.0));
+        assert_eq!(coords(&sheet, 1).2, Span { coord: 2, from: f64::NEG_INFINITY, to: f64::INFINITY });
+        assert_eq!(error(&sheet, 2).key, "error.range");
+        assert_eq!(error(&sheet, 3).missing, ["k"]);
+        assert_eq!(error(&sheet, 4).key, "error.range");
+        assert_eq!(System::Cylindrical.cartesian([2.0, PI, 1.0]).map(|value| (value * 1e9).round() / 1e9), [-2.0, 0.0, 1.0]);
     }
 
     fn complex_point(sheet: &Sheet, row: usize) -> (f64, f64, String) {

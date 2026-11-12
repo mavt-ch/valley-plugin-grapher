@@ -16,9 +16,12 @@ export interface Row {
   /** A palette reference (`palette:red`) or a literal colour. */
   color: string
   hidden: boolean
-  /** Range of θ or t for polar and parametric rows; empty means 0 and 2π. */
+  /** Range of θ or t for polar and parametric rows; empty means 0 and 2π. A surface over two coordinates takes its first one here. */
   from: string
   to: string
+  /** The second range of a surface over two coordinates (added later: absent in older files, empty means that coordinate's default). */
+  from2: string
+  to2: string
   slider: Slider
 }
 
@@ -60,8 +63,8 @@ export function nextColor(rows: readonly Row[]): string {
   return free ?? paletteRef(COLORS[rows.length % COLORS.length])
 }
 
-export function createRow(rows: readonly Row[], text = '', range: Partial<Pick<Row, 'from' | 'to'>> = {}): Row {
-  return { id: rowId(), text, color: nextColor(rows), hidden: false, from: range.from ?? '', to: range.to ?? '', slider: { ...DEFAULT_SLIDER } }
+export function createRow(rows: readonly Row[], text = '', range: Partial<Pick<Row, 'from' | 'to' | 'from2' | 'to2'>> = {}): Row {
+  return { id: rowId(), text, color: nextColor(rows), hidden: false, from: range.from ?? '', to: range.to ?? '', from2: range.from2 ?? '', to2: range.to2 ?? '', slider: { ...DEFAULT_SLIDER } }
 }
 
 /** Every sheet ends in one empty row to type into, like a fresh line on paper. */
@@ -75,8 +78,8 @@ export function withTrailingRow(rows: readonly Row[]): Row[] {
 function examples(texts: readonly Example[]): Row[] {
   const rows: Row[] = []
   for (const entry of texts) {
-    const [text, from, to] = typeof entry === 'string' ? [entry, '', ''] : entry
-    rows.push(createRow(rows, text, { from, to }))
+    const [text, from = '', to = '', from2 = '', to2 = ''] = typeof entry === 'string' ? [entry] : entry
+    rows.push(createRow(rows, text, { from, to, from2, to2 }))
   }
   return withTrailingRow(rows)
 }
@@ -136,6 +139,8 @@ function normalizeRow(value: unknown, rows: readonly Row[]): Row | null {
     hidden: record.hidden === true,
     from: text(record.from),
     to: text(record.to),
+    from2: text(record.from2),
+    to2: text(record.to2),
     slider: min < max && step > 0 ? { min, max, step } : { ...DEFAULT_SLIDER }
   }
 }

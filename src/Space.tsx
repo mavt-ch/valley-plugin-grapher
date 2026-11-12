@@ -144,7 +144,8 @@ export const SpaceCanvas = ({ view, rows, engine, graph, units }: SpaceProps): R
   const wrapRef = React.useRef<HTMLDivElement>(null)
   const canvasRef = React.useRef<HTMLCanvasElement>(null)
   const sizeRef = React.useRef<Size>({ width: 0, height: 0 })
-  const cameraRef = React.useRef<Camera>(store.cameras[slot] ?? HOME_CAMERA)
+  const home = React.useMemo((): Camera => ({ ...HOME_CAMERA, range: view.homeRange ?? HOME_CAMERA.range }), [view.homeRange])
+  const cameraRef = React.useRef<Camera>(store.cameras[slot] ?? home)
   const dragRef = React.useRef<{ id: number; x: number; y: number; camera: Camera } | null>(null)
   const frameRef = React.useRef<number | null>(null)
   const inputs = React.useRef({ view, slot, rows, engine, units })
@@ -182,9 +183,9 @@ export const SpaceCanvas = ({ view, rows, engine, graph, units }: SpaceProps): R
 
   // Each 3D sheet keeps its own camera.
   React.useEffect(() => {
-    cameraRef.current = store.cameras[slot] ?? HOME_CAMERA
+    cameraRef.current = store.cameras[slot] ?? home
     invalidate()
-  }, [slot, store, invalidate])
+  }, [slot, store, home, invalidate])
 
   React.useEffect(() => { invalidate() }, [rows, engine, units, invalidate])
 
@@ -244,7 +245,7 @@ export const SpaceCanvas = ({ view, rows, engine, graph, units }: SpaceProps): R
   }
 
   const zoomBy = (factor: number): void => setCamera({ ...cameraRef.current, range: cameraRef.current.range / factor })
-  const reset = (): void => setCamera(HOME_CAMERA)
+  const reset = (): void => setCamera(home)
 
   const onKeyDown = (event: KeyboardEvent<HTMLCanvasElement>): void => {
     const camera = cameraRef.current

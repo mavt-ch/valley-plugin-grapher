@@ -43,7 +43,7 @@ describe('the sidebar', () => {
     expect(screen.getByDisplayValue('y = x^2 - 2')).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: 'View: Cartesian' }))
     const options = within(screen.getByRole('radiogroup', { name: 'Coordinate system' })).getAllByRole('radio')
-    expect(options.map((option) => option.querySelector('.grapher-view-option-name')?.textContent)).toEqual(['Cartesian', 'Polar', 'Parametric', '3D', 'Complex', 'Complex 3D'])
+    expect(options.map((option) => option.querySelector('.grapher-view-option-name')?.textContent)).toEqual(['Cartesian', 'Polar', 'Parametric', '3D', 'Cylindrical', 'Complex', 'Complex 3D'])
     expect(options[0].getAttribute('aria-checked')).toBe('true')
     expect(screen.queryByDisplayValue('y = x^2 - 2')).toBeNull()
     fireEvent.keyDown(options[0], { key: 'Escape' })
@@ -128,6 +128,23 @@ describe('the graph tab', () => {
     expect(await screen.findByDisplayValue('z = (x^2 + y^2) / 5 - 6')).toBeTruthy()
     expect(await screen.findByLabelText(/^3D graph/)).toBeTruthy()
     expect(screen.getByDisplayValue('6π')).toBeTruthy()
+  })
+
+  it('draws cylindrical surfaces with a range row for each of their two coordinates', async () => {
+    const mock = mount()
+    const { container } = render(<><Sidebar /><GraphTab /></>)
+    await pick('Cylindrical')
+    expect(await screen.findByDisplayValue('r = 1 + cos(φ)')).toBeTruthy()
+    expect(await screen.findByLabelText(/^Cylindrical graph/)).toBeTruthy()
+    const first = (await screen.findAllByRole('listitem'))[0]
+    await waitFor(() => expect(first.getAttribute('data-kind')).toBe('coords'))
+    expect(within(first).getByRole('textbox', { name: 'Start of φ' }).getAttribute('placeholder')).toBe('0')
+    expect(within(first).getByRole('textbox', { name: 'End of φ' }).getAttribute('placeholder')).toBe('2π')
+    expect((within(first).getByRole('textbox', { name: 'Start of z' }) as HTMLInputElement).value).toBe('-4')
+    fireEvent.change(within(first).getByRole('textbox', { name: 'End of z' }), { target: { value: '2' } })
+    await waitFor(async () => expect(await mock.api.data.files.readText('graphs.json')).toContain('"to2": "2"'), { timeout: 2000 })
+    expect(within(first).getByRole('textbox', { name: 'End of z' }).closest('.grapher-domain')?.textContent).toContain('≤ z ≤')
+    expect(container.querySelector('.grapher-hint')?.textContent).toContain('r = 1 + cos(φ)')
   })
 
   it('draws w = f(z) over the complex plane in the complex 3D view', async () => {

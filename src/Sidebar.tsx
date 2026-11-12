@@ -11,7 +11,7 @@ import { getStore, useGrapher } from './store'
 import { formatComplex, formatNumber, formatPolar } from './ticks'
 import { viewOf } from './views'
 
-const DRAWN = new Set(['function', 'polar', 'curve', 'point', 'implicit', 'surface', 'curve3', 'point3', 'region', 'cpoint', 'csurface'])
+const DRAWN = new Set(['function', 'polar', 'curve', 'point', 'implicit', 'surface', 'curve3', 'point3', 'region', 'cpoint', 'csurface', 'coords'])
 
 /** The row whose input takes focus on its next render (after Enter adds a row or Backspace removes one). */
 let pendingFocus: string | null = null
@@ -165,17 +165,16 @@ const SliderControl = ({ row, analysis, edit }: Pick<RowProps, 'row' | 'analysis
 
 const formatBound = (value: number): string => String(Number(value.toPrecision(8)))
 
-const RangeControl = ({ row, analysis, edit }: Pick<RowProps, 'row' | 'analysis' | 'edit'>): ReactElement | null => {
-  if (analysis?.kind !== 'polar' && analysis?.kind !== 'curve' && analysis?.kind !== 'curve3') return null
-  const variable = rangeVariable(analysis.kind)
-  const field = (key: 'from' | 'to', placeholder: string): ReactElement => (
+/** One range row, `from ≤ variable ≤ to`, editing the row's first (`from`, `to`) or second (`from2`, `to2`) range. */
+const Domain = ({ row, edit, keys, variable, placeholders }: Pick<RowProps, 'row' | 'edit'> & { keys: readonly ['from', 'to'] | readonly ['from2', 'to2']; variable: string; placeholders: readonly [string, string] }): ReactElement => {
+  const field = (key: 'from' | 'to' | 'from2' | 'to2', label: 'range.from' | 'range.to', placeholder: string): ReactElement => (
     <input
       className="grapher-bound grapher-range-bound"
       value={row[key]}
       placeholder={placeholder}
       spellCheck={false}
       autoComplete="off"
-      aria-label={uiText(key === 'from' ? 'range.from' : 'range.to', { name: variable })}
+      aria-label={uiText(label, { name: variable })}
       onChange={(event) => {
         const value = event.target.value
         edit((current) => ({ ...current, [key]: value }))
@@ -184,11 +183,27 @@ const RangeControl = ({ row, analysis, edit }: Pick<RowProps, 'row' | 'analysis'
   )
   return (
     <div className="grapher-domain">
-      {field('from', '0')}
+      {field(keys[0], 'range.from', placeholders[0])}
       <span className="grapher-domain-variable">≤ {variable} ≤</span>
-      {field('to', '2π')}
+      {field(keys[1], 'range.to', placeholders[1])}
     </div>
   )
+}
+
+const RangeControl = ({ mode, row, analysis, edit }: Pick<RowProps, 'mode' | 'row' | 'analysis' | 'edit'>): ReactElement | null => {
+  if (analysis?.kind === 'coords' && analysis.over) {
+    const view = viewOf(mode)
+    const ranges = view.canvas === 'space' ? view.ranges ?? {} : {}
+    const [u, v] = analysis.over
+    return (
+      <>
+        <Domain row={row} edit={edit} keys={['from', 'to']} variable={u} placeholders={ranges[u] ?? ['0', '2π']} />
+        <Domain row={row} edit={edit} keys={['from2', 'to2']} variable={v} placeholders={ranges[v] ?? ['0', '2π']} />
+      </>
+    )
+  }
+  if (analysis?.kind !== 'polar' && analysis?.kind !== 'curve' && analysis?.kind !== 'curve3') return null
+  return <Domain row={row} edit={edit} keys={['from', 'to']} variable={rangeVariable(analysis.kind)} placeholders={['0', '2π']} />
 }
 
 const Details = (props: RowProps): ReactElement | null => {
@@ -225,6 +240,7 @@ const Details = (props: RowProps): ReactElement | null => {
     case 'polar':
     case 'curve':
     case 'curve3':
+    case 'coords':
       return <RangeControl {...props} />
     default:
       return null

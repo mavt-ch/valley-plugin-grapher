@@ -48,10 +48,25 @@ describe('sheets', () => {
   })
 
   it('keeps one folder per view, each with its own kernel mode', () => {
-    expect(MODES).toEqual(['cartesian', 'polar', 'parametric', 'space', 'complex', 'complexSpace'])
+    expect(MODES).toEqual(['cartesian', 'polar', 'parametric', 'space', 'cylindrical', 'complex', 'complexSpace'])
     expect(new Set(MODES.map((mode) => viewOf(mode).kernel)).size).toBe(MODES.length)
     expect(defaultDocument().sheets.complexSpace.map((row) => row.text)).toEqual(['w = (z^2 - 4) / 4', 'Re(z^2) / 5', '1 + 2i', ''])
     expect(normalizeDocument({ version: 1, sheets: {} }).sheets.complexSpace).toHaveLength(4)
+  })
+
+  it('loads files written before the second range and the cylindrical view, and keeps both once saved', () => {
+    const older = normalizeDocument({ version: 1, mode: 'space', sheets: { space: [{ id: 'a', text: 'z = x y', color: 'palette:red', hidden: false, from: '', to: '', slider: { min: -10, max: 10, step: 0.1 } }] }, units: { space: 'pi' }, graphs: { tab: { mode: 'polar', sheets: {} } } })
+    expect(older.mode).toBe('space')
+    expect(older.sheets.space[0]).toMatchObject({ id: 'a', text: 'z = x y', from: '', to: '', from2: '', to2: '' })
+    expect(unitsOf(older, 'space')).toBe('pi')
+    expect(older.sheets.cylindrical.map((row) => row.text)).toEqual(['r = 1 + cos(φ)', 'z = φ / 2', ''])
+    expect(older.sheets.cylindrical[0]).toMatchObject({ from: '', to: '', from2: '-4', to2: '0' })
+    expect(older.graphs.tab.sheets.cylindrical).toHaveLength(3)
+    const saved = JSON.parse(JSON.stringify({ ...older, mode: 'cylindrical' })) as unknown
+    const again = normalizeDocument(saved)
+    expect(again.mode).toBe('cylindrical')
+    expect(again.sheets.cylindrical[1]).toMatchObject({ text: 'z = φ / 2', from: '', to: '', from2: '0', to2: '3' })
+    expect(viewOf('cylindrical')).toMatchObject({ canvas: 'space', kernel: 7, homeRange: 5 })
   })
 
   it('turns the old trigonometric sheet into Cartesian with π axes', () => {
@@ -77,6 +92,8 @@ describe('sheets', () => {
     expect(parseMath('e^(i π/3)')).toMatchObject({ k: 'pow', exp: { k: 'frac', bottom: { k: 'num', text: '3' } } })
     expect(parseMath('|z + 2')).toMatchObject({ k: 'group', open: '|', closed: false })
     expect(() => parseMath(')) ^^ ,, (( sin^ |')).not.toThrow()
+    expect(tokenizeMath('rho = 1 + cos(Phi)')).toEqual([{ t: 'id', v: 'ρ' }, { t: 'op', v: '=' }, { t: 'num', v: '1' }, { t: 'op', v: '+' }, { t: 'fn', v: 'cos' }, { t: 'op', v: '(' }, { t: 'id', v: 'φ' }, { t: 'op', v: ')' }])
+    expect(parseMath('z = phi / 2')).toMatchObject({ k: 'seq', items: [{ k: 'var', text: 'z' }, { k: 'op', relation: true }, { k: 'frac', top: { k: 'var', text: 'φ' }, bottom: { k: 'num', text: '2' } }] })
     expect(parseMath('A = -1.3')).toMatchObject({ k: 'seq', items: [{ k: 'var' }, { k: 'op', relation: true }, { k: 'op', text: '−', sign: true }, { k: 'num', text: '1.3' }] })
   })
 

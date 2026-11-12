@@ -205,6 +205,11 @@ button.grapher-handle:hover { color:var(--text-color); }
 .grapher-topbar-title { position:absolute; left:50%; transform:translateX(-50%); color:var(--text-secondary);
   font-size:var(--smaller-font-size); white-space:nowrap; pointer-events:none; }
 .grapher-stage { position:relative; display:flex; flex:1 1 auto; min-height:0; }
+.grapher-tab { position:relative; }
+.grapher-export-notice { position:absolute; left:var(--space-3); bottom:var(--space-3); z-index:1; max-width:calc(100% - 2 * var(--space-3));
+  box-sizing:border-box; margin:0; padding:4px 8px; border:1px solid var(--border-light); border-radius:4px;
+  background:var(--container-color-alt); color:var(--text-secondary); font-size:var(--smaller-font-size); overflow-wrap:anywhere; }
+.grapher-export-failed { color:var(--danger-tint-text); }
 .grapher-canvas-wrap { position:relative; flex:1 1 auto; min-width:0; min-height:0; overflow:hidden; }
 .grapher-canvas { position:absolute; inset:0; display:block; width:100%; height:100%; background:var(--surface-color-alt);
   cursor:crosshair; touch-action:none; outline:none; }

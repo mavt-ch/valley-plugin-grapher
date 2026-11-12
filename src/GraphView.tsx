@@ -1,6 +1,7 @@
 import { React } from './runtime'
 import type { KeyboardEvent, PointerEvent, ReactElement } from 'react'
-import { colorOf, drawArrows, drawHover, drawLabel, drawMarkers, drawPaths, findHit, formatPoint, readTheme, toScreenX, toScreenY, toWorldX, toWorldY, type Hover, type Size } from './draw'
+import { drawHover, drawLabel, drawMarkers, findHit, formatPoint, paintPlane, readTheme, toScreenX, toScreenY, toWorldX, toWorldY, type Hover, type Size, type Theme } from './draw'
+import { NOTICE_SECONDS, onExportNotice, registerExporter, renderPng, renderSvg, type ExportNotice } from './exporting'
 import { MARKER, type Marker, type PlotEngine, type RowAnalysis, type SamplePath, type Viewport } from './engine'
 import { Fit, Minus, Plus } from './icons'
 import { uiText } from './localization'
@@ -176,39 +177,18 @@ export const GraphCanvas = ({ view: plane, units, rows, analyses, engine, graph 
     return { row: hit.row, sx: hit.sx, sy: hit.sy, wx: hit.wx, wy: hit.wy, parameter }
   }, [])
 
-  const draw = React.useCallback((): void => {
-    const frame = frameRef.current
-    frame.id = null
-    const canvas = canvasRef.current
-    const ctx = canvas?.getContext('2d')
+  /** Paints the current frame. An export paints the same frame without the pointer: no readout, no hover or selection
+   * markers, only the pinned markers with their labels. */
+  const paint = React.useCallback((ctx: CanvasRenderingContext2D, theme: Theme, exporting: boolean): void => {
+    const { plane, units, rows, analyses } = inputs.current
     const size = sizeRef.current
-    if (!canvas || !ctx || size.width <= 0 || size.height <= 0) return
-    const { plane, units, mode, rows, analyses, engine } = inputs.current
-    const view = viewRef.current ?? (viewRef.current = homeView(plane, size))
-    if (frame.resample) {
-      frame.resample = false
-      generationRef.current += 1
-      try {
-        pathsRef.current = engine ? engine.sample(mode, rows, size.width, size.height, view) : []
-      } catch {
-        pathsRef.current = []
-      }
-    }
-    const dpr = canvas.ownerDocument.defaultView?.devicePixelRatio || 1
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
-    const theme = readTheme(canvas)
-    plane.grid(ctx, view, size, theme, units)
-    const colors = rows.map((row) => colorOf(row.color))
-    drawPaths(ctx, pathsRef.current, colors, theme, rows.map((_, index) => Boolean(analyses[index]?.strict)), rows.map((row) => row.magnitude === false), rows.map((row) => row.labels !== false))
-    if (plane.complex) {
-      const arrows = analyses.flatMap((analysis, index) => analysis.kind === 'cpoint' && !rows[index]?.hidden && analysis.x !== undefined && analysis.y !== undefined
-        ? [{ x: analysis.x, y: analysis.y, color: colors[index] ?? theme.axis }] : [])
-      drawArrows(ctx, arrows, view, size, theme)
-    }
+    const view = viewRef.current
+    if (!view) return
+    const colors = paintPlane(ctx, plane, units, rows, analyses, pathsRef.current, view, size, theme)
     // While the button is down, markers and the readout stay until the pointer moves: a click must not make them blink.
     const drag = dragRef.current
-    const pointer = pointerRef.current && !(drag && Math.hypot(pointerRef.current.x - drag.x, pointerRef.current.y - drag.y) >= 4) ? pointerRef.current : null
-    const placed = placeMarkers(pointer ? findHit(pathsRef.current, pointer.x, pointer.y)?.row ?? null : null)
+    const pointer = !exporting && pointerRef.current && !(drag && Math.hypot(pointerRef.current.x - drag.x, pointerRef.current.y - drag.y) >= 4) ? pointerRef.current : null
+    const placed = placeMarkers(pointer ? findHit(pathsRef.current, pointer.x, pointer.y)?.row ?? null : null).filter((entry) => !exporting || entry.pinned)
     drawMarkers(ctx, placed, theme)
     for (const entry of placed) if (entry.pinned) drawLabel(ctx, entry.sx, entry.sy, [markerKind(entry.marker.kind), formatPoint(entry.marker.x, entry.marker.y)], size, theme)
     const onMarker = pointer ? placed.find((entry) => Math.hypot(entry.sx - pointer.x, entry.sy - pointer.y) <= MARKER_REACH) : undefined
@@ -217,6 +197,35 @@ export const GraphCanvas = ({ view: plane, units, rows, analyses, engine, graph 
       : pointer ? hoverAt(pointer.x, pointer.y) : null
     if (hover && !onMarker?.pinned) drawHover(ctx, hover, colors[hover.row] ?? theme.axis, size, theme, plane.complex)
   }, [hoverAt, placeMarkers])
+
+  /** The view and the sampled paths for the current size, resampled when the view or the rows changed since the last frame. */
+  const prepare = React.useCallback((): void => {
+    const frame = frameRef.current
+    const size = sizeRef.current
+    const { plane, mode, rows, engine } = inputs.current
+    const view = viewRef.current ?? (viewRef.current = homeView(plane, size))
+    if (!frame.resample) return
+    frame.resample = false
+    generationRef.current += 1
+    try {
+      pathsRef.current = engine ? engine.sample(mode, rows, size.width, size.height, view) : []
+    } catch {
+      pathsRef.current = []
+    }
+  }, [])
+
+  const draw = React.useCallback((): void => {
+    const frame = frameRef.current
+    frame.id = null
+    const canvas = canvasRef.current
+    const ctx = canvas?.getContext('2d')
+    const size = sizeRef.current
+    if (!canvas || !ctx || size.width <= 0 || size.height <= 0) return
+    prepare()
+    const dpr = canvas.ownerDocument.defaultView?.devicePixelRatio || 1
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+    paint(ctx, readTheme(canvas), false)
+  }, [paint, prepare])
 
   const invalidate = React.useCallback((resample: boolean): void => {
     const frame = frameRef.current
@@ -230,6 +239,24 @@ export const GraphCanvas = ({ view: plane, units, rows, analyses, engine, graph 
     store.viewports[inputs.current.slot] = next
     invalidate(true)
   }, [invalidate, store])
+
+  // The tab's menu exports this frame: the paths sampled last, at the canvas's size, in the theme's colours.
+  React.useEffect(() => registerExporter(graph, {
+    mode: () => inputs.current.mode,
+    formats: ['png', 'svg'],
+    render: async (format) => {
+      const canvas = canvasRef.current
+      const size = sizeRef.current
+      if (!canvas || size.width <= 0 || size.height <= 0) throw new Error(uiText('export.noCanvas'))
+      prepare()
+      const theme = readTheme(canvas)
+      try {
+        return format === 'svg' ? renderSvg(canvas.ownerDocument, size, (ctx) => paint(ctx, theme, true)) : await renderPng(canvas.ownerDocument, size, (ctx) => paint(ctx, theme, true))
+      } finally {
+        invalidate(false)
+      }
+    }
+  }), [graph, paint, prepare, invalidate])
 
   // A new sheet brings its own camera, and leaves the other sheet's selection and pins behind.
   React.useEffect(() => {
@@ -412,8 +439,18 @@ export const GraphTab = ({ instanceId }: { instanceId?: string }): ReactElement 
   const rows = graph.sheets[mode]
   const analyses = React.useMemo(() => (engine ? engine.analyze(mode, rows) : []), [engine, mode, rows])
   const engineProblem = problems.find((problem) => problem.key === 'problem.engine')
+  const tabRef = React.useRef<HTMLDivElement>(null)
+  const [notice, setNotice] = React.useState<ExportNotice | null>(null)
+  React.useEffect(() => onExportNotice(id, setNotice), [id])
+  // The notice fades after a few seconds, timed in the tab's own window.
+  React.useEffect(() => {
+    const view = tabRef.current?.ownerDocument.defaultView
+    if (!notice || !view) return
+    const timer = view.setTimeout(() => setNotice(null), NOTICE_SECONDS * 1000)
+    return () => view.clearTimeout(timer)
+  }, [notice])
   return (
-    <div className="grapher-tab">
+    <div className="grapher-tab" ref={tabRef}>
       <div className="grapher-topbar">
         <span className="grapher-topbar-title">{uiText(`mode.${mode}`)}</span>
       </div>
@@ -421,6 +458,7 @@ export const GraphTab = ({ instanceId }: { instanceId?: string }): ReactElement 
       <div className="grapher-stage">
         {view.canvas === 'space' ? <SpaceCanvas view={view} rows={rows} engine={engine} graph={id} units={unitsOf(graph, mode)} /> : <GraphCanvas key={view.id} view={view} units={unitsOf(graph, mode)} rows={rows} analyses={analyses} engine={engine} graph={id} />}
       </div>
+      {notice ? <p className={`grapher-export-notice${notice.ok ? '' : ' grapher-export-failed'}`} role="status">{notice.text}</p> : null}
     </div>
   )
 }

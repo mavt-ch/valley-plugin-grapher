@@ -6,6 +6,7 @@ import { Fit, Minus, Plus } from './icons'
 import { uiText } from './localization'
 import type { Row } from './model'
 import { cameraKey, getStore } from './store'
+import { registerExporter, renderPng } from './exporting'
 import { formatNumber, piTicks } from './ticks'
 import type { AxisUnits } from './model'
 import type { SpaceView } from './views'
@@ -166,12 +167,9 @@ export const SpaceCanvas = ({ view, rows, engine, graph, units }: SpaceProps): R
   const inputs = React.useRef({ view, slot, rows, engine, units })
   inputs.current = { view, slot, rows, engine, units }
 
-  const draw = React.useCallback((): void => {
-    frameRef.current = null
-    const canvas = canvasRef.current
-    const ctx = canvas?.getContext('2d')
+  /** Projects and paints the current frame for the camera at the canvas's size (on screen, or into an export). */
+  const paint = React.useCallback((ctx: CanvasRenderingContext2D, theme: Theme): void => {
     const size = sizeRef.current
-    if (!canvas || !ctx || size.width <= 0 || size.height <= 0) return
     const { view, rows, engine, units } = inputs.current
     let records: SpaceRecord[] = []
     try {
@@ -179,15 +177,37 @@ export const SpaceCanvas = ({ view, rows, engine, graph, units }: SpaceProps): R
     } catch {
       records = []
     }
+    drawSpace(ctx, records, rows.map((row) => colorOf(row.color)), size, theme, view.axisNames, units, cameraRef.current.range, rows.map((row) => row.magnitude === false))
+  }, [])
+
+  const draw = React.useCallback((): void => {
+    frameRef.current = null
+    const canvas = canvasRef.current
+    const ctx = canvas?.getContext('2d')
+    const size = sizeRef.current
+    if (!canvas || !ctx || size.width <= 0 || size.height <= 0) return
     const dpr = canvas.ownerDocument.defaultView?.devicePixelRatio || 1
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
-    drawSpace(ctx, records, rows.map((row) => colorOf(row.color)), size, readTheme(canvas), view.axisNames, units, cameraRef.current.range, rows.map((row) => row.magnitude === false))
-  }, [])
+    paint(ctx, readTheme(canvas))
+  }, [paint])
 
   const invalidate = React.useCallback((): void => {
     const view = canvasRef.current?.ownerDocument.defaultView
     if (frameRef.current === null && view) frameRef.current = view.requestAnimationFrame(draw)
   }, [draw])
+
+  // 3D exports as PNG only: its surfaces are thousands of depth-sorted polygons, which an SVG would carry as seams.
+  React.useEffect(() => registerExporter(graph, {
+    mode: () => inputs.current.view.id,
+    formats: ['png'],
+    render: async () => {
+      const canvas = canvasRef.current
+      const size = sizeRef.current
+      if (!canvas || size.width <= 0 || size.height <= 0) throw new Error(uiText('export.noCanvas'))
+      const theme = readTheme(canvas)
+      return renderPng(canvas.ownerDocument, size, (ctx) => paint(ctx, theme))
+    }
+  }), [graph, paint])
 
   const setCamera = React.useCallback((next: Camera): void => {
     const camera = { yaw: next.yaw, pitch: Math.max(-MAX_PITCH, Math.min(MAX_PITCH, next.pitch)), range: Math.max(MIN_RANGE, Math.min(MAX_RANGE, next.range)) }

@@ -109,5 +109,11 @@
   "zoom.group": "Zoom",
   "zoom.in": "Zoom avant",
   "zoom.out": "Zoom arrière",
-  "zoom.reset": "Réinitialiser la vue"
+  "zoom.reset": "Réinitialiser la vue",
+  "export.png": "Exporter en PNG",
+  "export.svg": "Exporter en SVG",
+  "export.saved": "Exporté vers {{path}}",
+  "export.failed": "Échec de l’exportation : {{message}}",
+  "export.noFile": "le dossier de téléchargement n’a enregistré aucun fichier.",
+  "export.noCanvas": "le graphique n’est pas encore dessiné."
 }

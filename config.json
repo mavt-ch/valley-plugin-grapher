@@ -11,6 +11,13 @@
       "order": 95
     }
   },
+  "provides": [
+    {
+      "id": "workspace.surface",
+      "kind": "extension",
+      "version": "1.0.0"
+    }
+  ],
   "locales": {
     "en": "runtime/locales/en.json",
     "de": "runtime/locales/de.json",

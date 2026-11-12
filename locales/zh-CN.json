@@ -109,5 +109,11 @@
   "zoom.group": "缩放",
   "zoom.in": "放大",
   "zoom.out": "缩小",
-  "zoom.reset": "重置视图"
+  "zoom.reset": "重置视图",
+  "export.png": "导出为 PNG",
+  "export.svg": "导出为 SVG",
+  "export.saved": "已导出到 {{path}}",
+  "export.failed": "导出失败：{{message}}",
+  "export.noFile": "下载文件夹未保存任何文件。",
+  "export.noCanvas": "图形尚未绘制。"
 }

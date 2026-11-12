@@ -109,5 +109,11 @@
   "zoom.group": "Zoom",
   "zoom.in": "Zoom in",
   "zoom.out": "Zoom out",
-  "zoom.reset": "Reset view"
+  "zoom.reset": "Reset view",
+  "export.png": "Export as PNG",
+  "export.svg": "Export as SVG",
+  "export.saved": "Exported to {{path}}",
+  "export.failed": "Export failed: {{message}}",
+  "export.noFile": "the download folder took no file.",
+  "export.noCanvas": "the graph is not drawn yet."
 }

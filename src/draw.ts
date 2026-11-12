@@ -292,28 +292,53 @@ export function drawArrows(ctx: CanvasRenderingContext2D, arrows: readonly { x: 
   }
 }
 
+/** What a flat view contributes to a frame: its grid painter and whether numbers are complex arrows. */
+export interface PlanePainter {
+  grid: GridPainter
+  complex?: boolean
+}
+
+/** One frame of a flat sheet without the pointer's readout and markers: grid, axes and labels, then every sampled path
+ * (regions, curves, points, arrows, level labels), then the complex sheet's arrows. Returns the rows' colours. */
+export function paintPlane(ctx: CanvasRenderingContext2D, plane: PlanePainter, units: AxisUnits, rows: readonly { color: string; hidden: boolean; magnitude?: boolean; labels?: boolean }[], analyses: readonly { kind: string; strict?: boolean; x?: number; y?: number }[], paths: readonly SamplePath[], view: Viewport, size: Size, theme: Theme): string[] {
+  plane.grid(ctx, view, size, theme, units)
+  const colors = rows.map((row) => colorOf(row.color))
+  drawPaths(ctx, paths, colors, theme, rows.map((_, index) => Boolean(analyses[index]?.strict)), rows.map((row) => row.magnitude === false), rows.map((row) => row.labels !== false))
+  if (plane.complex) {
+    const arrows = analyses.flatMap((analysis, index) => analysis.kind === 'cpoint' && !rows[index]?.hidden && analysis.x !== undefined && analysis.y !== undefined
+      ? [{ x: analysis.x, y: analysis.y, color: colors[index] ?? theme.axis }] : [])
+    drawArrows(ctx, arrows, view, size, theme)
+  }
+  return colors
+}
+
 /** Regions are filled first, translucent and once per row so neighbouring cells never double up; `dashed` marks
  * rows whose boundary is excluded (strict inequalities), `uniform` vector fields whose arrows are not shaded by magnitude
  * and `labelled` rows whose level curves show their values. */
 export function drawPaths(ctx: CanvasRenderingContext2D, paths: readonly SamplePath[], colors: readonly string[], theme: Theme, dashed: readonly boolean[] = [], uniform: readonly boolean[] = [], labelled: readonly boolean[] = []): void {
   ctx.lineJoin = 'round'
   ctx.lineCap = 'round'
-  const regions = new Map<number, Path2D>()
+  // One path per row (not a Path2D), so the SVG export's recording context can fill it too.
+  const regions = new Map<number, SamplePath[]>()
   for (const path of paths) {
     if (path.kind !== 'region') continue
-    const area = regions.get(path.row) ?? new Path2D()
-    for (let i = 0; i < path.points.length; i += STRIDE) {
-      if (i === 0) area.moveTo(clamp(path.points[i]), clamp(path.points[i + 1]))
-      else area.lineTo(clamp(path.points[i]), clamp(path.points[i + 1]))
-    }
-    area.closePath()
-    regions.set(path.row, area)
+    const area = regions.get(path.row)
+    if (area) area.push(path)
+    else regions.set(path.row, [path])
   }
   ctx.save()
   ctx.globalAlpha = 0.22
   for (const [row, area] of regions) {
+    ctx.beginPath()
+    for (const { points } of area) {
+      for (let i = 0; i < points.length; i += STRIDE) {
+        if (i === 0) ctx.moveTo(clamp(points[i]), clamp(points[i + 1]))
+        else ctx.lineTo(clamp(points[i]), clamp(points[i + 1]))
+      }
+      ctx.closePath()
+    }
     ctx.fillStyle = colors[row] ?? theme.axis
-    ctx.fill(area)
+    ctx.fill()
   }
   ctx.restore()
   for (const path of paths) {

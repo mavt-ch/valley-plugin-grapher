@@ -13,6 +13,7 @@ import { injectStyles } from './styles'
 import { Sidebar, openNewGraph } from './Sidebar'
 import { GraphTab } from './GraphView'
 import { getStore } from './store'
+import { provideGraphSurface } from './exporting'
 
 export function register(api: ValleyPluginApi): () => Promise<void> {
   initLocalization(api)
@@ -23,10 +24,13 @@ export function register(api: ValleyPluginApi): () => Promise<void> {
   const store = getStore()
   // + in the tab strip of a Grapher tab opens another graph with its own sheets, on the focused graph's view.
   const offNewTab = api.workspace.registerNewTabHandler(({ paneId }) => openNewGraph(store.graph(store.getSnapshot().active).mode, paneId))
+  // The graph tab's three-dot menu offers the export of what it shows.
+  const offSurface = provideGraphSurface(api, store)
   let disposal: Promise<void> | undefined
   return () => {
     if (disposal) return disposal
     offNewTab()
+    offSurface()
     disposal = store.flush().catch(() => {}).finally(() => {
       store.dispose()
       disposeStyles()

@@ -66,3 +66,8 @@ export const Check = (p: IconProps): ReactElement => (
 export const TableIcon = (p: IconProps): ReactElement => (
   <Svg {...p}><rect x="4" y="5" width="16" height="14" rx="1.5" /><path d="M4 10h16M12 5v14" /></Svg>
 )
+
+/** An arrow down onto a tray: export the graph as a file. */
+export const Download = (p: IconProps): ReactElement => (
+  <Svg {...p}><path d="M12 4v11M7 10l5 5 5-5M5 20h14" /></Svg>
+)

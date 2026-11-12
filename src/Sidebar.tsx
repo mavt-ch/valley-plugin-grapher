@@ -11,7 +11,7 @@ import { getStore, useGrapher } from './store'
 import { formatComplex, formatNumber, formatPolar } from './ticks'
 import { viewOf } from './views'
 
-const DRAWN = new Set(['function', 'polar', 'curve', 'point', 'implicit', 'surface', 'curve3', 'point3', 'region', 'cpoint', 'csurface', 'coords'])
+const DRAWN = new Set(['function', 'polar', 'curve', 'point', 'implicit', 'surface', 'curve3', 'point3', 'region', 'cpoint', 'csurface', 'coords', 'psurface'])
 
 /** The row whose input takes focus on its next render (after Enter adds a row or Backspace removes one). */
 let pendingFocus: string | null = null
@@ -191,7 +191,7 @@ const Domain = ({ row, edit, keys, variable, placeholders }: Pick<RowProps, 'row
 }
 
 const RangeControl = ({ mode, row, analysis, edit }: Pick<RowProps, 'mode' | 'row' | 'analysis' | 'edit'>): ReactElement | null => {
-  if (analysis?.kind === 'coords' && analysis.over) {
+  if ((analysis?.kind === 'coords' || analysis?.kind === 'psurface') && analysis.over) {
     const view = viewOf(mode)
     const ranges = view.canvas === 'space' ? view.ranges ?? {} : {}
     const [u, v] = analysis.over
@@ -241,6 +241,7 @@ const Details = (props: RowProps): ReactElement | null => {
     case 'curve':
     case 'curve3':
     case 'coords':
+    case 'psurface':
       return <RangeControl {...props} />
     default:
       return null

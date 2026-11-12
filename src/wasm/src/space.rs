@@ -266,6 +266,16 @@ impl Scene<'_> {
         self.mesh(row, &grid, &[0, 1, 2], None);
     }
 
+    /// `(x(u, v), y(u, v), z(u, v))` over the rectangle `u` × `v` of parameter values, clipped to the cube on every axis.
+    fn param_surface(&mut self, row: f64, (x, y, z): (&Expr, &Expr, &Expr), u: (f64, f64), v: (f64, f64), slots: [usize; 2]) {
+        let grid = self.sample_grid(u, v, |scene, a, b| {
+            scene.env[slots[0]] = a;
+            scene.env[slots[1]] = b;
+            [eval(x, scene.env, scene.functions), eval(y, scene.env, scene.functions), eval(z, scene.env, scene.functions)]
+        });
+        self.mesh(row, &grid, &[0, 1, 2], None);
+    }
+
     /// `w = f(z)` over the complex plane, one hue per cell from arg of `hue` at the cell's centre.
     fn complex_surface(&mut self, row: f64, expr: &CExpr, hue: &CExpr, height: Height) {
         let range = self.camera.range;
@@ -441,6 +451,7 @@ pub fn render(sheet: &mut Sheet, camera: Camera) -> Vec<f64> {
             Plot::ComplexSurface { expr, hue, height } => scene.complex_surface(index, expr, hue, *height),
             Plot::ComplexPoint { re, im, .. } => scene.point(index, [*re, *im, 0.0]),
             Plot::CoordSurface { expr, system, given, u, v } => scene.coord_surface(index, expr, *system, *given, *u, *v),
+            Plot::ParamSurface { x, y, z, u, v, slots } => scene.param_surface(index, (x, y, z), *u, *v, *slots),
             _ => {}
         }
     }
@@ -608,6 +619,39 @@ mod tests {
         let cut = records_in(Mode::Spherical, &["ρ = 12"], top);
         assert!(cut.iter().filter(|r| r.kind == POLYGON).count() > 200);
         for record in cut.iter().filter(|r| r.kind == POLYGON) {
+            for (x, y) in &record.points {
+                assert!((x - cx).abs() <= half + 1e-6 && (y - cy).abs() <= half + 1e-6, "{x}, {y}");
+            }
+        }
+    }
+
+    #[test]
+    fn parametric_surfaces_are_shaded_and_clipped_to_the_cube() {
+        let small = Camera { range: 4.0, ..CAMERA };
+        let found = records(&[
+            "((2 + cos v) cos u, (2 + cos v) sin u, sin v)",
+            "((1 + v / 2 cos(u / 2)) cos u, (1 + v / 2 cos(u / 2)) sin u, v / 2 sin(u / 2))",
+            "(u cos v, u sin v, v)",
+            "(u cos v, u sin v, u)",
+        ], small);
+        for row in 0..4 {
+            let polygons: Vec<&Record> = found.iter().filter(|r| r.kind == POLYGON && r.row == row as f64).collect();
+            assert!(polygons.len() > 1000, "row {row}: {}", polygons.len());
+            assert!(polygons.iter().all(|p| (0.3..=1.0).contains(&p.value) && p.points.len() >= 3));
+        }
+        // Seen from above, the torus fills the ring between radius 1 and 3; the cone, which leaves the cube, stays inside its square.
+        let top = Camera { pitch: std::f64::consts::FRAC_PI_2, yaw: 0.0, ..small };
+        let projector = Projector::new(&top);
+        let (cx, cy, _) = projector.screen([0.0, 0.0, 0.0]);
+        let torus = records(&["((2 + cos v) cos u, (2 + cos v) sin u, sin v)"], top);
+        for record in torus.iter().filter(|r| r.kind == POLYGON) {
+            for (x, y) in &record.points {
+                let radius = ((x - cx).powi(2) + (y - cy).powi(2)).sqrt() / projector.scale;
+                assert!((0.99..=3.01).contains(&radius), "{radius}");
+            }
+        }
+        let half = 4.0 * projector.scale;
+        for record in records(&["(u cos v, u sin v, u)"], top).iter().filter(|r| r.kind == POLYGON) {
             for (x, y) in &record.points {
                 assert!((x - cx).abs() <= half + 1e-6 && (y - cy).abs() <= half + 1e-6, "{x}, {y}");
             }

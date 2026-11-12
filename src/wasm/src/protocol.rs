@@ -5,7 +5,8 @@
 //! `empty` · `error key param missing,names` · `param name value slider` · `value number` · `function x|y` ·
 //! `definition name` · `polar from to` · `curve from to` · `point x y` · `implicit` · `surface x|y|z` ·
 //! `curve3 from to` · `point3 x y z` · `region strict|loose` · `cpoint re im name` · `csurface modulus|real` ·
-//! `coords given u v ufrom uto vfrom vto` (a surface in curvilinear coordinates; the names are its coordinates).
+//! `coords given u v ufrom uto vfrom vto` (a surface in curvilinear coordinates; the names are its coordinates) ·
+//! `psurface ufrom uto vfrom vto` (a parametric surface in u and v).
 
 use crate::sheet::{Outcome, Plot, RowInput, Sheet};
 
@@ -60,6 +61,7 @@ pub fn write_outcomes(sheet: &Sheet) -> String {
                 Outcome::Plotted(Plot::Curve3 { from, to, .. }) => vec!["curve3".into(), number(*from), number(*to)],
                 Outcome::Plotted(Plot::Point3 { x, y, z }) => vec!["point3".into(), number(*x), number(*y), number(*z)],
                 Outcome::Plotted(Plot::ComplexSurface { height, .. }) => vec!["csurface".into(), height.name().into()],
+                Outcome::Plotted(Plot::ParamSurface { u, v, .. }) => vec!["psurface".into(), number(u.0), number(u.1), number(v.0), number(v.1)],
                 Outcome::Plotted(Plot::CoordSurface { system, given, u, v, .. }) => {
                     let names = system.names();
                     vec!["coords".into(), names[*given].into(), names[u.coord].into(), names[v.coord].into(), number(u.from), number(u.to), number(v.from), number(v.to)]
@@ -103,6 +105,8 @@ mod tests {
         assert!(records[0].starts_with("coords\u{1f}r\u{1f}φ\u{1f}z\u{1f}0\u{1f}3.14159"), "{}", records[0]);
         assert!(records[0].ends_with("\u{1f}-1\u{1f}3"));
         assert_eq!(records[1], "coords\u{1f}z\u{1f}φ\u{1f}r\u{1f}0\u{1f}6.283185307179586\u{1f}0\u{1f}Infinity");
+        let torus = write_outcomes(&analyze(Mode::Space, &read_rows("((2 + cos v) cos u, (2 + cos v) sin u, sin v)\u{1f}\u{1f}π\u{1f}0\u{1f}-1\u{1f}")));
+        assert_eq!(torus, "psurface\u{1f}0\u{1f}3.141592653589793\u{1f}-1\u{1f}6.283185307179586");
         let sphere = write_outcomes(&analyze(Mode::Spherical, &read_rows("φ = π/4")));
         assert_eq!(sphere, "coords\u{1f}φ\u{1f}θ\u{1f}ρ\u{1f}0\u{1f}6.283185307179586\u{1f}0\u{1f}Infinity");
     }

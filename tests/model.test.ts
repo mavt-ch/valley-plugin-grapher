@@ -97,6 +97,7 @@ describe('sheets', () => {
     expect(() => parseMath(')) ^^ ,, (( sin^ |')).not.toThrow()
     expect(tokenizeMath('rho = 1 + cos(Phi)')).toEqual([{ t: 'id', v: 'ρ' }, { t: 'op', v: '=' }, { t: 'num', v: '1' }, { t: 'op', v: '+' }, { t: 'fn', v: 'cos' }, { t: 'op', v: '(' }, { t: 'id', v: 'φ' }, { t: 'op', v: ')' }])
     expect(parseMath('z = phi / 2')).toMatchObject({ k: 'seq', items: [{ k: 'var', text: 'z' }, { k: 'op', relation: true }, { k: 'frac', top: { k: 'var', text: 'φ' }, bottom: { k: 'num', text: '2' } }] })
+    expect(tokenizeMath('(ucos v, u sin v, v)').filter((token) => token.t !== 'op')).toEqual([{ t: 'id', v: 'u' }, { t: 'fn', v: 'cos' }, { t: 'id', v: 'v' }, { t: 'id', v: 'u' }, { t: 'fn', v: 'sin' }, { t: 'id', v: 'v' }, { t: 'id', v: 'v' }])
     expect(parseMath('A = -1.3')).toMatchObject({ k: 'seq', items: [{ k: 'var' }, { k: 'op', relation: true }, { k: 'op', text: '−', sign: true }, { k: 'num', text: '1.3' }] })
   })
 

@@ -130,6 +130,24 @@ describe('the graph tab', () => {
     expect(screen.getByDisplayValue('6π')).toBeTruthy()
   })
 
+  it('draws a parametric surface typed in u and v with a range row for each', async () => {
+    const mock = mount()
+    const { container } = render(<><Sidebar /><GraphTab /></>)
+    await pick('3D')
+    await screen.findByDisplayValue('z = (x^2 + y^2) / 5 - 6')
+    const inputs = screen.getAllByRole('textbox', { name: /Expression/ })
+    const trailing = inputs[inputs.length - 1]
+    expect(trailing.getAttribute('placeholder')).toBe('(u cos v, u sin v, v)')
+    fireEvent.change(trailing, { target: { value: '((2 + cos v) cos u, (2 + cos v) sin u, sin v)' } })
+    const torus = (await screen.findAllByRole('listitem'))[2]
+    await waitFor(() => expect(torus.getAttribute('data-kind')).toBe('psurface'))
+    expect(within(torus).getByRole('textbox', { name: 'Start of u' }).getAttribute('placeholder')).toBe('0')
+    expect(within(torus).getByRole('textbox', { name: 'End of v' }).getAttribute('placeholder')).toBe('2π')
+    fireEvent.change(within(torus).getByRole('textbox', { name: 'End of u' }), { target: { value: 'π' } })
+    await waitFor(async () => expect(await mock.api.data.files.readText('graphs.json')).toContain('"to": "π"'), { timeout: 2000 })
+    expect(container.querySelector('.grapher-hint')?.textContent).toContain('A triple in u and v is a surface, in t a curve')
+  })
+
   it('draws cylindrical surfaces with a range row for each of their two coordinates', async () => {
     const mock = mount()
     const { container } = render(<><Sidebar /><GraphTab /></>)

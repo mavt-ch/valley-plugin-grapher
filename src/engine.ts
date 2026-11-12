@@ -9,7 +9,7 @@ export { STRIDE }
 const MODULE_ID = 'plot'
 const RECORD = '\u001e'
 const FIELD = '\u001f'
-export type RowKind = 'empty' | 'error' | 'param' | 'value' | 'function' | 'definition' | 'polar' | 'curve' | 'point' | 'implicit' | 'surface' | 'curve3' | 'point3' | 'region' | 'cpoint' | 'csurface' | 'coords'
+export type RowKind = 'empty' | 'error' | 'param' | 'value' | 'function' | 'definition' | 'polar' | 'curve' | 'point' | 'implicit' | 'surface' | 'curve3' | 'point3' | 'region' | 'cpoint' | 'csurface' | 'coords' | 'psurface'
 
 export interface RowError {
   key: string
@@ -35,7 +35,7 @@ export interface RowAnalysis {
   z?: number
   /** `region` rows: a strict inequality, drawn with a dashed boundary. */
   strict?: boolean
-  /** `coords` rows: the coordinate the expression gives and the two it runs over (`from`/`to`, then `from2`/`to2`). */
+  /** `coords` rows: the coordinate the expression gives and the two it runs over (`from`/`to`, then `from2`/`to2`); `psurface` rows run over u and v. */
   given?: string
   over?: [string, string]
   from2?: number
@@ -118,6 +118,7 @@ export function decodeOutcomes(text: string, count: number): RowAnalysis[] {
       case 'cpoint': return { kind, x: Number(a), y: Number(b), ...(c ? { name: c } : {}) }
       case 'csurface': return { kind }
       case 'coords': return { kind, given: a, over: [b, c], from: Number(rest[0]), to: Number(rest[1]), from2: Number(rest[2]), to2: Number(rest[3]) }
+      case 'psurface': return { kind, over: ['u', 'v'], from: Number(a), to: Number(b), from2: Number(c), to2: Number(rest[0]) }
       case 'definition': return { kind, name: a }
       case 'polar':
       case 'curve': return { kind, from: Number(a), to: Number(b) }

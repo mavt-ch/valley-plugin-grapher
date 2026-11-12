@@ -32,6 +32,9 @@ const RESERVED_COMPLEX: [&str; 4] = ["x", "y", "z", "i"];
 const RESERVED_CYLINDRICAL: [&str; 5] = ["x", "y", "z", "r", "φ"];
 /// The spherical sheet reads (ρ, θ, φ); r is read as ρ before analysis.
 const RESERVED_SPHERICAL: [&str; 6] = ["x", "y", "z", "ρ", "θ", "φ"];
+/// The parameters of a surface `(x(u, v), y(u, v), z(u, v))` on the 3D sheet. They are not reserved: elsewhere, and
+/// wherever the sheet defines one of them, they stay ordinary names (sliders).
+pub const SURFACE_PARAMETERS: [&str; 2] = ["u", "v"];
 
 thread_local! {
     /// Set by `analyze` for the sheet being read.
@@ -207,6 +210,8 @@ pub enum Plot {
     /// `z = f(x, y)`, `x = f(y, z)` or `y = f(x, z)`: `axis` is the one the expression gives.
     Surface { expr: Expr, axis: Axis3 },
     Curve3 { x: Expr, y: Expr, z: Expr, from: f64, to: f64 },
+    /// `(x(u, v), y(u, v), z(u, v))`: `u` and `v` are the parameter ranges, `slots` the env slots of u and v.
+    ParamSurface { x: Expr, y: Expr, z: Expr, u: (f64, f64), v: (f64, f64), slots: [usize; 2] },
     Point3 { x: f64, y: f64, z: f64 },
     /// `w = f(z)` over the complex plane: the height is |f(z)|, or the value itself when the row is real-valued
     /// (`Re(z^2) / 5`), and `hue` is the complex value whose argument colours the surface.
@@ -333,6 +338,13 @@ fn collect(node: &Node, names: &mut BTreeSet<String>, calls: &mut BTreeSet<Strin
         }
         Node::Tuple(items) => items.iter().for_each(|item| collect(item, names, calls)),
     }
+}
+
+/// Every name a node reads, reserved or not, constants left out.
+fn names(node: &Node) -> BTreeSet<String> {
+    let mut names = BTreeSet::new();
+    collect(node, &mut names, &mut BTreeSet::new());
+    names
 }
 
 /// The reserved variables a node reads.
@@ -585,6 +597,17 @@ impl Analysis<'_> {
         Ok((from, to))
     }
 
+    /// A triple on the 3D sheet that reads both u and v and no reserved variable is a parametric surface, unless the
+    /// sheet defines u or v: then the triple keeps the meaning it had before (a point with sliders).
+    fn sweeps(&self, statement: &Statement) -> bool {
+        let (None, Node::Tuple(items)) = (&statement.left, &statement.right) else { return false };
+        if items.len() != 3 || items.iter().any(|item| !variables(item).is_empty()) {
+            return false;
+        }
+        let used: BTreeSet<String> = items.iter().flat_map(names).collect();
+        SURFACE_PARAMETERS.iter().all(|name| used.contains(*name) && !self.definitions.contains_key(*name) && !self.duplicates.contains(*name))
+    }
+
     fn plot(&mut self, mode: Mode, row: usize, input: &RowInput) -> Result<Outcome, MathError> {
         let statement = self.statement(row).clone();
         // `w = f(z)` names its surface; only the right side has to resolve.
@@ -595,7 +618,8 @@ impl Analysis<'_> {
         if let Some(left) = &statement.left {
             nodes.push(left);
         }
-        self.require(&nodes, &[])?;
+        let own: &[&str] = if mode == Mode::Space && self.sweeps(&statement) { &SURFACE_PARAMETERS } else { &[] };
+        self.require(&nodes, own)?;
         if mode == Mode::Complex {
             return self.plot_complex(&statement);
         }
@@ -798,6 +822,13 @@ impl Analysis<'_> {
             Ok(Outcome::Plotted(Plot::Surface { expr: over(analysis, node, axis.over())?, axis }))
         };
         match (&statement.left, &statement.right) {
+            (None, Node::Tuple(items)) if self.sweeps(statement) => {
+                let u = self.bounds(&input.from, &input.to, (0.0, TAU), true)?;
+                let v = self.bounds(&input.from2, &input.to2, (0.0, TAU), true)?;
+                let sweep = |analysis: &Self, node: &Node| analysis.compile(node, &|name| SURFACE_PARAMETERS.contains(&name) || !is_reserved(name));
+                let slots = SURFACE_PARAMETERS.map(|name| self.slots[name]);
+                Ok(Outcome::Plotted(Plot::ParamSurface { x: sweep(self, &items[0])?, y: sweep(self, &items[1])?, z: sweep(self, &items[2])?, u, v, slots }))
+            }
             (None, Node::Tuple(items)) => match items.as_slice() {
                 [x, y, z] if [x, y, z].iter().all(|item| only(item, &["t"])) && [x, y, z].iter().any(|item| uses(item, "t")) => {
                     let (from, to) = self.range(input)?;
@@ -905,6 +936,13 @@ pub fn analyze(mode: Mode, inputs: &[RowInput]) -> Sheet {
     }
     let mut env = vec![0.0; SLOTS];
     let mut cenv = vec![C64::real(0.0); SLOTS];
+    if mode == Mode::Space {
+        for name in SURFACE_PARAMETERS {
+            slots.insert(name.to_string(), env.len());
+            env.push(0.0);
+            cenv.push(C64::real(0.0));
+        }
+    }
     let mut cfunctions = Vec::new();
     let mut function_index = HashMap::new();
     let mut functions = Vec::new();
@@ -1110,6 +1148,36 @@ mod tests {
         assert_eq!(error(&sheet, 6).key, "error.triple");
         assert_eq!(error(&sheet, 7).key, "error.unsupported");
         assert!(matches!(sheet.rows[8].outcome, Outcome::Value(value) if value == 7.0));
+    }
+
+    #[test]
+    fn triples_in_u_and_v_are_parametric_surfaces_unless_the_sheet_defines_them() {
+        let mut sheet = sheet(Mode::Space, &[
+            "((2 + cos v) cos u, (2 + cos v) sin u, sin v)", "(u cos v, u sin v, u)", "(u, v, t)", "(u, 1, 2)", "(cos t, sin t, t)", "(1, 2, 3)", "(a u, v, 0)", "a = 2",
+        ]);
+        assert!(matches!(sheet.rows[0].plot(), Some(Plot::ParamSurface { u, v, .. }) if *u == (0.0, TAU) && *v == (0.0, TAU)), "{:?}", sheet.rows[0].outcome);
+        assert!(matches!(sheet.rows[1].plot(), Some(Plot::ParamSurface { .. })));
+        // A triple that also reads t, or only one of u and v, keeps its old reading: u and v are undefined names.
+        assert_eq!(error(&sheet, 2).missing, ["u", "v"]);
+        assert_eq!(error(&sheet, 3).missing, ["u"]);
+        assert!(matches!(sheet.rows[4].plot(), Some(Plot::Curve3 { .. })));
+        assert!(matches!(sheet.rows[5].plot(), Some(Plot::Point3 { .. })));
+        assert!(matches!(sheet.rows[6].plot(), Some(Plot::ParamSurface { .. })));
+        let Some(Plot::ParamSurface { x, slots, .. }) = sheet.rows[0].plot().cloned() else { unreachable!() };
+        sheet.env[slots[0]] = 0.0;
+        sheet.env[slots[1]] = 0.0;
+        assert_eq!(eval(&x, &mut sheet.env, &sheet.functions), 3.0);
+        // Where the sheet defines u and v, the triple is a point at their values, as before.
+        let defined = self::sheet(Mode::Space, &["(u cos v, u sin v, v)", "u = 2", "v = 0"]);
+        assert!(matches!(defined.rows[0].plot(), Some(Plot::Point3 { x, y, z }) if (*x, *y, *z) == (2.0, 0.0, 0.0)), "{:?}", defined.rows[0].outcome);
+        assert!(matches!(&defined.rows[1].outcome, Outcome::Parameter { name, slider: true, .. } if name == "u"));
+        // u and v stay ordinary names on every other sheet.
+        assert_eq!(error(&self::sheet(Mode::Cylindrical, &["(u cos v, u sin v, u)"]), 0).missing, ["u", "v"]);
+        let input = |from: &str, to: &str, from2: &str, to2: &str| RowInput { text: "(u cos v, u sin v, v)".into(), from: from.into(), to: to.into(), from2: from2.into(), to2: to2.into(), hidden: false };
+        let ranged = analyze(Mode::Space, &[input("-1", "1", "0", "4π"), input("0", "∞", "", ""), input("", "", "k", "1")]);
+        assert!(matches!(ranged.rows[0].plot(), Some(Plot::ParamSurface { u, v, .. }) if *u == (-1.0, 1.0) && *v == (0.0, 4.0 * PI)));
+        assert_eq!(error(&ranged, 1).key, "error.range");
+        assert_eq!(error(&ranged, 2).missing, ["k"]);
     }
 
     fn coords(sheet: &Sheet, row: usize) -> (usize, Span, Span) {

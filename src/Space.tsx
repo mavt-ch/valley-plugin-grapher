@@ -82,6 +82,11 @@ export function drawSpace(ctx: CanvasRenderingContext2D, records: readonly Space
       ctx.lineWidth = 2.5
       trace(ctx, record.points)
       ctx.stroke()
+    } else if (record.kind === SPACE.contour) {
+      ctx.strokeStyle = color
+      ctx.lineWidth = 1.25
+      trace(ctx, record.points)
+      ctx.stroke()
     } else if (record.kind === SPACE.arrow && record.points.length >= 4) {
       const [ax, ay, bx, by] = record.points
       fieldArrow(ctx, ax, ay, bx, by, color, uniform[record.row] ? 1 : magnitudeOpacity(record.value))

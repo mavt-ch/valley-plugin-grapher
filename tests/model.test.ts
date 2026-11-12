@@ -85,6 +85,17 @@ describe('sheets', () => {
     expect(named('F(x, y) = (-y, x) + 1')).toBe(false)
   })
 
+  it('reads level-curve settings additively and starts the 3D paraboloid with its floor curves', () => {
+    const document = normalizeDocument({ version: 1, sheets: { cartesian: [{ id: 'a', text: 'f(x, y) = x y', levels: 12, step: '0.5', labels: false }, { id: 'b', text: 'g(x, y) = x', levels: 0, step: 3 }, { id: 'c', text: 'z' }], space: [{ id: 'd', text: 'x y', floor: true }] } })
+    expect(document.sheets.cartesian[0]).toMatchObject({ levels: 12, step: '0.5', labels: false })
+    expect(['levels', 'step', 'labels', 'floor'].some((key) => key in document.sheets.cartesian[1])).toBe(false)
+    expect(['levels', 'step', 'labels', 'floor'].some((key) => key in document.sheets.cartesian[2])).toBe(false)
+    expect(document.sheets.space[0].floor).toBe(true)
+    const fresh = defaultDocument()
+    expect(fresh.sheets.space[0]).toMatchObject({ text: 'z = (x^2 + y^2) / 5 - 6', floor: true })
+    expect('floor' in fresh.sheets.space[1]).toBe(false)
+  })
+
   it('turns the old trigonometric sheet into Cartesian with π axes', () => {
     const row = (id: string, text: string) => ({ id, text, color: 'palette:red' })
     const examples = normalizeDocument({ version: 1, mode: 'trig', sheets: { cartesian: [row('a', 'y = x')], trig: ['sin(x)', 'cos(x)', 'y = A sin(k x)', 'A = 2', 'k = 0.5'].map((text, at) => row(`t${at}`, text)) } })

@@ -26,8 +26,8 @@ use crate::complex::{self, C64, CExpr, CUserFn};
 use crate::eval::{Expr, UserFn, eval};
 use std::collections::HashMap;
 
-use crate::sample::percentile;
-use crate::sheet::{Axis3, Face, Height, Mesh, Plot, Sheet, Span, System, T, X, Y, Z};
+use crate::sample::{level_values, nice, percentile};
+use crate::sheet::{Axis3, Face, Height, Levels, Mesh, Plot, Sheet, Span, System, T, X, Y, Z};
 
 pub const POLYGON: f64 = 0.0;
 pub const SEGMENT: f64 = 1.0;
@@ -36,6 +36,8 @@ pub const POINT: f64 = 2.0;
 pub const HUE_POLYGON: f64 = 3.0;
 /// An arrow of a vector field: tail and head, with the magnitude relative to the field's reference as the value.
 pub const ARROW: f64 = 4.0;
+/// A piece of a level curve on the floor of the cube under a surface z = f(x, y), with its level as the value.
+pub const CONTOUR: f64 = 5.0;
 pub const BOX: f64 = 10.0;
 pub const GRID: f64 = 11.0;
 pub const GRID_MAJOR: f64 = 12.0;
@@ -93,13 +95,6 @@ fn dot(a: Vec3, b: Vec3) -> f64 {
 fn normalize(a: Vec3) -> Option<Vec3> {
     let length = dot(a, a).sqrt();
     (length > 0.0 && length.is_finite()).then(|| [a[0] / length, a[1] / length, a[2] / length])
-}
-
-/// A 1, 2 or 5 × 10ⁿ step at least `raw`.
-fn nice(raw: f64) -> f64 {
-    let base = 10_f64.powf(raw.log10().floor());
-    let ratio = raw / base;
-    base * if ratio <= 1.0 { 1.0 } else if ratio <= 2.0 { 2.0 } else if ratio <= 5.0 { 5.0 } else { 10.0 }
 }
 
 struct Projector {
@@ -325,7 +320,7 @@ struct Scene<'a> {
 }
 
 impl Scene<'_> {
-    fn surface(&mut self, row: f64, expr: &Expr, axis: Axis3) {
+    fn surface(&mut self, row: f64, expr: &Expr, axis: Axis3, floor: Option<Levels>) {
         let range = self.camera.range;
         // The two grid axes as (env slot, coordinate index), then the coordinate the expression gives.
         let (u, v, w) = match axis {
@@ -348,6 +343,47 @@ impl Scene<'_> {
             }
         }
         self.mesh(row, &grid, &[w], None);
+        if let (Axis3::Z, Some(levels)) = (axis, floor) {
+            self.floor_contours(row, &grid, levels);
+        }
+    }
+
+    /// The level curves of a surface z = f(x, y) sampled on `grid`, by marching squares, drawn on the floor of the cube
+    /// (z = −range) for the levels the surface takes inside the cube.
+    fn floor_contours(&mut self, row: f64, grid: &[Vec3], levels: Levels) {
+        let range = self.camera.range;
+        let stride = CELLS + 1;
+        let mut values: Vec<f64> = grid.iter().map(|p| p[2]).filter(|z| z.is_finite() && z.abs() <= range).collect();
+        for level in level_values(&mut values, levels) {
+            for j in 0..CELLS {
+                for i in 0..CELLS {
+                    // Corners counter-clockwise from (i, j); edge `e` runs from corner `e` to corner `e + 1`.
+                    let corners = [grid[j * stride + i], grid[j * stride + i + 1], grid[(j + 1) * stride + i + 1], grid[(j + 1) * stride + i]];
+                    if corners.iter().any(|p| !p[2].is_finite()) {
+                        continue;
+                    }
+                    let above: [bool; 4] = corners.map(|p| p[2] > level);
+                    let crossing = |e: usize| {
+                        let (a, b) = (corners[e], corners[(e + 1) % 4]);
+                        let t = (level - a[2]) / (b[2] - a[2]);
+                        [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, -range]
+                    };
+                    let edges: Vec<usize> = (0..4).filter(|e| above[*e] != above[(e + 1) % 4]).collect();
+                    let pairs: Vec<(usize, usize)> = match edges.as_slice() {
+                        [a, b] => vec![(*a, *b)],
+                        // A saddle: where the mean of the corners lies on corner 0's side, corners 0 and 2 join across the
+                        // centre and the level cuts off corners 1 and 3; otherwise corners 0 and 2.
+                        [_, _, _, _] => {
+                            if (corners.iter().map(|p| p[2]).sum::<f64>() / 4.0 > level) == above[0] { vec![(0, 1), (2, 3)] } else { vec![(3, 0), (1, 2)] }
+                        }
+                        _ => Vec::new(),
+                    };
+                    for (a, b) in pairs {
+                        self.push(CONTOUR, row, level, &[crossing(a), crossing(b)]);
+                    }
+                }
+            }
+        }
     }
 
     /// The points of a surface sampled on a (CELLS + 1)² grid over `u` × `v`; `point` maps parameter values to (x, y, z).
@@ -623,7 +659,7 @@ pub fn render(sheet: &mut Sheet, camera: Camera) -> Vec<f64> {
         }
         let index = index as f64;
         match plot {
-            Plot::Surface { expr, axis } => scene.surface(index, expr, *axis),
+            Plot::Surface { expr, axis, floor } => scene.surface(index, expr, *axis, *floor),
             Plot::Curve3 { x, y, z, from, to } => scene.curve(index, (x, y, z), *from, *to),
             Plot::Point3 { x, y, z } => scene.point(index, [*x, *y, *z]),
             Plot::ComplexSurface { expr, hue, height } => scene.complex_surface(index, expr, hue, *height),
@@ -893,6 +929,37 @@ mod tests {
             let length = (record.points[1].0 - record.points[0].0).hypot(record.points[1].1 - record.points[0].1);
             assert!((length - FIELD_REACH * edge).abs() < 1e-6, "{length} vs {edge}");
         }
+    }
+
+    #[test]
+    fn level_curves_of_a_surface_lie_on_the_floor_of_the_cube() {
+        let inputs = [RowInput { text: "z = (x^2 + y^2) / 5 - 6".into(), floor: true, ..RowInput::default() }, RowInput { text: "x = y z / 10".into(), floor: true, ..RowInput::default() }];
+        let top = Camera { pitch: std::f64::consts::FRAC_PI_2, yaw: 0.0, ..CAMERA };
+        let mut sheet = analyze(Mode::Space, &inputs);
+        let data = render(&mut sheet, top);
+        let projector = Projector::new(&top);
+        let (cx, cy, _) = projector.screen([0.0, 0.0, -10.0]);
+        let mut levels = Vec::new();
+        let mut at = 0;
+        while at < data.len() {
+            let count = data[at + 3] as usize;
+            if data[at] == CONTOUR {
+                assert_eq!(data[at + 1], 0.0, "only the surface along z draws level curves");
+                let level = data[at + 2];
+                levels.push(level);
+                // From above, the level c of (x² + y²)/5 − 6 is the circle of radius √(5(c + 6)).
+                for k in 0..count {
+                    let r = ((data[at + 4 + 2 * k] - cx).powi(2) + (data[at + 5 + 2 * k] - cy).powi(2)).sqrt() / projector.scale;
+                    assert!((r - (5.0 * (level + 6.0)).sqrt()).abs() < 0.1, "level {level}: radius {r}");
+                }
+            }
+            at += 4 + 2 * count;
+        }
+        levels.dedup();
+        assert_eq!(levels, [-4.0, -2.0, 0.0, 2.0, 4.0, 6.0, 8.0], "levels the surface takes inside the cube (−6 to just under 10), on a step of 2");
+        // Seen from the side the floor lines are farthest and come before the surface.
+        let side = records(&["z = (x^2 + y^2) / 5 - 6"], CAMERA);
+        assert!(side.iter().all(|r| r.kind != CONTOUR));
     }
 
     #[test]

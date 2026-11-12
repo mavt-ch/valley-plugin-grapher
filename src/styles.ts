@@ -137,6 +137,8 @@ button.grapher-handle:hover { color:var(--text-color); }
 .grapher-bound::-webkit-outer-spin-button, .grapher-bound::-webkit-inner-spin-button { -webkit-appearance:none; margin:0; }
 .grapher-bound:focus { outline:none; border-color:var(--accent-color); color:var(--text-color); }
 .grapher-range-bound { width:64px; }
+.grapher-levels-count { width:40px; }
+.grapher-bound:disabled { opacity:0.45; }
 .grapher-domain-variable { font-family:var(--mono-font); font-size:0.75rem; color:var(--text-secondary); white-space:nowrap; }
 
 /* Same 2px line and 10px thumb as the app's media slider; the fill comes from --slider-fill. */

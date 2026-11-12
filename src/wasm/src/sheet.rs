@@ -190,7 +190,24 @@ pub struct RowInput {
     /// The second parameter range of a surface over two coordinates; empty means that coordinate's default.
     pub from2: String,
     pub to2: String,
+    /// Level curves: the most levels to draw (empty means 10) and the step between them (empty means automatic).
+    pub levels: String,
+    pub step: String,
+    /// Draw the level curves of a surface z = f(x, y) on the floor of the cube.
+    pub floor: bool,
 }
+
+/// Which level curves to draw: at most `count` round levels across the values in view, or every multiple of `step`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Levels {
+    pub count: usize,
+    pub step: Option<f64>,
+}
+
+/// Level curves drawn when the row does not say how many.
+pub const DEFAULT_LEVELS: usize = 10;
+/// The most levels a row may ask for.
+pub const MAX_LEVELS: usize = 50;
 
 #[derive(Clone, Debug)]
 pub enum Plot {
@@ -207,8 +224,11 @@ pub enum Plot {
     Region { field: Field, relation: Relation },
     /// A complex number on the complex sheet, with the name it was defined under.
     ComplexPoint { re: f64, im: f64, name: String },
-    /// `z = f(x, y)`, `x = f(y, z)` or `y = f(x, z)`: `axis` is the one the expression gives.
-    Surface { expr: Expr, axis: Axis3 },
+    /// `z = f(x, y)`, `x = f(y, z)` or `y = f(x, z)`: `axis` is the one the expression gives; a surface along z may draw
+    /// its level curves on the floor of the cube.
+    Surface { expr: Expr, axis: Axis3, floor: Option<Levels> },
+    /// The level curves of a function `f(x, y) = …` defined on the Cartesian sheet.
+    Contour { field: Field, levels: Levels, name: String },
     Curve3 { x: Expr, y: Expr, z: Expr, from: f64, to: f64 },
     /// A vector field `F(x, y) = (P, Q)` or a bare pair in x and y on the Cartesian sheet, drawn as arrows.
     Field { x: Expr, y: Expr },
@@ -627,6 +647,24 @@ impl Analysis<'_> {
         Ok(eval(&expr, &mut self.env, &self.functions))
     }
 
+    /// The level curves a row asks for: its count (empty or unreadable means the default, clamped to 1 … 50) and its
+    /// step, a positive constant expression, or automatic when empty.
+    fn levels(&mut self, input: &RowInput) -> Result<Levels, MathError> {
+        let count = input.levels.trim().parse::<f64>().ok().filter(|count| count.is_finite()).map_or(DEFAULT_LEVELS, |count| (count.round() as usize).clamp(1, MAX_LEVELS));
+        if input.step.trim().is_empty() {
+            return Ok(Levels { count, step: None });
+        }
+        let statement = tokenize(&input.step).and_then(|tokens| parse(&tokens, &HashSet::new()))?;
+        if statement.left.is_some() {
+            return Err(MathError::new("error.unexpected", "="));
+        }
+        let step = self.constant(&statement.right)?;
+        if !(step.is_finite() && step > 0.0) {
+            return Err(MathError::new("error.step", ""));
+        }
+        Ok(Levels { count, step: Some(step) })
+    }
+
     fn range(&mut self, input: &RowInput) -> Result<(f64, f64), MathError> {
         self.bounds(&input.from, &input.to, (0.0, TAU), true)
     }
@@ -906,8 +944,11 @@ impl Analysis<'_> {
         let over = |analysis: &Self, node: &Node, axes: [&'static str; 2]| -> Result<Expr, MathError> {
             analysis.compile(node, &move |name| axes.contains(&name) || !is_reserved(name))
         };
+        // Level curves on the floor belong to surfaces along z; their settings are read only where they apply.
+        let floor = if input.floor { Some(self.levels(input)) } else { None };
         let surface = |analysis: &Self, node: &Node, axis: Axis3| -> Result<Outcome, MathError> {
-            Ok(Outcome::Plotted(Plot::Surface { expr: over(analysis, node, axis.over())?, axis }))
+            let floor = if axis == Axis3::Z { floor.clone().transpose()? } else { None };
+            Ok(Outcome::Plotted(Plot::Surface { expr: over(analysis, node, axis.over())?, axis, floor }))
         };
         match (&statement.left, &statement.right) {
             (None, Node::Tuple(items)) if self.sweeps(statement) => {
@@ -1103,6 +1144,21 @@ pub fn analyze(mode: Mode, inputs: &[RowInput]) -> Sheet {
                         let body = analysis.cfunctions[analysis.function_index[name].0].body.clone();
                         Outcome::Plotted(Plot::ComplexSurface { expr: body.clone(), hue: body, height: Height::Modulus })
                     }
+                    // `f(x, y) = …` draws its level curves on the Cartesian sheet and its surface z = f(x, y) in 3D.
+                    Definition::Function { params, .. } if params == &["x", "y"] && matches!(mode, Mode::Cartesian | Mode::Trig) => {
+                        let body = analysis.functions[analysis.function_index[name].0].body.clone();
+                        match analysis.levels(input) {
+                            Ok(levels) => Outcome::Plotted(Plot::Contour { field: Field::Real(body), levels, name: name.clone() }),
+                            Err(error) => Outcome::Error(error),
+                        }
+                    }
+                    Definition::Function { params, .. } if params == &["x", "y"] && mode == Mode::Space => {
+                        let expr = analysis.functions[analysis.function_index[name].0].body.clone();
+                        match input.floor.then(|| analysis.levels(input)).transpose() {
+                            Ok(floor) => Outcome::Plotted(Plot::Surface { expr, axis: Axis3::Z, floor }),
+                            Err(error) => Outcome::Error(error),
+                        }
+                    }
                     Definition::Function { params, .. } if params == &["x"] && !analysis.complex => {
                         let index = analysis.function_index[name].0;
                         Outcome::Plotted(Plot::FunctionX(analysis.functions[index].body.clone()))
@@ -1236,7 +1292,7 @@ mod tests {
     #[test]
     fn user_functions_take_up_to_three_parameters() {
         let mut sheet = sheet(Mode::Cartesian, &["f(x, y) = x y + 1", "f(2, 3)", "h(x) = f(x, 2) - 1", "g(a, b, c) = a + 2b + 3c", "g(1, 1, 1)", "f(1)", "k(x, x) = x"]);
-        assert!(matches!(&sheet.rows[0].outcome, Outcome::Definition { name } if name == "f"), "{:?}", sheet.rows[0].outcome);
+        assert!(matches!(sheet.rows[0].plot(), Some(Plot::Contour { name, .. }) if name == "f"), "{:?}", sheet.rows[0].outcome);
         assert!(matches!(sheet.rows[1].outcome, Outcome::Value(value) if value == 7.0));
         assert_eq!(at(&mut sheet, 2, X, 3.0), 6.0);
         assert!(matches!(sheet.rows[4].outcome, Outcome::Value(value) if value == 6.0));
@@ -1250,6 +1306,38 @@ mod tests {
         assert_eq!((swap.env[X], swap.env[Y]), (1.0, 5.0));
         let complex = self::sheet(Mode::Complex, &["f(z, w) = z w", "f(i, i)"]);
         assert!(matches!(complex.rows[1].plot(), Some(Plot::ComplexPoint { re, im, .. }) if *re == -1.0 && *im == 0.0), "{:?}", complex.rows[1].outcome);
+    }
+
+    #[test]
+    fn functions_of_x_and_y_draw_level_curves_and_surfaces() {
+        let input = |text: &str, levels: &str, step: &str, floor: bool| RowInput { text: text.into(), levels: levels.into(), step: step.into(), floor, ..RowInput::default() };
+        let plane = analyze(Mode::Cartesian, &[
+            input("f(x, y) = x^2 - y^2", "", "", false), input("g(x, y) = x y", "5", "0.5", false), input("h(x, y) = x + y", "", "-1", false),
+            input("k(x, y) = x - y", "abc", "q", false), input("m(x, y) = x", "500", "", false), input("f(x, 2)", "", "", false), input("n(a, b) = a b", "", "", false),
+        ]);
+        let levels = |sheet: &Sheet, row: usize| match sheet.rows[row].plot() {
+            Some(Plot::Contour { levels, .. }) => *levels,
+            other => panic!("row {row} draws no level curves: {other:?}"),
+        };
+        assert_eq!(levels(&plane, 0), Levels { count: DEFAULT_LEVELS, step: None });
+        assert!(matches!(plane.rows[0].plot(), Some(Plot::Contour { name, .. }) if name == "f"));
+        assert_eq!(levels(&plane, 1), Levels { count: 5, step: Some(0.5) });
+        assert_eq!(error(&plane, 2).key, "error.step");
+        assert_eq!(error(&plane, 3).missing, ["q"]);
+        assert_eq!(levels(&plane, 4).count, MAX_LEVELS);
+        // A two-variable function stays callable, and one in other names is only defined.
+        assert!(matches!(plane.rows[5].plot(), Some(Plot::FunctionX(_))));
+        assert!(matches!(&plane.rows[6].outcome, Outcome::Definition { name } if name == "n"));
+        assert!(matches!(&sheet(Mode::Polar, &["f(x, y) = x y"]).rows[0].outcome, Outcome::Definition { .. }));
+        let space = analyze(Mode::Space, &[
+            input("f(x, y) = x^2 - y^2", "", "", false), input("g(x, y) = x y", "4", "", true), input("z = x y", "", "2", true), input("x^2 + y^2", "", "", true), input("x = y z", "", "", true), input("z = x", "", "0", true),
+        ]);
+        assert!(matches!(space.rows[0].plot(), Some(Plot::Surface { axis: Axis3::Z, floor: None, .. })), "{:?}", space.rows[0].outcome);
+        assert!(matches!(space.rows[1].plot(), Some(Plot::Surface { floor: Some(Levels { count: 4, step: None }), .. })));
+        assert!(matches!(space.rows[2].plot(), Some(Plot::Surface { floor: Some(Levels { step: Some(2.0), .. }), .. })));
+        assert!(matches!(space.rows[3].plot(), Some(Plot::Surface { floor: Some(_), .. })));
+        assert!(matches!(space.rows[4].plot(), Some(Plot::Surface { axis: Axis3::X, floor: None, .. })));
+        assert_eq!(error(&space, 5).key, "error.step");
     }
 
     #[test]
@@ -1347,7 +1435,7 @@ mod tests {
         assert!(matches!(&defined.rows[1].outcome, Outcome::Parameter { name, slider: true, .. } if name == "u"));
         // u and v stay ordinary names on every other sheet.
         assert_eq!(error(&self::sheet(Mode::Cylindrical, &["(u cos v, u sin v, u)"]), 0).missing, ["u", "v"]);
-        let input = |from: &str, to: &str, from2: &str, to2: &str| RowInput { text: "(u cos v, u sin v, v)".into(), from: from.into(), to: to.into(), from2: from2.into(), to2: to2.into(), hidden: false };
+        let input = |from: &str, to: &str, from2: &str, to2: &str| RowInput { text: "(u cos v, u sin v, v)".into(), from: from.into(), to: to.into(), from2: from2.into(), to2: to2.into(), hidden: false, ..RowInput::default() };
         let ranged = analyze(Mode::Space, &[input("-1", "1", "0", "4π"), input("0", "∞", "", ""), input("", "", "k", "1")]);
         assert!(matches!(ranged.rows[0].plot(), Some(Plot::ParamSurface { u, v, .. }) if *u == (-1.0, 1.0) && *v == (0.0, 4.0 * PI)));
         assert_eq!(error(&ranged, 1).key, "error.range");
@@ -1395,7 +1483,7 @@ mod tests {
 
     #[test]
     fn cylindrical_ranges_take_angles_finite_and_heights_open() {
-        let input = |text: &str, from: &str, to: &str, from2: &str, to2: &str| RowInput { text: text.into(), from: from.into(), to: to.into(), from2: from2.into(), to2: to2.into(), hidden: false };
+        let input = |text: &str, from: &str, to: &str, from2: &str, to2: &str| RowInput { text: text.into(), from: from.into(), to: to.into(), from2: from2.into(), to2: to2.into(), hidden: false, ..RowInput::default() };
         let sheet = analyze(Mode::Cylindrical, &[
             input("r = 2", "0", "π", "-1", "3"),
             input("r = 2", "", "", "-inf", "∞"),

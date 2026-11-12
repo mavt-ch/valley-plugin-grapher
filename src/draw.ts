@@ -246,8 +246,9 @@ export function drawArrows(ctx: CanvasRenderingContext2D, arrows: readonly { x: 
 }
 
 /** Regions are filled first, translucent and once per row so neighbouring cells never double up; `dashed` marks
- * rows whose boundary is excluded (strict inequalities), and `uniform` vector fields whose arrows are not shaded by magnitude. */
-export function drawPaths(ctx: CanvasRenderingContext2D, paths: readonly SamplePath[], colors: readonly string[], theme: Theme, dashed: readonly boolean[] = [], uniform: readonly boolean[] = []): void {
+ * rows whose boundary is excluded (strict inequalities), `uniform` vector fields whose arrows are not shaded by magnitude
+ * and `labelled` rows whose level curves show their values. */
+export function drawPaths(ctx: CanvasRenderingContext2D, paths: readonly SamplePath[], colors: readonly string[], theme: Theme, dashed: readonly boolean[] = [], uniform: readonly boolean[] = [], labelled: readonly boolean[] = []): void {
   ctx.lineJoin = 'round'
   ctx.lineCap = 'round'
   const regions = new Map<number, Path2D>()
@@ -286,7 +287,7 @@ export function drawPaths(ctx: CanvasRenderingContext2D, paths: readonly SampleP
       ctx.stroke()
       continue
     }
-    ctx.lineWidth = 2.5
+    ctx.lineWidth = path.kind === 'contour' ? 1.5 : 2.5
     ctx.strokeStyle = color
     ctx.setLineDash(dashed[path.row] ? [7, 5] : [])
     ctx.beginPath()
@@ -299,6 +300,34 @@ export function drawPaths(ctx: CanvasRenderingContext2D, paths: readonly SampleP
     ctx.stroke()
   }
   ctx.setLineDash([])
+  levelLabels(ctx, paths.filter((path) => path.kind === 'contour' && labelled[path.row]), theme)
+}
+
+/** Where along a level curve its label may go, tried in turn: off the middle first, since a curve symmetric about an axis has its middle on that axis. */
+const LABEL_SPOTS = [0.3, 0.7, 0.15, 0.85, 0.5]
+
+/** Each level curve at least 60 pixels long shows its value once, at the first spot along it where the label overlaps no other. */
+export function levelLabels(ctx: CanvasRenderingContext2D, paths: readonly SamplePath[], theme: Theme): void {
+  ctx.font = theme.font
+  ctx.textAlign = 'center'
+  ctx.textBaseline = 'middle'
+  const placed: { x: number; y: number; w: number }[] = []
+  for (const { points } of paths) {
+    const walked = [0]
+    for (let i = STRIDE; i < points.length; i += STRIDE) walked.push(walked[walked.length - 1] + Math.hypot(points[i] - points[i - STRIDE], points[i + 1] - points[i + 1 - STRIDE]))
+    const length = walked[walked.length - 1]
+    if (length < 60) continue
+    const text = formatNumber(points[4], 4)
+    const w = ctx.measureText(text).width + 8
+    for (const spot of LABEL_SPOTS) {
+      const at = Math.max(0, walked.findIndex((distance) => distance >= length * spot)) * STRIDE
+      const [x, y] = [clamp(points[at]), clamp(points[at + 1])]
+      if (placed.some((box) => Math.abs(box.x - x) < (box.w + w) / 2 && Math.abs(box.y - y) < 16)) continue
+      placed.push({ x, y, w })
+      haloText(ctx, theme, text, x, y)
+      break
+    }
+  }
 }
 
 export interface Hit {

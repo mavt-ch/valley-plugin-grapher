@@ -6,12 +6,12 @@ import type { RowAnalysis } from './engine'
 import { Check, ChevronDown, Eye, EyeOff, Grip, Slider, Trash, Warning, X } from './icons'
 import { uiText } from './localization'
 import { MathText } from './MathText'
-import { COLORS, MAIN_GRAPH, MODES, createRow, graphOf, moveRow, rangeVariable, unitsOf, type AxisUnits, type Mode, type Row } from './model'
+import { COLORS, DEFAULT_LEVELS, MAIN_GRAPH, MAX_LEVELS, MODES, createRow, graphOf, moveRow, rangeVariable, unitsOf, type AxisUnits, type Mode, type Row } from './model'
 import { getStore, useGrapher } from './store'
 import { formatComplex, formatNumber, formatPolar } from './ticks'
 import { viewOf } from './views'
 
-const DRAWN = new Set(['function', 'polar', 'curve', 'point', 'implicit', 'surface', 'curve3', 'point3', 'region', 'cpoint', 'csurface', 'coords', 'psurface', 'implicit3', 'field', 'field3'])
+const DRAWN = new Set(['function', 'polar', 'curve', 'point', 'implicit', 'surface', 'curve3', 'point3', 'region', 'cpoint', 'csurface', 'coords', 'psurface', 'implicit3', 'field', 'field3', 'contour'])
 
 /** The row whose input takes focus on its next render (after Enter adds a row or Backspace removes one). */
 let pendingFocus: string | null = null
@@ -214,6 +214,43 @@ const OptionToggle = ({ label, checked, onChange }: { label: string; checked: bo
   </button>
 )
 
+/** How many level curves a row draws (at most this many round levels in view) or the step between them, which takes over when set. */
+const LevelsControl = ({ row, edit }: Pick<RowProps, 'row' | 'edit'>): ReactElement => {
+  const stepped = Boolean(row.step?.trim())
+  return (
+    <div className="grapher-domain">
+      <input
+        className="grapher-bound grapher-levels-count"
+        type="number"
+        min={1}
+        max={MAX_LEVELS}
+        step={1}
+        value={row.levels ?? DEFAULT_LEVELS}
+        disabled={stepped}
+        aria-label={uiText('levels.count')}
+        onChange={(event) => {
+          const value = Number(event.target.value)
+          if (Number.isInteger(value) && value >= 1 && value <= MAX_LEVELS) edit((current) => ({ ...current, levels: value }))
+        }}
+      />
+      <span className="grapher-domain-variable">{uiText('levels.unit')}</span>
+      <input
+        className="grapher-bound grapher-range-bound"
+        value={row.step ?? ''}
+        placeholder={uiText('levels.auto')}
+        spellCheck={false}
+        autoComplete="off"
+        aria-label={uiText('levels.step')}
+        onChange={(event) => {
+          const value = event.target.value
+          edit((current) => ({ ...current, step: value }))
+        }}
+      />
+      <span className="grapher-domain-variable">{uiText('levels.stepUnit')}</span>
+    </div>
+  )
+}
+
 const Details = (props: RowProps): ReactElement | null => {
   const { analysis, row } = props
   if (!analysis || !row.text.trim()) return null
@@ -251,6 +288,25 @@ const Details = (props: RowProps): ReactElement | null => {
     case 'coords':
     case 'psurface':
       return <RangeControl {...props} />
+    case 'contour':
+      return (
+        <>
+          <LevelsControl row={row} edit={props.edit} />
+          <div className="grapher-options">
+            <OptionToggle label={uiText('levels.labels')} checked={row.labels !== false} onChange={(checked) => props.edit((current) => ({ ...current, labels: checked }))} />
+          </div>
+        </>
+      )
+    case 'surface':
+      if (analysis.axis !== 'z') return null
+      return (
+        <>
+          <div className="grapher-options">
+            <OptionToggle label={uiText('levels.floor')} checked={row.floor === true} onChange={(checked) => props.edit((current) => ({ ...current, floor: checked }))} />
+          </div>
+          {row.floor ? <LevelsControl row={row} edit={props.edit} /> : null}
+        </>
+      )
     case 'field':
     case 'field3':
       return (

@@ -13,6 +13,10 @@
 //! magnitude relative to the 90th percentile of the magnitudes in view, capped at nine tenths of the cell, so no arrow
 //! reaches into a neighbour's cell.
 //!
+//! The level curves of `f(x, y) = …` are traced by the same marching squares, once per level: at most the row's count of
+//! levels on round multiples of a 1, 2 or 5 × 10ⁿ step across the values in view (from the 2nd to the 98th percentile,
+//! so a pole does not swallow the range), or every multiple of the row's own step; each path carries its level.
+//!
 //! Output is one flat `f64` stream of paths: `[row, kind, count]`, then `count` points of
 //! `[screen x, screen y, world x, world y, parameter]`. An arrow is two points, tail then head; the tail's parameter
 //! is the magnitude |F| and the head's the magnitude relative to the view's reference, in [0, 1].
@@ -22,10 +26,12 @@ use std::f64::consts::TAU;
 use crate::complex::{self, C64, CUserFn};
 use crate::eval::{Expr, UserFn, eval};
 use crate::parser::Relation;
-use crate::sheet::{Field, Plot, Sheet, T, THETA, X, Y, Z};
+use crate::sheet::{Field, Levels, Plot, Sheet, T, THETA, X, Y, Z};
 
 pub const LINE: f64 = 0.0;
 pub const POINT: f64 = 1.0;
+/// One level curve; every point's parameter is its level.
+pub const CONTOUR: f64 = 2.0;
 /// One filled polygon of a region.
 pub const REGION: f64 = 3.0;
 /// One arrow of a vector field.
@@ -38,6 +44,8 @@ const ARROWS_ACROSS: f64 = 20.0;
 const ARROW_BUDGET: usize = 2500;
 /// The share of a lattice cell the longest arrow spans.
 const ARROW_REACH: f64 = 0.9;
+/// The most level curves one row draws in view; a finer step is coarsened to stay below it.
+const LEVEL_BUDGET: usize = 200;
 
 const FUNCTION_DEPTH: u32 = 12;
 const CURVE_DEPTH: u32 = 10;
@@ -376,31 +384,42 @@ impl Graph<'_> {
     }
 
     /// Where F changes sign along an edge, by linear interpolation; `None` at a pole, where |F| grows there.
-    fn crossing(&mut self, field: &Field, a: (f64, f64, f64), b: (f64, f64, f64)) -> Option<(f64, f64)> {
+    fn crossing(&mut self, field: &Field, a: (f64, f64, f64), b: (f64, f64, f64), level: f64) -> Option<(f64, f64)> {
         let t = a.2 / (a.2 - b.2);
         let point = (a.0 + (b.0 - a.0) * t, a.1 + (b.1 - a.1) * t);
-        let value = self.field_at(field, point.0, point.1);
+        let value = self.field_at(field, point.0, point.1) - level;
         (value.abs() <= a.2.abs() + b.2.abs()).then_some(point)
     }
 
     /// The segment between the crossings on two edges; edge `e` runs from corner `e` to corner `e + 1`.
-    fn segment(&mut self, field: &Field, corners: [(f64, f64, f64); 4], from: usize, to: usize) -> Option<Segment> {
-        let a = self.crossing(field, corners[from], corners[(from + 1) % 4])?;
-        let b = self.crossing(field, corners[to], corners[(to + 1) % 4])?;
+    fn segment(&mut self, field: &Field, corners: [(f64, f64, f64); 4], from: usize, to: usize, level: f64) -> Option<Segment> {
+        let a = self.crossing(field, corners[from], corners[(from + 1) % 4], level)?;
+        let b = self.crossing(field, corners[to], corners[(to + 1) % 4], level)?;
         Some((a, b))
     }
 
     fn implicit(&mut self, field: &Field) {
         let (cell, cols, rows, grid) = self.grid(field);
-        self.contour(field, cell, cols, rows, &grid);
+        self.contour(field, cell, cols, rows, &grid, 0.0, LINE);
     }
 
-    /// The zero line of the field, joined from cell segments into polylines so dashes and joins run continuously.
-    fn contour(&mut self, field: &Field, cell: f64, cols: usize, rows: usize, grid: &[f64]) {
+    /// The level curves of `f(x, y)`, each a set of polylines whose points carry the level.
+    fn contours(&mut self, field: &Field, levels: Levels) {
+        let (cell, cols, rows, grid) = self.grid(field);
+        let mut values: Vec<f64> = grid.iter().copied().filter(|value| value.is_finite()).collect();
+        for level in level_values(&mut values, levels) {
+            self.contour(field, cell, cols, rows, &grid, level, CONTOUR);
+        }
+    }
+
+    /// Where the field equals `level`, joined from cell segments into polylines so dashes and joins run continuously;
+    /// written as paths of `kind` whose points carry the level.
+    #[allow(clippy::too_many_arguments)]
+    fn contour(&mut self, field: &Field, cell: f64, cols: usize, rows: usize, grid: &[f64], level: f64, kind: f64) {
         let mut segments = Vec::new();
         for j in 0..rows {
             for i in 0..cols {
-                let corners = Self::corners(cell, cols, grid, i, j);
+                let corners = Self::corners(cell, cols, grid, i, j).map(|(x, y, value)| (x, y, value - level));
                 if corners.iter().any(|corner| !corner.2.is_finite()) {
                     continue;
                 }
@@ -415,21 +434,21 @@ impl Graph<'_> {
                     6 | 9 => &[(0, 2)],
                     7 | 8 => &[(0, 3)],
                     5 | 10 => {
-                        let center = self.field_at(field, corners[0].0 + 0.5 * cell, corners[0].1 + 0.5 * cell) > 0.0;
+                        let center = self.field_at(field, corners[0].0 + 0.5 * cell, corners[0].1 + 0.5 * cell) - level > 0.0;
                         // 5: top-right and bottom-left positive; 10: top-left and bottom-right positive.
                         if (case == 5) == center { &[(0, 3), (2, 1)] } else { &[(0, 1), (3, 2)] }
                     }
                     _ => &[],
                 };
                 for &(from, to) in pairs {
-                    segments.extend(self.segment(field, corners, from, to));
+                    segments.extend(self.segment(field, corners, from, to, level));
                 }
             }
         }
         for line in chain(&segments) {
-            self.out.begin(LINE);
+            self.out.begin(kind);
             for (sx, sy) in line {
-                self.out.push(sx, sy, self.view.wx(sx), self.view.wy(sy), 0.0);
+                self.out.push(sx, sy, self.view.wx(sx), self.view.wy(sy), level);
             }
             self.out.end();
         }
@@ -481,12 +500,43 @@ impl Graph<'_> {
                 self.polygon(&clipped);
             }
         }
-        self.contour(field, cell, cols, rows, &grid);
+        self.contour(field, cell, cols, rows, &grid, 0.0, LINE);
     }
 }
 
 /// A piece of a contour line between two screen points.
 type Segment = ((f64, f64), (f64, f64));
+
+/// A 1, 2 or 5 × 10ⁿ step at least `raw`.
+pub fn nice(raw: f64) -> f64 {
+    let base = 10_f64.powf(raw.log10().floor());
+    let ratio = raw / base;
+    base * if ratio <= 1.0 { 1.0 } else if ratio <= 2.0 { 2.0 } else if ratio <= 5.0 { 5.0 } else { 10.0 }
+}
+
+/// The levels to trace among `values` (finite; reordered): with an explicit step every multiple of it between the least
+/// and the greatest value, else at most `count` multiples of a round step across the 2nd to 98th percentile. Never
+/// more than `LEVEL_BUDGET`; a constant field has none.
+pub fn level_values(values: &mut [f64], levels: Levels) -> Vec<f64> {
+    let (lo, hi) = match levels.step {
+        Some(_) => (values.iter().copied().fold(f64::INFINITY, f64::min), values.iter().copied().fold(f64::NEG_INFINITY, f64::max)),
+        None => match (percentile(values, 0.02), percentile(values, 0.98)) {
+            (Some(lo), Some(hi)) => (lo, hi),
+            _ => return Vec::new(),
+        },
+    };
+    if !(lo.is_finite() && hi.is_finite() && hi > lo) {
+        return Vec::new();
+    }
+    let mut step = levels.step.unwrap_or_else(|| nice((hi - lo) / levels.count.max(1) as f64));
+    let span = |step: f64| ((lo / step).ceil() as i64, (hi / step).floor() as i64);
+    let (mut first, mut last) = span(step);
+    if last - first + 1 > LEVEL_BUDGET as i64 {
+        step *= ((last - first + 1) as f64 / LEVEL_BUDGET as f64).ceil();
+        (first, last) = span(step);
+    }
+    (first..=last).map(|k| k as f64 * step).collect()
+}
 
 /// The 1, 2 or 5 × 10ⁿ step nearest to `raw` on a logarithmic scale.
 pub fn nice_near(raw: f64) -> f64 {
@@ -573,6 +623,7 @@ pub fn sample(sheet: &mut Sheet, view: View) -> Vec<f64> {
             }
             Plot::Implicit(field) => graph.implicit(field),
             Plot::Field { x, y } => graph.field(x, y),
+            Plot::Contour { field, levels, .. } => graph.contours(field, *levels),
             Plot::Region { field, relation } => graph.region(field, *relation),
             Plot::Surface { .. } | Plot::Curve3 { .. } | Plot::Point3 { .. } | Plot::ComplexSurface { .. } | Plot::CoordSurface { .. } | Plot::ParamSurface { .. } | Plot::Implicit3(_) | Plot::Field3 { .. } => {}
         }
@@ -595,7 +646,7 @@ pub fn evaluate(sheet: &mut Sheet, row: usize, value: f64) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sheet::{Mode, RowInput, analyze};
+    use crate::sheet::{DEFAULT_LEVELS, Mode, RowInput, analyze};
 
     const VIEW: View = View { width: 400.0, height: 300.0, cx: 0.0, cy: 0.0, scale: 20.0 };
 
@@ -705,6 +756,42 @@ mod tests {
         assert_eq!(nice_near(1.5), 2.0);
         assert_eq!(nice_near(3.0), 2.0);
         assert_eq!(nice_near(8.0), 10.0);
+    }
+
+    #[test]
+    fn level_curves_lie_on_round_levels_of_the_function() {
+        let found = paths(Mode::Cartesian, &["f(x, y) = x^2 + y^2"], VIEW);
+        assert!(!found.is_empty() && found.iter().all(|path| path.kind == CONTOUR));
+        let mut levels: Vec<f64> = found.iter().map(|path| path.points[0][4]).collect();
+        levels.dedup();
+        // x² + y² runs from 0 to 156 over the 20 × 15 view: at most ten levels on multiples of a round step (here 20).
+        assert!(levels.len() <= DEFAULT_LEVELS && levels.len() >= 4, "{levels:?}");
+        assert!(levels.iter().all(|level| (level / 20.0).fract() == 0.0), "{levels:?}");
+        for path in &found {
+            for point in &path.points {
+                assert!((point[2] * point[2] + point[3] * point[3] - point[4]).abs() < 0.5, "{point:?}");
+            }
+        }
+        // Each circle inside the view is one closed polyline.
+        let circle = found.iter().find(|path| path.points[0][4] == 20.0).unwrap();
+        assert_eq!(found.iter().filter(|path| path.points[0][4] == 20.0).count(), 1);
+        assert!((circle.points[0][0] - circle.points.last().unwrap()[0]).abs() < 1e-6);
+        // An explicit step draws every multiple of it.
+        let inputs = [RowInput { text: "g(x, y) = x".into(), step: "2.5".into(), ..RowInput::default() }];
+        let mut sheet = analyze(Mode::Cartesian, &inputs);
+        let data = sample(&mut sheet, VIEW);
+        let mut stepped = Vec::new();
+        let mut at = 0;
+        while at < data.len() {
+            stepped.push(data[at + 3 + 4]);
+            at += 3 + data[at + 2] as usize * STRIDE;
+        }
+        assert_eq!(stepped, [-10.0, -7.5, -5.0, -2.5, 0.0, 2.5, 5.0, 7.5, 10.0]);
+        let mut values: Vec<f64> = (0..=100).map(f64::from).collect();
+        assert_eq!(level_values(&mut values, Levels { count: 10, step: None }), [10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0, 90.0]);
+        assert_eq!(level_values(&mut values, Levels { count: 3, step: None }), [50.0]);
+        assert!(level_values(&mut [3.0, 3.0, 3.0], Levels { count: 10, step: None }).is_empty());
+        assert_eq!(level_values(&mut [0.0, 1.0], Levels { count: 10, step: Some(1e-6) }).len(), 200);
     }
 
     #[test]

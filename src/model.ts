@@ -25,7 +25,17 @@ export interface Row {
   slider: Slider
   /** Vector fields: shade each arrow by its magnitude (added later: absent means on). */
   magnitude?: boolean
+  /** Level curves (added later, each absent until set): the most levels in view (absent means 10), the step between them
+   * (absent or empty means automatic), their value labels (absent means on) and, for a surface z = f(x, y), the curves on the floor. */
+  levels?: number
+  step?: string
+  labels?: boolean
+  floor?: boolean
 }
+
+/** The most level curves a row may ask for, and the count it draws when it does not say. */
+export const MAX_LEVELS = 50
+export const DEFAULT_LEVELS = 10
 
 /** One graph: what a single Grapher tab shows and the sidebar edits while that tab is focused. */
 export interface Graph {
@@ -65,8 +75,8 @@ export function nextColor(rows: readonly Row[]): string {
   return free ?? paletteRef(COLORS[rows.length % COLORS.length])
 }
 
-export function createRow(rows: readonly Row[], text = '', range: Partial<Pick<Row, 'from' | 'to' | 'from2' | 'to2'>> = {}): Row {
-  return { id: rowId(), text, color: nextColor(rows), hidden: false, from: range.from ?? '', to: range.to ?? '', from2: range.from2 ?? '', to2: range.to2 ?? '', slider: { ...DEFAULT_SLIDER } }
+export function createRow(rows: readonly Row[], text = '', range: Partial<Pick<Row, 'from' | 'to' | 'from2' | 'to2' | 'floor'>> = {}): Row {
+  return { id: rowId(), text, color: nextColor(rows), hidden: false, from: range.from ?? '', to: range.to ?? '', from2: range.from2 ?? '', to2: range.to2 ?? '', slider: { ...DEFAULT_SLIDER }, ...(range.floor ? { floor: true } : {}) }
 }
 
 /** Every sheet ends in one empty row to type into, like a fresh line on paper. */
@@ -80,6 +90,11 @@ export function withTrailingRow(rows: readonly Row[]): Row[] {
 function examples(texts: readonly Example[]): Row[] {
   const rows: Row[] = []
   for (const entry of texts) {
+    if (typeof entry === 'object' && !Array.isArray(entry)) {
+      const { text, ...options } = entry as Exclude<Example, string | readonly string[]>
+      rows.push(createRow(rows, text, options))
+      continue
+    }
     const [text, from = '', to = '', from2 = '', to2 = ''] = typeof entry === 'string' ? [entry] : entry
     rows.push(createRow(rows, text, { from, to, from2, to2 }))
   }
@@ -144,7 +159,11 @@ function normalizeRow(value: unknown, rows: readonly Row[]): Row | null {
     from2: text(record.from2),
     to2: text(record.to2),
     slider: min < max && step > 0 ? { min, max, step } : { ...DEFAULT_SLIDER },
-    ...(typeof record.magnitude === 'boolean' ? { magnitude: record.magnitude } : {})
+    ...(typeof record.magnitude === 'boolean' ? { magnitude: record.magnitude } : {}),
+    ...(typeof record.levels === 'number' && Number.isInteger(record.levels) && record.levels >= 1 && record.levels <= MAX_LEVELS ? { levels: record.levels } : {}),
+    ...(typeof record.step === 'string' && record.step ? { step: text(record.step) } : {}),
+    ...(typeof record.labels === 'boolean' ? { labels: record.labels } : {}),
+    ...(typeof record.floor === 'boolean' ? { floor: record.floor } : {})
   }
 }
 

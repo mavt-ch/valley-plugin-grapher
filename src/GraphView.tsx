@@ -70,7 +70,9 @@ export const GraphCanvas = ({ view: plane, units, rows, analyses, engine, graph 
         if (Number.isFinite(wx)) return { row: hit.row, sx: (wx - view.cx) * view.scale + size.width / 2, sy: hit.sy, wx, wy: hit.wy, parameter: null }
       }
     }
-    const parameter = analysis?.kind === 'polar' ? { name: 'θ', value: hit.parameter } : analysis?.kind === 'curve' ? { name: 't', value: hit.parameter } : null
+    const parameter = analysis?.kind === 'polar' ? { name: 'θ', value: hit.parameter }
+      : analysis?.kind === 'curve' ? { name: 't', value: hit.parameter }
+        : analysis?.kind === 'contour' ? { name: `${analysis.name ?? 'f'}(x, y)`, value: hit.parameter } : null
     return { row: hit.row, sx: hit.sx, sy: hit.sy, wx: hit.wx, wy: hit.wy, parameter }
   }, [])
 
@@ -96,7 +98,7 @@ export const GraphCanvas = ({ view: plane, units, rows, analyses, engine, graph 
     const theme = readTheme(canvas)
     plane.grid(ctx, view, size, theme, units)
     const colors = rows.map((row) => colorOf(row.color))
-    drawPaths(ctx, pathsRef.current, colors, theme, rows.map((_, index) => Boolean(analyses[index]?.strict)), rows.map((row) => row.magnitude === false))
+    drawPaths(ctx, pathsRef.current, colors, theme, rows.map((_, index) => Boolean(analyses[index]?.strict)), rows.map((row) => row.magnitude === false), rows.map((row) => row.labels !== false))
     if (plane.complex) {
       const arrows = analyses.flatMap((analysis, index) => analysis.kind === 'cpoint' && !rows[index]?.hidden && analysis.x !== undefined && analysis.y !== undefined
         ? [{ x: analysis.x, y: analysis.y, color: colors[index] ?? theme.axis }] : [])

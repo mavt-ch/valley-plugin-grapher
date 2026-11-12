@@ -235,7 +235,7 @@ describe('the plot kernel through api.wasm', () => {
 
   it('draws vector fields as centred arrows in the plane and in space', () => {
     const rows = sheet('F(x, y) = (-y, x)', '(y, -x)', '(1, 2)', '(x, t)', 'G(x) = (x, 1)', 'f(x, y) = x y', 'f(2, 3)')
-    expect(engine.analyze('cartesian', rows).map((row) => row.kind)).toEqual(['field', 'field', 'point', 'error', 'error', 'definition', 'value'])
+    expect(engine.analyze('cartesian', rows).map((row) => row.kind)).toEqual(['field', 'field', 'point', 'error', 'error', 'contour', 'value'])
     expect(engine.analyze('cartesian', rows)[4].error?.key).toBe('error.field')
     expect(engine.analyze('cartesian', rows)[6].value).toBe(6)
     const paths = engine.sample('cartesian', rows, 400, 300, { cx: 0, cy: 0, scale: 20 }).filter((path) => path.row === 0)
@@ -253,6 +253,31 @@ describe('the plot kernel through api.wasm', () => {
     const records = engine.space('space', space, 600, 400, { yaw: -0.6, pitch: 0.45, range: 10 })
     expect(records.filter((record) => record.kind === SPACE.arrow && record.row === 0)).toHaveLength(342)
     expect(records.filter((record) => record.kind === SPACE.arrow && record.row === 1).every((record) => record.value === 1 && record.points.length === 4)).toBe(true)
+  })
+
+  it('draws the level curves of f(x, y) with their levels and on the floor under a surface', () => {
+    const rows = sheet('f(x, y) = x^2 + y^2', { text: 'g(x, y) = x', step: '2.5' }, { text: 'h(x, y) = y', step: '-1' }, { text: 'k(x, y) = x y', levels: 4 })
+    const analyses = engine.analyze('cartesian', rows)
+    expect(analyses.map((row) => row.kind)).toEqual(['contour', 'contour', 'error', 'contour'])
+    expect(analyses[0].name).toBe('f')
+    expect(analyses[2].error?.key).toBe('error.step')
+    const paths = engine.sample('cartesian', rows, 400, 300, { cx: 0, cy: 0, scale: 20 })
+    const circles = paths.filter((path) => path.row === 0)
+    expect(circles.length).toBeGreaterThan(3)
+    for (const path of circles) {
+      expect(path.kind).toBe('contour')
+      const level = path.points[4]
+      expect(level % 20).toBe(0)
+      for (let i = 0; i < path.points.length; i += STRIDE) expect(Math.abs(path.points[i + 2] ** 2 + path.points[i + 3] ** 2 - level)).toBeLessThan(0.5)
+    }
+    expect([...new Set(paths.filter((path) => path.row === 1).map((path) => path.points[4]))]).toEqual([-10, -7.5, -5, -2.5, 0, 2.5, 5, 7.5, 10])
+    expect(new Set(paths.filter((path) => path.row === 3).map((path) => path.points[4])).size).toBeLessThanOrEqual(4)
+    const space = sheet({ text: 'z = (x^2 + y^2) / 5 - 6', floor: true }, 'z = x y / 10', { text: 'f(x, y) = x - y', floor: true, levels: 3 })
+    expect(engine.analyze('space', space).map((row) => row.kind)).toEqual(['surface', 'surface', 'surface'])
+    const records = engine.space('space', space, 600, 400, { yaw: -0.6, pitch: 0.45, range: 10 })
+    expect(records.filter((record) => record.kind === SPACE.contour && record.row === 0).length).toBeGreaterThan(200)
+    expect(records.filter((record) => record.kind === SPACE.contour && record.row === 1)).toHaveLength(0)
+    expect(new Set(records.filter((record) => record.kind === SPACE.contour && record.row === 2).map((record) => record.value)).size).toBeLessThanOrEqual(3)
   })
 
   it('shades inequalities on Cartesian sheets', () => {

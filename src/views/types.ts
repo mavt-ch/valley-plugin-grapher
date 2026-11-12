@@ -10,8 +10,13 @@ export type { AxisUnits }
  */
 export type Mode = 'cartesian' | 'polar' | 'parametric' | 'space' | 'cylindrical' | 'spherical' | 'complex' | 'complexSpace'
 
-/** An example row of a fresh sheet: its text, or its text with a parameter range (and a second one for a surface). */
-export type Example = string | readonly [text: string, from: string, to: string] | readonly [text: string, from: string, to: string, from2: string, to2: string]
+/** An example row of a fresh sheet: its text, or its text with a parameter range (and a second one for a surface), or its
+ * text with options such as level curves on the floor. */
+export type Example =
+  | string
+  | readonly [text: string, from: string, to: string]
+  | readonly [text: string, from: string, to: string, from2: string, to2: string]
+  | { readonly text: string; readonly floor?: boolean }
 
 interface CommonView {
   id: Mode

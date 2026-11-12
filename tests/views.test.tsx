@@ -181,6 +181,34 @@ describe('the graph tab', () => {
     expect(container.querySelector('.grapher-hint')?.textContent).toContain('vector field F(x, y) = (−y, x)')
   })
 
+  it('draws the level curves of f(x, y) with a level count, a step and labels, and floor curves under a 3D surface', async () => {
+    const mock = mount()
+    const { container } = render(<><Sidebar /><GraphTab /></>)
+    await screen.findByDisplayValue('y = x^2 - 2')
+    const inputs = screen.getAllByRole('textbox', { name: /Expression/ })
+    fireEvent.change(inputs[inputs.length - 1], { target: { value: 'f(x, y) = x^2 - y^2' } })
+    const contour = (await screen.findAllByRole('listitem'))[4]
+    await waitFor(() => expect(contour.getAttribute('data-kind')).toBe('contour'))
+    const count = within(contour).getByRole('spinbutton', { name: 'Number of levels' })
+    expect((count as HTMLInputElement).value).toBe('10')
+    fireEvent.change(count, { target: { value: '6' } })
+    await waitFor(async () => expect(await mock.api.data.files.readText('graphs.json')).toContain('"levels": 6'), { timeout: 2000 })
+    fireEvent.change(within(contour).getByRole('textbox', { name: 'Step between levels' }), { target: { value: '5' } })
+    expect((within(contour).getByRole('spinbutton', { name: 'Number of levels' }) as HTMLInputElement).disabled).toBe(true)
+    const labels = within(contour).getByRole('switch', { name: 'Label values' })
+    expect(labels.getAttribute('aria-checked')).toBe('true')
+    fireEvent.click(labels)
+    await waitFor(async () => expect(await mock.api.data.files.readText('graphs.json')).toMatch(/"step": "5",\s*"labels": false/), { timeout: 2000 })
+    expect(container.querySelector('.grapher-hint')?.textContent).toContain('f(x, y) = x^2 − y^2 for its level curves')
+    await pick('3D')
+    const paraboloid = (await screen.findAllByRole('listitem'))[0]
+    await waitFor(() => expect(paraboloid.getAttribute('data-kind')).toBe('surface'))
+    expect(within(paraboloid).getByRole('switch', { name: 'Level curves on the floor' }).getAttribute('aria-checked')).toBe('true')
+    expect(within(paraboloid).getByRole('spinbutton', { name: 'Number of levels' })).toBeTruthy()
+    fireEvent.click(within(paraboloid).getByRole('switch', { name: 'Level curves on the floor' }))
+    await waitFor(() => expect(within(paraboloid).queryByRole('spinbutton', { name: 'Number of levels' })).toBeNull())
+  })
+
   it('draws cylindrical surfaces with a range row for each of their two coordinates', async () => {
     const mock = mount()
     const { container } = render(<><Sidebar /><GraphTab /></>)

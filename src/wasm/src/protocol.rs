@@ -1,13 +1,13 @@
 //! The text the JavaScript side exchanges with the module. Rows are separated by U+001E and fields by U+001F,
 //! which an expression never contains (the plugin strips both before encoding).
 //!
-//! In: `text, from, to, hidden, from2, to2` per row (the second range is optional). Out, per row, a kind and its fields:
+//! In: `text, from, to, hidden, from2, to2, levels, step, floor` per row (the fields after `hidden` are optional). Out, per row, a kind and its fields:
 //! `empty` · `error key param missing,names` · `param name value slider` · `value number` · `function x|y` ·
 //! `definition name` · `polar from to` · `curve from to` · `point x y` · `implicit` · `surface x|y|z` ·
 //! `curve3 from to` · `point3 x y z` · `region strict|loose` · `cpoint re im name` · `csurface modulus|real` ·
 //! `coords given u v ufrom uto vfrom vto` (a surface in curvilinear coordinates; the names are its coordinates) ·
 //! `psurface ufrom uto vfrom vto` (a parametric surface in u and v) · `implicit3` (a surface F(x, y, z) = 0) ·
-//! `field` and `field3` (vector fields in the plane and in space).
+//! `field` and `field3` (vector fields in the plane and in space) · `contour name` (the level curves of `name(x, y)`).
 
 use crate::sheet::{Outcome, Plot, RowInput, Sheet};
 
@@ -23,7 +23,8 @@ pub fn read_rows(text: &str) -> Vec<RowInput> {
             let mut fields = record.split(FIELD);
             let mut next = || fields.next().unwrap_or_default().to_string();
             let (text, from, to, hidden, from2, to2) = (next(), next(), next(), next(), next(), next());
-            RowInput { text, from, to, hidden: hidden == "1", from2, to2 }
+            let (levels, step, floor) = (next(), next(), next());
+            RowInput { text, from, to, hidden: hidden == "1", from2, to2, levels, step, floor: floor == "1" }
         })
         .collect()
 }
@@ -65,6 +66,7 @@ pub fn write_outcomes(sheet: &Sheet) -> String {
                 Outcome::Plotted(Plot::Implicit3(_)) => vec!["implicit3".into()],
                 Outcome::Plotted(Plot::Field { .. }) => vec!["field".into()],
                 Outcome::Plotted(Plot::Field3 { .. }) => vec!["field3".into()],
+                Outcome::Plotted(Plot::Contour { name, .. }) => vec!["contour".into(), name.clone()],
                 Outcome::Plotted(Plot::ParamSurface { u, v, .. }) => vec!["psurface".into(), number(u.0), number(u.1), number(v.0), number(v.1)],
                 Outcome::Plotted(Plot::CoordSurface { system, given, u, v, .. }) => {
                     let names = system.names();

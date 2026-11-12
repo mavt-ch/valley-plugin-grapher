@@ -9,7 +9,7 @@ export { STRIDE }
 const MODULE_ID = 'plot'
 const RECORD = '\u001e'
 const FIELD = '\u001f'
-export type RowKind = 'empty' | 'error' | 'param' | 'value' | 'function' | 'definition' | 'polar' | 'curve' | 'point' | 'implicit' | 'surface' | 'curve3' | 'point3' | 'region' | 'cpoint' | 'csurface' | 'coords' | 'psurface' | 'implicit3' | 'field' | 'field3'
+export type RowKind = 'empty' | 'error' | 'param' | 'value' | 'function' | 'definition' | 'polar' | 'curve' | 'point' | 'implicit' | 'surface' | 'curve3' | 'point3' | 'region' | 'cpoint' | 'csurface' | 'coords' | 'psurface' | 'implicit3' | 'field' | 'field3' | 'contour'
 
 export interface RowError {
   key: string
@@ -21,7 +21,7 @@ export interface RowError {
 export interface RowAnalysis {
   kind: RowKind
   error?: RowError
-  /** Parameter or function name. */
+  /** Parameter or function name; for `contour` rows the function whose level curves they are. */
   name?: string
   value?: number
   slider?: boolean
@@ -42,8 +42,8 @@ export interface RowAnalysis {
   to2?: number
 }
 
-/** `arrow` paths are a vector field's arrows: tail and head, the tail's parameter |F|, the head's |F| relative to the view's reference (0–1). */
-export type PathKind = 'line' | 'point' | 'region' | 'arrow'
+/** `contour` paths are level curves whose points carry their level as the parameter; `arrow` paths are a vector field's arrows: tail and head, the tail's parameter |F|, the head's |F| relative to the view's reference (0–1). */
+export type PathKind = 'line' | 'point' | 'region' | 'arrow' | 'contour'
 
 export interface SamplePath {
   row: number
@@ -76,7 +76,7 @@ export interface SpaceRecord {
   points: Float64Array
 }
 
-export const SPACE = { polygon: 0, segment: 1, point: 2, huePolygon: 3, arrow: 4, box: 10, grid: 11, gridMajor: 12, axis: 13, tick: 14, axisName: 15 } as const
+export const SPACE = { polygon: 0, segment: 1, point: 2, huePolygon: 3, arrow: 4, contour: 5, box: 10, grid: 11, gridMajor: 12, axis: 13, tick: 14, axisName: 15 } as const
 
 export interface PlotEngine {
   analyze(mode: Mode, rows: readonly Row[]): RowAnalysis[]
@@ -100,7 +100,7 @@ const EXPORTS: (keyof PlotExports)[] = ['plot_input', 'plot_analyze', 'plot_text
 const clean = (value: string): string => value.replace(/[\u001e\u001f]/g, ' ')
 
 export function encodeRows(rows: readonly Row[]): string {
-  return rows.map((row) => [clean(row.text), clean(row.from), clean(row.to), row.hidden ? '1' : '0', clean(row.from2), clean(row.to2)].join(FIELD)).join(RECORD)
+  return rows.map((row) => [clean(row.text), clean(row.from), clean(row.to), row.hidden ? '1' : '0', clean(row.from2), clean(row.to2), row.levels === undefined ? '' : String(row.levels), clean(row.step ?? ''), row.floor ? '1' : '0'].join(FIELD)).join(RECORD)
 }
 
 export function decodeOutcomes(text: string, count: number): RowAnalysis[] {
@@ -120,7 +120,8 @@ export function decodeOutcomes(text: string, count: number): RowAnalysis[] {
       case 'csurface': return { kind }
       case 'coords': return { kind, given: a, over: [b, c], from: Number(rest[0]), to: Number(rest[1]), from2: Number(rest[2]), to2: Number(rest[3]) }
       case 'psurface': return { kind, over: ['u', 'v'], from: Number(a), to: Number(b), from2: Number(c), to2: Number(rest[0]) }
-      case 'definition': return { kind, name: a }
+      case 'definition':
+      case 'contour': return { kind, name: a }
       case 'polar':
       case 'curve': return { kind, from: Number(a), to: Number(b) }
       case 'point': return { kind, x: Number(a), y: Number(b) }
@@ -133,7 +134,7 @@ export function decodeOutcomes(text: string, count: number): RowAnalysis[] {
   })
 }
 
-const PATH_KINDS: Partial<Record<number, PathKind>> = { 0: 'line', 1: 'point', 3: 'region', 4: 'arrow' }
+const PATH_KINDS: Partial<Record<number, PathKind>> = { 0: 'line', 1: 'point', 2: 'contour', 3: 'region', 4: 'arrow' }
 
 export function decodePaths(data: Float64Array): SamplePath[] {
   const paths: SamplePath[] = []

@@ -1,6 +1,7 @@
 import type { ValleyPluginApi } from '@valley/plugin-sdk'
 import type { FileBaseline } from '@valley/plugin-sdk/types'
 import { React, api } from './runtime'
+import { uiText } from './localization'
 import { loadPlotEngine, type Camera, type PlotEngine, type Viewport } from './engine'
 import { MAIN_GRAPH, MODES, defaultDocument, defaultGraph, graphOf, normalizeDocument, rowId, withGraph, withTrailingRow, type AxisUnits, type Graph, type GrapherDocument, type Mode, type Row } from './model'
 
@@ -43,6 +44,7 @@ export class GrapherStore {
   private pending: Promise<void> = Promise.resolve()
   private disposed = false
   private engineRequested = false
+  private adoptedAt = 0
   private readonly offs: (() => void)[] = []
   /** Session-only view of each graph's sheets (`graph:mode`), so switching modes or reopening the tab keeps the camera. */
   readonly viewports: Record<string, Viewport> = {}
@@ -96,7 +98,9 @@ export class GrapherStore {
     this.offs.push(this.api.data.files.onChanged((path) => { if (path === GRAPHS_FILE) void this.reload() }))
     this.offs.push(this.api.runtime.onBeforeUnload(() => this.flush()))
     this.offs.push(this.api.subscribeState(['activePluginTab'], ({ state: { activePluginTab } }) => {
-      if (activePluginTab?.pluginId === this.api.pluginId) this.focus(activePluginTab.instanceId ?? MAIN_GRAPH)
+      if (activePluginTab?.pluginId !== this.api.pluginId) return
+      this.focus(activePluginTab.instanceId ?? MAIN_GRAPH)
+      this.adoptUntitledTab()
     }))
     void this.read()
   }
@@ -112,6 +116,7 @@ export class GrapherStore {
       this.update({ loaded: true, document })
       this.problem('problem.load', null)
       this.ensureGraph(this.snapshot.active)
+      this.adoptUntitledTab()
     } catch (error) {
       if (this.disposed) return
       this.writable = false
@@ -160,14 +165,39 @@ export class GrapherStore {
     this.change(withGraph(document, id, { mode, sheets: main.sheets, units: main.units }))
   }
 
+  /**
+   * A Grapher tab opened without an instance id (the rail, a menu, an older layout) cannot be told apart from another
+   * one, so the focused one is re-keyed in place to a copy of the main graph; from then on it keeps its own graph.
+   */
+  private adoptUntitledTab(): void {
+    const tab = this.api.getState().activePluginTab
+    if (!this.snapshot.loaded || tab?.pluginId !== this.api.pluginId || tab.instanceId) return
+    const now = Date.now()
+    if (now - this.adoptedAt < 1000) return
+    this.adoptedAt = now
+    const id = this.forkGraph(MAIN_GRAPH)
+    this.focus(id)
+    this.api.workspace.openMainTab({ instanceId: id, title: uiText('graph.title') })
+  }
+
+  /** A copy of one graph under a new id; returns the id. */
+  forkGraph(from: string): string {
+    const source = this.graph(from)
+    return this.addGraph({ mode: source.mode, sheets: source.sheets, units: source.units })
+  }
+
   /** A fresh graph with the example sheets, for a new tab; returns its id. */
   createGraph(mode: Mode): string {
+    return this.addGraph(defaultGraph(mode))
+  }
+
+  private addGraph(graph: Graph): string {
     const id = `g-${rowId()}`
     const open = new Set(this.api.workspace.getOpenMainTabs())
     const graphs = { ...this.snapshot.document.graphs }
     const closed = Object.keys(graphs).filter((key) => !open.has(key) && key !== this.snapshot.active)
     while (Object.keys(graphs).length >= KEPT_GRAPHS && closed.length) delete graphs[closed.shift()!]
-    this.change(withGraph({ ...this.snapshot.document, graphs }, id, defaultGraph(mode)))
+    this.change(withGraph({ ...this.snapshot.document, graphs }, id, graph))
     return id
   }
 

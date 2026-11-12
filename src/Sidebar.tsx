@@ -438,7 +438,7 @@ export const Sidebar = (): ReactElement => {
           className="plugin-open-page"
           onClick={(event) => {
             if (api.ui.hasModKey(event)) openNewGraph(mode)
-            else api.workspace.openMainTab({ instanceId: active === MAIN_GRAPH ? undefined : active, title: uiText('graph.title') })
+            else api.workspace.openMainTab({ instanceId: active === MAIN_GRAPH ? store.forkGraph(MAIN_GRAPH) : active, title: uiText('graph.title') })
           }}
           aria-label={uiText('graph.open')}
           title={uiText('graph.open')}

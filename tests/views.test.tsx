@@ -145,12 +145,18 @@ describe('the graph tab', () => {
     expect(await screen.findByDisplayValue('r = 1 + cos(θ)')).toBeTruthy()
     expect(await screen.findByLabelText(/^Polar graph/)).toBeTruthy()
     expect(screen.getByLabelText(/^Cartesian graph/)).toBeTruthy()
+    // A tab without an instance id is re-keyed in place to its own copy of the main graph.
     act(() => { mock.emitState({ activePluginTab: { pluginId: mock.api.pluginId } }) })
     expect(await screen.findByDisplayValue('y = x^2 - 2')).toBeTruthy()
+    const open = mock.api.workspace.openMainTab as unknown as { mock: { calls: [{ instanceId?: string; newTab?: boolean }][] } }
+    const adopted = open.mock.calls[open.mock.calls.length - 1][0]
+    expect(adopted.instanceId).toMatch(/^g-/)
+    expect(adopted.newTab).toBeUndefined()
     await waitFor(async () => {
       const saved = JSON.parse(await mock.api.data.files.readText('graphs.json') ?? '{}') as { mode: string; graphs: Record<string, { mode: string }> }
       expect(saved.mode).toBe('cartesian')
       expect(saved.graphs.second.mode).toBe('polar')
+      expect(saved.graphs[adopted.instanceId!].mode).toBe('cartesian')
     }, { timeout: 2000 })
   })
 

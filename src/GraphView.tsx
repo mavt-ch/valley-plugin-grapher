@@ -1,7 +1,7 @@
 import { React } from './runtime'
 import type { KeyboardEvent, PointerEvent, ReactElement } from 'react'
-import { colorOf, drawArrows, drawHover, drawPaths, findHit, readTheme, toScreenY, toWorldX, toWorldY, type Hover, type Size } from './draw'
-import type { PlotEngine, RowAnalysis, SamplePath, Viewport } from './engine'
+import { colorOf, drawArrows, drawHover, drawLabel, drawMarkers, drawPaths, findHit, formatPoint, readTheme, toScreenX, toScreenY, toWorldX, toWorldY, type Hover, type Size } from './draw'
+import { MARKER, type Marker, type PlotEngine, type RowAnalysis, type SamplePath, type Viewport } from './engine'
 import { Fit, Minus, Plus } from './icons'
 import { uiText } from './localization'
 import { MAIN_GRAPH, graphOf, unitsOf, type AxisUnits, type Row } from './model'
@@ -11,6 +11,34 @@ import { viewOf, type PlaneView } from './views'
 
 const MIN_SCALE = 1e-3
 const MAX_SCALE = 1e7
+/** Pointer distance in pixels within which a marker is hovered or clicked, and how far a pinned marker may move between frames
+ * (a slider step, a zoom) and still keep its label. */
+const MARKER_REACH = 7
+const PIN_FOLLOW = 24
+const MAX_PINS = 12
+
+/** What a marker is, in words: “Zero”, “Maximum”, “Zero · Minimum” for a touching root, “Intersection”. */
+export function markerKind(kind: number): string {
+  return (['zero', 'minimum', 'maximum', 'intersection'] as const).filter((name) => kind & MARKER[name]).map((name) => uiText(`marker.${name}`)).join(' · ')
+}
+
+/** A pinned marker: its curve and, for an intersection, the other curve by row id, so it survives rows moving; x and y
+ * follow the marker as the view or a slider changes. */
+interface Pin {
+  id: string
+  kind: number
+  other: string | null
+  x: number
+  y: number
+}
+
+interface Placed {
+  row: number
+  marker: Marker
+  sx: number
+  sy: number
+  pinned: boolean
+}
 
 export function homeView(view: PlaneView, size: Size): Viewport {
   const span = view.homeSpan
@@ -52,6 +80,78 @@ export const GraphCanvas = ({ view: plane, units, rows, analyses, engine, graph 
   const frameRef = React.useRef<{ id: number | null; resample: boolean }>({ id: null, resample: true })
   const inputs = React.useRef({ plane, units, mode, slot, rows, analyses, engine })
   inputs.current = { plane, units, mode, slot, rows, analyses, engine }
+  /** Markers: computed per row on demand and kept until the next resample (pan, zoom, any row or slider change). */
+  const generationRef = React.useRef(0)
+  const markersRef = React.useRef<{ generation: number; rows: Map<number, Marker[]> }>({ generation: -1, rows: new Map() })
+  const selectedRef = React.useRef<string | null>(null)
+  const pinsRef = React.useRef<Pin[]>([])
+  const placedRef = React.useRef<Placed[]>([])
+
+  /** Visible curves y = f(x) on the Cartesian sheet carry markers. */
+  const markable = React.useCallback((row: number): boolean => {
+    const { mode, rows, analyses } = inputs.current
+    const analysis = analyses[row]
+    return mode === 'cartesian' && analysis?.kind === 'function' && analysis.axis === 'x' && rows[row] !== undefined && !rows[row].hidden
+  }, [])
+
+  const markersOf = React.useCallback((row: number): Marker[] => {
+    const { mode, rows, engine } = inputs.current
+    const cache = markersRef.current
+    if (cache.generation !== generationRef.current) {
+      cache.generation = generationRef.current
+      cache.rows.clear()
+    }
+    const cached = cache.rows.get(row)
+    if (cached) return cached
+    const view = viewRef.current
+    const size = sizeRef.current
+    let found: Marker[] = []
+    try {
+      if (engine && view) found = engine.markers(mode, rows, row, size.width, size.height, view)
+    } catch {
+      found = []
+    }
+    cache.rows.set(row, found)
+    return found
+  }, [])
+
+  /** The markers to draw: every marker of the selected curve and of the curve under the pointer, and each pinned marker
+   * matched again to the nearest marker of its kind (it hides while none is near, as when a slider moves it off). */
+  const placeMarkers = React.useCallback((hovered: number | null): Placed[] => {
+    const { rows } = inputs.current
+    const view = viewRef.current
+    const size = sizeRef.current
+    if (!view) return []
+    const indexOf = (id: string | null): number => (id === null ? -1 : rows.findIndex((row) => row.id === id))
+    const place = (row: number, marker: Marker, pinned: boolean): Placed => ({ row, marker, sx: toScreenX(view, size, marker.x), sy: toScreenY(view, size, marker.y), pinned })
+    const active = new Set<number>()
+    const selected = indexOf(selectedRef.current)
+    if (selected < 0) selectedRef.current = null
+    else if (markable(selected)) active.add(selected)
+    if (hovered !== null && markable(hovered)) active.add(hovered)
+    const placed: Placed[] = []
+    for (const row of active) for (const marker of markersOf(row)) placed.push(place(row, marker, false))
+    for (const pin of pinsRef.current) {
+      const row = indexOf(pin.id)
+      const other = pin.other === null ? null : indexOf(pin.other)
+      if (row < 0 || other === -1 || !markable(row)) continue
+      let best: Marker | null = null
+      let distance = PIN_FOLLOW
+      for (const marker of markersOf(row)) {
+        if (marker.kind !== pin.kind || marker.other !== other) continue
+        const away = Math.hypot((marker.x - pin.x) * view.scale, (marker.y - pin.y) * view.scale)
+        if (away < distance) [best, distance] = [marker, away]
+      }
+      if (!best) continue
+      pin.x = best.x
+      pin.y = best.y
+      const shown = placed.find((entry) => entry.row === row && entry.marker === best)
+      if (shown) shown.pinned = true
+      else placed.push(place(row, best, true))
+    }
+    placedRef.current = placed
+    return placed
+  }, [markable, markersOf])
 
   const hoverAt = React.useCallback((x: number, y: number): Hover | null => {
     const { mode, rows, analyses, engine } = inputs.current
@@ -87,6 +187,7 @@ export const GraphCanvas = ({ view: plane, units, rows, analyses, engine, graph 
     const view = viewRef.current ?? (viewRef.current = homeView(plane, size))
     if (frame.resample) {
       frame.resample = false
+      generationRef.current += 1
       try {
         pathsRef.current = engine ? engine.sample(mode, rows, size.width, size.height, view) : []
       } catch {
@@ -104,10 +205,16 @@ export const GraphCanvas = ({ view: plane, units, rows, analyses, engine, graph 
         ? [{ x: analysis.x, y: analysis.y, color: colors[index] ?? theme.axis }] : [])
       drawArrows(ctx, arrows, view, size, theme)
     }
-    const pointer = pointerRef.current
-    const hover = pointer && !dragRef.current ? hoverAt(pointer.x, pointer.y) : null
-    if (hover) drawHover(ctx, hover, colors[hover.row] ?? theme.axis, size, theme, plane.complex)
-  }, [hoverAt])
+    const pointer = pointerRef.current && !dragRef.current ? pointerRef.current : null
+    const placed = placeMarkers(pointer ? findHit(pathsRef.current, pointer.x, pointer.y)?.row ?? null : null)
+    drawMarkers(ctx, placed, theme)
+    for (const entry of placed) if (entry.pinned) drawLabel(ctx, entry.sx, entry.sy, [markerKind(entry.marker.kind), formatPoint(entry.marker.x, entry.marker.y)], size, theme)
+    const onMarker = pointer ? placed.find((entry) => Math.hypot(entry.sx - pointer.x, entry.sy - pointer.y) <= MARKER_REACH) : undefined
+    const hover: Hover | null = onMarker
+      ? { row: onMarker.row, sx: onMarker.sx, sy: onMarker.sy, wx: onMarker.marker.x, wy: onMarker.marker.y, parameter: null, label: markerKind(onMarker.marker.kind) }
+      : pointer ? hoverAt(pointer.x, pointer.y) : null
+    if (hover && !onMarker?.pinned) drawHover(ctx, hover, colors[hover.row] ?? theme.axis, size, theme, plane.complex)
+  }, [hoverAt, placeMarkers])
 
   const invalidate = React.useCallback((resample: boolean): void => {
     const frame = frameRef.current
@@ -122,9 +229,11 @@ export const GraphCanvas = ({ view: plane, units, rows, analyses, engine, graph 
     invalidate(true)
   }, [invalidate, store])
 
-  // A new sheet brings its own camera.
+  // A new sheet brings its own camera, and leaves the other sheet's selection and pins behind.
   React.useEffect(() => {
     viewRef.current = store.viewports[slot] ?? null
+    selectedRef.current = null
+    pinsRef.current = []
     invalidate(true)
   }, [slot, store, invalidate])
 
@@ -199,8 +308,33 @@ export const GraphCanvas = ({ view: plane, units, rows, analyses, engine, graph 
     invalidate(false)
   }
 
+  /** A click (no drag) on a marker pins or unpins its label; on a curve y = f(x) it selects the curve, so its markers stay;
+   * anywhere else it clears the selection. */
+  const clickAt = (x: number, y: number): void => {
+    const { rows } = inputs.current
+    const target = placedRef.current.find((entry) => Math.hypot(entry.sx - x, entry.sy - y) <= MARKER_REACH)
+    if (target) {
+      const id = rows[target.row]?.id
+      if (!id) return
+      const { kind, other: index, x: mx, y: my } = target.marker
+      const other = index === null ? null : rows[index]?.id ?? null
+      const same = (pin: Pin): boolean => pin.id === id && pin.kind === kind && pin.other === other && pin.x === mx && pin.y === my
+      pinsRef.current = target.pinned ? pinsRef.current.filter((pin) => !same(pin)) : [...pinsRef.current, { id, kind, other, x: mx, y: my }].slice(-MAX_PINS)
+    } else {
+      const hit = findHit(pathsRef.current, x, y)
+      const id = hit && markable(hit.row) ? rows[hit.row]?.id ?? null : null
+      selectedRef.current = id !== null && selectedRef.current !== id ? id : null
+    }
+    invalidate(false)
+  }
+
   const endDrag = (event: PointerEvent<HTMLCanvasElement>): void => {
-    if (dragRef.current?.id === event.pointerId) dragRef.current = null
+    const drag = dragRef.current
+    if (drag?.id === event.pointerId) {
+      dragRef.current = null
+      const at = local(event)
+      if (event.type === 'pointerup' && Math.hypot(at.x - drag.x, at.y - drag.y) < 4) clickAt(at.x, at.y)
+    }
     invalidate(false)
   }
 
@@ -227,7 +361,12 @@ export const GraphCanvas = ({ view: plane, units, rows, analyses, engine, graph 
       '+': () => zoomBy(1.5),
       '=': () => zoomBy(1.5),
       '-': () => zoomBy(1 / 1.5),
-      '0': reset
+      '0': reset,
+      Escape: () => {
+        selectedRef.current = null
+        pinsRef.current = []
+        invalidate(false)
+      }
     }
     const move = moves[event.key]
     if (move && !event.metaKey && !event.ctrlKey && !event.altKey) {

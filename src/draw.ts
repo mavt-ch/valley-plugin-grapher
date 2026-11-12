@@ -28,7 +28,54 @@ export interface Hover {
   wy: number
   /** The range variable at the point, for polar and parametric rows. */
   parameter: { name: string; value: number } | null
+  /** What the point is, for a marker (“Zero”, “Maximum” …). */
+  label?: string
 }
+
+/** A marker on a curve at screen (sx, sy): a zero, an extremum or an intersection (see `engine.ts`). */
+export interface ShownMarker {
+  sx: number
+  sy: number
+  pinned: boolean
+}
+
+/** Markers are small neutral dots with a ring of the background, so they read on any curve colour. */
+export function drawMarkers(ctx: CanvasRenderingContext2D, markers: readonly ShownMarker[], theme: Theme): void {
+  for (const marker of markers) {
+    ctx.beginPath()
+    ctx.arc(clamp(marker.sx), clamp(marker.sy), marker.pinned ? 4 : 3.5, 0, Math.PI * 2)
+    ctx.fillStyle = marker.pinned ? theme.axis : theme.label
+    ctx.fill()
+    ctx.lineWidth = 1.5
+    ctx.strokeStyle = theme.background
+    ctx.stroke()
+  }
+}
+
+/** A readout box beside the point (sx, sy): above and to the right, flipped to stay inside the view. */
+export function drawLabel(ctx: CanvasRenderingContext2D, sx: number, sy: number, lines: readonly string[], size: Size, theme: Theme): void {
+  ctx.font = theme.font
+  const width = Math.max(...lines.map((line) => ctx.measureText(line).width)) + 12
+  const height = lines.length * 15 + 7
+  let x = sx + 10
+  let y = sy - height - 8
+  if (x + width > size.width - 4) x = sx - width - 10
+  if (y < 4) y = sy + 10
+  ctx.beginPath()
+  ctx.roundRect(x, y, width, height, 4)
+  ctx.fillStyle = theme.background
+  ctx.fill()
+  ctx.lineWidth = 1
+  ctx.strokeStyle = theme.major
+  ctx.stroke()
+  ctx.fillStyle = theme.label
+  ctx.textAlign = 'left'
+  ctx.textBaseline = 'top'
+  lines.forEach((line, index) => ctx.fillText(line, x + 6, y + 4 + index * 15))
+}
+
+/** The coordinates of a point as the readout writes them. */
+export const formatPoint = (x: number, y: number): string => `(${formatNumber(x)}, ${formatNumber(y)})`
 
 // Canvas coordinates far outside the view are clamped; Chromium drops paths with huge coordinates.
 const CLAMP = 1e5
@@ -387,24 +434,8 @@ export function drawHover(ctx: CanvasRenderingContext2D, hover: Hover, color: st
   ctx.lineWidth = 2
   ctx.strokeStyle = theme.background
   ctx.stroke()
-  const lines = [complex ? formatComplex(hover.wx, hover.wy) : `(${formatNumber(hover.wx)}, ${formatNumber(hover.wy)})`]
+  const lines = [complex ? formatComplex(hover.wx, hover.wy) : formatPoint(hover.wx, hover.wy)]
   if (hover.parameter) lines.push(`${hover.parameter.name} = ${formatNumber(hover.parameter.value)}`)
-  ctx.font = theme.font
-  const width = Math.max(...lines.map((line) => ctx.measureText(line).width)) + 12
-  const height = lines.length * 15 + 7
-  let x = hover.sx + 10
-  let y = hover.sy - height - 8
-  if (x + width > size.width - 4) x = hover.sx - width - 10
-  if (y < 4) y = hover.sy + 10
-  ctx.beginPath()
-  ctx.roundRect(x, y, width, height, 4)
-  ctx.fillStyle = theme.background
-  ctx.fill()
-  ctx.lineWidth = 1
-  ctx.strokeStyle = theme.major
-  ctx.stroke()
-  ctx.fillStyle = theme.label
-  ctx.textAlign = 'left'
-  ctx.textBaseline = 'top'
-  lines.forEach((line, index) => ctx.fillText(line, x + 6, y + 4 + index * 15))
+  if (hover.label) lines.unshift(hover.label)
+  drawLabel(ctx, hover.sx, hover.sy, lines, size, theme)
 }

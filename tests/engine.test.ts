@@ -1,6 +1,7 @@
 import { beforeAll, describe, expect, it, vi } from 'vitest'
 import { createMockValleyApi, loadPackageWasm } from '@valley/plugin-testkit'
-import { decodeOutcomes, encodeRows, loadPlotEngine, SPACE, STRIDE, type PlotEngine } from '../src/engine'
+import { decodeMarkers, decodeOutcomes, encodeRows, loadPlotEngine, MARKER, SPACE, STRIDE, type PlotEngine } from '../src/engine'
+import { markerKind } from '../src/GraphView'
 import { createRow, type Row } from '../src/model'
 
 let engine: PlotEngine
@@ -403,6 +404,29 @@ describe('the plot kernel through api.wasm', () => {
     expect(paths.slice(1).map((path) => [path.points[2], path.points[3], path.points[4]])).toEqual([[0, 1, 1], [1.5, 2, 2], [4, 6, 5]])
     expect(engine.analyze('space', rows)[1].error?.key).toBe('error.table')
     expect(engine.analyze('polar', rows)[1].kind).toBe('table')
+  })
+
+  it('finds zeros, extrema and intersections of a curve y = f(x), never across a jump or a pole', () => {
+    const rows = sheet('y = x^2 - 2', 'y = x', '1/x', { text: 'y = 5', hidden: true }, 'x^2 + y^2 = 4', '{x < 1: -1, 1}')
+    const view = { cx: 0, cy: 0, scale: 20 }
+    const markers = engine.markers('cartesian', rows, 0, 400, 300, view)
+    const xs = (kind: number, other: number | null = null) => markers.filter((marker) => marker.kind & kind && marker.other === other).map((marker) => marker.x)
+    expect(xs(MARKER.zero).map((x) => x.toFixed(12))).toEqual([-Math.SQRT2, Math.SQRT2].map((x) => x.toFixed(12)))
+    expect(markers.find((marker) => marker.kind === MARKER.minimum)).toMatchObject({ x: 0, y: -2 })
+    expect(xs(MARKER.intersection, 1).map((x) => x.toFixed(12))).toEqual(['-1.000000000000', '2.000000000000'])
+    // x² − 2 = 1/x: x³ − 2x − 1 = 0 at −1 and (1 ± √5)/2, one on each side of the pole and one beside it; none with the hidden row.
+    expect(xs(MARKER.intersection, 2).map((x) => x.toFixed(9))).toEqual([-1, (1 - Math.sqrt(5)) / 2, (1 + Math.sqrt(5)) / 2].map((x) => x.toFixed(9)))
+    expect(markers.some((marker) => marker.other === 3 || marker.other === 4)).toBe(false)
+    expect(engine.markers('cartesian', rows, 2, 400, 300, view).filter((marker) => marker.kind & MARKER.zero)).toEqual([])
+    expect(engine.markers('cartesian', rows, 5, 400, 300, view).filter((marker) => marker.kind & MARKER.zero)).toEqual([])
+    expect(engine.markers('cartesian', rows, 4, 400, 300, view)).toEqual([])
+    // Panning brings other zeros into view; a touching root is one marker, a zero and a minimum.
+    const sine = engine.markers('cartesian', sheet('sin x'), 0, 400, 300, { cx: 100, cy: 0, scale: 20 })
+    expect(sine.filter((marker) => marker.kind & MARKER.zero).every((marker) => Math.abs(Math.round(marker.x / Math.PI) * Math.PI - marker.x) < 1e-9 && marker.x > 89)).toBe(true)
+    expect(engine.markers('cartesian', sheet('(x - 1)^2'), 0, 400, 300, view)).toEqual([{ x: expect.closeTo(1, 9), y: expect.closeTo(0, 12), kind: MARKER.zero | MARKER.minimum, other: null }])
+    expect(markerKind(MARKER.zero | MARKER.minimum)).toBe('Zero · Minimum')
+    expect(markerKind(MARKER.intersection)).toBe('Intersection')
+    expect(decodeMarkers(new Float64Array([1, 2, 8, 3, 4, 5, 1, -1]))).toEqual([{ x: 1, y: 2, kind: 8, other: 3 }, { x: 4, y: 5, kind: 1, other: null }])
   })
 
   it('shades inequalities on Cartesian sheets', () => {

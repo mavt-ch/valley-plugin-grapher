@@ -722,6 +722,29 @@ pub fn sample(sheet: &mut Sheet, view: View) -> Vec<f64> {
     out.data
 }
 
+/// The stretches of x over which a visible `y = f(x)` row is drawn in the view, one per path: they end where the curve
+/// jumps, has a pole or a gap, so a sign change between two of them is no zero (see `markers`).
+pub fn pieces(sheet: &mut Sheet, view: View, row: usize) -> Vec<(f64, f64)> {
+    let mut out = Writer::default();
+    let Sheet { env, functions, cenv, cfunctions, rows, .. } = sheet;
+    let Some(Plot::FunctionX(expr)) = rows.get(row).filter(|found| !found.hidden).and_then(|found| found.plot()) else { return Vec::new() };
+    if !view.valid() {
+        return Vec::new();
+    }
+    let mut graph = Graph { view, env: env.as_mut_slice(), functions: functions.as_slice(), cenv: cenv.as_mut_slice(), cfunctions: cfunctions.as_slice(), out: &mut out, budget: ROW_BUDGET };
+    graph.function(expr, true);
+    let mut found = Vec::new();
+    let mut at = 0;
+    while at + 3 <= out.data.len() {
+        let count = out.data[at + 2] as usize;
+        if count > 0 {
+            found.push((out.data[at + 3 + 2], out.data[at + 3 + (count - 1) * STRIDE + 2]));
+        }
+        at += 3 + count * STRIDE;
+    }
+    found
+}
+
 /// `f(value)` of a `y = f(x)` or `x = g(y)` row, for tracing under the pointer; NaN for any other row.
 pub fn evaluate(sheet: &mut Sheet, row: usize, value: f64) -> f64 {
     let Sheet { env, functions, rows, .. } = sheet;

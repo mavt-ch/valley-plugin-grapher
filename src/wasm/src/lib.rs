@@ -1,7 +1,8 @@
 //! Grapher's plotting kernel. JavaScript writes the active sheet's rows into the buffer `plot_input(len)`
 //! returns, calls `plot_analyze(mode)` and reads the per-row outcomes from `plot_text()`; then, once per
 //! viewport, `plot_sample(width, height, cx, cy, scale)` fills the `f64` path stream at `plot_samples()` and
-//! `plot_eval(row, value)` traces a function under the pointer. A 3D or complex 3D sheet renders with
+//! `plot_eval(row, value)` traces a function under the pointer, and `plot_markers(row, …)` finds the zeros, extrema and
+//! intersections of a curve y = f(x) for the same viewport. A 3D or complex 3D sheet renders with
 //! `plot_space(width, height, yaw, pitch, range)` into the same `plot_samples()` buffer. Addresses point into the host-owned
 //! `env.memory` and stay valid until the next call. The Valley ABI exports are present because the host
 //! requires them of every module; `valley_call` answers no method.
@@ -18,6 +19,8 @@ mod error;
 mod eval;
 #[forbid(unsafe_code)]
 mod lexer;
+#[forbid(unsafe_code)]
+mod markers;
 #[forbid(unsafe_code)]
 mod parser;
 #[forbid(unsafe_code)]
@@ -116,6 +119,23 @@ pub extern "C" fn plot_eval(row: u32, value: f64) -> f64 {
         Some(sheet) => sample::evaluate(sheet, row as usize, value),
         None => f64::NAN,
     })
+}
+
+/// The markers of row `row` (a visible y = f(x)) for a viewport as `plot_sample` takes it: records of four `f64`, x, y,
+/// kind (bits 1 zero, 2 minimum, 4 maximum, 8 intersection) and the other curve's row (−1 for none), written to the
+/// `plot_samples()` buffer; the number of values written.
+#[unsafe(no_mangle)]
+pub extern "C" fn plot_markers(row: u32, width: f64, height: f64, cx: f64, cy: f64, scale: f64) -> u32 {
+    let data: Vec<f64> = SHEET.with(|current| match current.borrow_mut().as_mut() {
+        Some(sheet) => markers::markers(sheet, View { width, height, cx, cy, scale }, row as usize)
+            .into_iter()
+            .flat_map(|marker| [marker.x, marker.y, f64::from(marker.kind), marker.other.map_or(-1.0, |other| other as f64)])
+            .collect(),
+        None => Vec::new(),
+    });
+    let len = length(data.len());
+    SAMPLES.with(|samples| *samples.borrow_mut() = data);
+    len
 }
 
 #[unsafe(no_mangle)]

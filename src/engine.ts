@@ -87,6 +87,16 @@ export interface SpaceRecord {
   points: Float64Array
 }
 
+/** A point of interest on a curve y = f(x): `kind` holds the `MARKER` bits it is, `other` the row of the other curve of an intersection. */
+export interface Marker {
+  x: number
+  y: number
+  kind: number
+  other: number | null
+}
+
+export const MARKER = { zero: 1, minimum: 2, maximum: 4, intersection: 8 } as const
+
 export const SPACE = { polygon: 0, segment: 1, point: 2, huePolygon: 3, arrow: 4, contour: 5, vector: 6, box: 10, grid: 11, gridMajor: 12, axis: 13, tick: 14, axisName: 15 } as const
 
 export interface PlotEngine {
@@ -95,6 +105,8 @@ export interface PlotEngine {
   sample(mode: Mode, rows: readonly Row[], width: number, height: number, view: Viewport): SamplePath[]
   /** `f(value)` of a function row, for tracing under the pointer. */
   evaluate(mode: Mode, rows: readonly Row[], row: number, value: number): number
+  /** Zeros, extrema and intersections of a `y = f(x)` row in the viewport. */
+  markers(mode: Mode, rows: readonly Row[], row: number, width: number, height: number, view: Viewport): Marker[]
 }
 
 interface PlotExports {
@@ -105,9 +117,10 @@ interface PlotExports {
   plot_samples(): number
   plot_eval(row: number, value: number): number
   plot_space(width: number, height: number, yaw: number, pitch: number, range: number): number
+  plot_markers(row: number, width: number, height: number, cx: number, cy: number, scale: number): number
 }
 
-const EXPORTS: (keyof PlotExports)[] = ['plot_input', 'plot_analyze', 'plot_text', 'plot_sample', 'plot_samples', 'plot_eval', 'plot_space']
+const EXPORTS: (keyof PlotExports)[] = ['plot_input', 'plot_analyze', 'plot_text', 'plot_sample', 'plot_samples', 'plot_eval', 'plot_space', 'plot_markers']
 const clean = (value: string): string => value.replace(/[\u001d\u001e\u001f]/g, ' ')
 
 /** One record per row; a table sends its cells (decimal commas read as points) instead of the text. */
@@ -169,6 +182,12 @@ export function decodePaths(data: Float64Array): SamplePath[] {
   return paths
 }
 
+export function decodeMarkers(data: Float64Array): Marker[] {
+  const markers: Marker[] = []
+  for (let at = 0; at + 4 <= data.length; at += 4) markers.push({ x: data[at], y: data[at + 1], kind: data[at + 2], other: data[at + 3] < 0 ? null : data[at + 3] })
+  return markers
+}
+
 export function decodeSpace(data: Float64Array): SpaceRecord[] {
   const records: SpaceRecord[] = []
   let at = 0
@@ -226,6 +245,11 @@ export function createPlotEngine(exports: PlotExports, memory: WebAssembly.Memor
     evaluate(mode, rows, row, value) {
       load(mode, rows)
       return exports.plot_eval(row, value)
+    },
+    markers(mode, rows, row, width, height, view) {
+      load(mode, rows)
+      const count = exports.plot_markers(row, width, height, view.cx, view.cy, view.scale)
+      return decodeMarkers(new Float64Array(memory.buffer, exports.plot_samples(), count).slice())
     }
   }
 }

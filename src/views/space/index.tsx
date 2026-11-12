@@ -11,14 +11,14 @@ const Icon = (p: IconProps): ReactElement => (
 /**
  * Surfaces z = f(x, y), x = f(y, z), y = f(x, z), parametric surfaces, space curves and points in an orbiting cube. A
  * triple names what it is by its variables: u and v make a surface, t a curve, numbers a point. The fresh paraboloid shows
- * its level curves on the floor of the cube.
+ * its level curves on the floor of the cube, and the empty row suggests its tangent plane at (3, 2) with the normal.
  */
 export const space: SpaceView = {
   id: 'space',
   kernel: 4,
   canvas: 'space',
   icon: Icon,
-  placeholder: '(u cos v, u sin v, v)',
+  placeholder: 'tangent((x^2 + y^2) / 5 - 6, 3, 2)',
   examples: [{ text: 'z = (x^2 + y^2) / 5 - 6', floor: true }, ['(6cos t, 6sin t, t / 2)', '0', '6π']],
   axisNames: ['x', 'y', 'z']
 }

@@ -196,6 +196,8 @@ pub struct RowInput {
     pub step: String,
     /// Draw the level curves of a surface z = f(x, y) on the floor of the cube.
     pub floor: bool,
+    /// Leave out the normal vector of a tangent plane (drawn unless the row turns it off).
+    pub hide_normal: bool,
 }
 
 /// Which level curves to draw: at most `count` round levels across the values in view, or every multiple of `step`.
@@ -250,6 +252,9 @@ pub enum Plot {
     Integral { body: Expr, from: f64, to: f64, value: f64 },
     /// `tangent(g, a)`: the line y = slope · x + intercept touching g at (x, y).
     Tangent { slope: f64, intercept: f64, x: f64, y: f64 },
+    /// `tangent(g, a, b)` on the 3D sheet: the plane z = c + gx (x − a) + gy (y − b) touching z = g(x, y) at `point`
+    /// = (a, b, c), with the normal (−gx, −gy, 1) drawn when `normal`.
+    TangentPlane { point: [f64; 3], gradient: [f64; 2], normal: bool },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -751,10 +756,14 @@ impl Analysis<'_> {
         }
         let own: &[&str] = if mode == Mode::Space && self.sweeps(&statement) { &SURFACE_PARAMETERS } else { &[] };
         self.require(&nodes, own)?;
-        if let (None, Node::Call(callee @ (Callee::Integral | Callee::Tangent), args)) = (&statement.left, &statement.right)
-            && matches!(mode, Mode::Cartesian | Mode::Trig)
-        {
-            return if *callee == Callee::Integral { self.integral(args) } else { self.tangent(args) };
+        if let (None, Node::Call(callee @ (Callee::Integral | Callee::Tangent), args)) = (&statement.left, &statement.right) {
+            match (callee, mode) {
+                (Callee::Integral, Mode::Cartesian | Mode::Trig) => return self.integral(args),
+                (_, Mode::Cartesian | Mode::Trig) => return self.tangent(args),
+                (Callee::Tangent, Mode::Space) => return self.tangent_plane(args, input),
+                (Callee::Tangent, _) => return Err(MathError::new("error.unsupported", "")),
+                _ => {}
+            }
         }
         if mode == Mode::Complex {
             return self.plot_complex(&statement);
@@ -861,6 +870,22 @@ impl Analysis<'_> {
             return Err(MathError::new("error.tangent", format!("x = {}", short(x))));
         }
         Ok(Outcome::Plotted(Plot::Tangent { slope, intercept: y - slope * x, x, y }))
+    }
+
+    /// `tangent(g, a, b)` on the 3D sheet: g(a, b) and the partial derivatives there, each exact along one axis.
+    fn tangent_plane(&mut self, args: &[Node], input: &RowInput) -> Result<Outcome, MathError> {
+        let [body, at_x, at_y] = args else { return Err(MathError::new("error.arity", "tangent")) };
+        let body = self.compile(body, &|name| name == "x" || name == "y" || !is_reserved(name))?;
+        let (a, b) = (self.constant(at_x)?, self.constant(at_y)?);
+        self.env[Y] = b;
+        let along_x = calculus::taylor(&body, X, a, 1, &mut self.env, &self.functions);
+        self.env[X] = a;
+        let along_y = calculus::taylor(&body, Y, b, 1, &mut self.env, &self.functions);
+        let (c, gradient) = (along_x.value(), [along_x.derivative(1), along_y.derivative(1)]);
+        if ![a, b, c, gradient[0], gradient[1]].iter().all(|value| value.is_finite()) {
+            return Err(MathError::new("error.tangent", format!("({}, {})", short(a), short(b))));
+        }
+        Ok(Outcome::Plotted(Plot::TangentPlane { point: [a, b, c], gradient, normal: !input.hide_normal }))
     }
 
     /// `F(x, y) = (P, Q)` on the Cartesian sheet or `F(x, y, z) = (P, Q, R)` on the 3D sheet; anything else named
@@ -1464,6 +1489,30 @@ mod tests {
         assert_eq!(error(&sheet, 7).param, "x = −1");
         assert_eq!(error(&sheet, 8).key, "error.tangentRow");
         assert_eq!(error(&sheet, 9).key, "error.arity");
+    }
+
+    #[test]
+    fn tangent_planes_touch_surfaces_in_3d() {
+        let inputs: Vec<RowInput> = [
+            "f(x, y) = x^2 + y^2", "tangent(f, 1, 2)", "tangent(x y / 4, a, b)", "a = 2", "tangent(sqrt(x^2 + y^2), 0, 0)", "tangent(f, 1)", "tangent(g, 1, 2)", "tangent(f, a, c)", "tangent(sin(x) cos(y), π, 0)",
+        ].iter().map(|text| RowInput { text: text.to_string(), ..RowInput::default() }).collect();
+        let mut inputs = inputs;
+        inputs[8].hide_normal = true;
+        let sheet = analyze(Mode::Space, &inputs);
+        assert!(matches!(sheet.rows[1].plot(), Some(Plot::TangentPlane { point, gradient, normal: true }) if *point == [1.0, 2.0, 5.0] && *gradient == [2.0, 4.0]), "{:?}", sheet.rows[1].outcome);
+        assert_eq!(error(&sheet, 2).missing, ["b"]);
+        assert_eq!(error(&sheet, 4).key, "error.tangent");
+        assert_eq!(error(&sheet, 4).param, "(0, 0)");
+        assert_eq!(error(&sheet, 5).key, "error.arity");
+        assert_eq!(error(&sheet, 6).key, "error.function");
+        assert_eq!(error(&sheet, 7).missing, ["c"]);
+        let Some(Plot::TangentPlane { point, gradient, normal: false }) = sheet.rows[8].plot() else { panic!("{:?}", sheet.rows[8].outcome) };
+        assert!((point[2]).abs() < 1e-12 && (gradient[0] + 1.0).abs() < 1e-12 && gradient[1].abs() < 1e-12);
+        let defined = self::sheet(Mode::Space, &["tangent(x y / 4, a, b)", "a = 2", "b = -4"]);
+        assert!(matches!(defined.rows[0].plot(), Some(Plot::TangentPlane { point, gradient, .. }) if *point == [2.0, -4.0, -2.0] && *gradient == [-1.0, 0.5]));
+        // The other 3D sheets have no tangent planes, and a plane needs two coordinates.
+        assert_eq!(error(&self::sheet(Mode::Cylindrical, &["tangent(r, 1, 2)"]), 0).key, "error.unsupported");
+        assert_eq!(error(&self::sheet(Mode::Cartesian, &["f(x) = x", "tangent(f, 1, 2)"]), 1).key, "error.arity");
     }
 
     #[test]

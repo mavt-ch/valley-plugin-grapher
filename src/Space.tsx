@@ -1,6 +1,6 @@
 import { React } from './runtime'
 import type { KeyboardEvent, PointerEvent, ReactElement } from 'react'
-import { colorOf, fieldArrow, magnitudeOpacity, readTheme, type Size, type Theme } from './draw'
+import { arrowShape, colorOf, fieldArrow, magnitudeOpacity, readTheme, type Size, type Theme } from './draw'
 import { SPACE, type Camera, type PlotEngine, type SpaceRecord } from './engine'
 import { Fit, Minus, Plus } from './icons'
 import { uiText } from './localization'
@@ -90,6 +90,12 @@ export function drawSpace(ctx: CanvasRenderingContext2D, records: readonly Space
     } else if (record.kind === SPACE.arrow && record.points.length >= 4) {
       const [ax, ay, bx, by] = record.points
       fieldArrow(ctx, ax, ay, bx, by, color, uniform[record.row] ? 1 : magnitudeOpacity(record.value))
+    } else if (record.kind === SPACE.vector && record.points.length >= 4) {
+      const [ax, ay, bx, by] = record.points
+      const head = Math.min(10, Math.hypot(bx - ax, by - ay) * 0.4)
+      ctx.strokeStyle = color
+      ctx.fillStyle = color
+      arrowShape(ctx, ax, ay, bx, by, head, head * 0.45, 2)
     } else if (record.kind === SPACE.point) {
       ctx.beginPath()
       ctx.arc(record.points[0], record.points[1], 4.5, 0, Math.PI * 2)

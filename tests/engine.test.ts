@@ -334,6 +334,20 @@ describe('the plot kernel through api.wasm', () => {
     expect(engine.analyze('cartesian', sheet('tangent(g, 1)'))[0].error).toMatchObject({ key: 'error.function', param: 'g' })
   })
 
+  it('draws a tangent plane with its point and normal in 3D and leaves the normal out when asked', () => {
+    const rows = sheet('f(x, y) = x^2 - y^2', 'tangent(f, a, 1)', 'a = 2', { text: 'tangent(x y / 4, 1, -2)', normal: false }, 'tangent(f, 1)', 'tangent(sqrt(x^2 + y^2), 0, 0)')
+    const analyses = engine.analyze('space', rows)
+    expect(analyses[1]).toMatchObject({ kind: 'tplane', gradient: [4, -2], x: 2, y: 1, z: 3 })
+    expect(analyses[3]).toMatchObject({ kind: 'tplane', gradient: [-0.5, 0.25], x: 1, y: -2, z: -0.5 })
+    expect(analyses[4].error?.key).toBe('error.arity')
+    expect(analyses[5].error).toMatchObject({ key: 'error.tangent', param: '(0, 0)' })
+    const records = engine.space('space', rows, 600, 400, { yaw: -0.6, pitch: 0.45, range: 10 })
+    expect(records.filter((record) => record.kind === SPACE.polygon && record.row === 1)).toHaveLength(144)
+    expect(records.filter((record) => record.kind === SPACE.vector).map((record) => record.row)).toEqual([1])
+    expect(records.filter((record) => record.kind === SPACE.point).map((record) => record.row).sort()).toEqual([1, 3])
+    expect(encodeRows(rows).split('\u001e')[3].split('\u001f')[9]).toBe('0')
+  })
+
   it('shades inequalities on Cartesian sheets', () => {
     const rows = sheet('y > x^2', 'x^2 + y^2 ≤ 4')
     expect(engine.analyze('cartesian', rows)).toMatchObject([{ kind: 'region', strict: true }, { kind: 'region', strict: false }])

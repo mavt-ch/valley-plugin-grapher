@@ -683,7 +683,7 @@ pub fn sample(sheet: &mut Sheet, view: View) -> Vec<f64> {
             Plot::Region { field, relation } => graph.region(field, *relation),
             Plot::Integral { body, from, to, .. } => graph.area(body, *from, *to),
             Plot::Tangent { slope, intercept, x, y } => graph.tangent(*slope, *intercept, (*x, *y)),
-            Plot::Surface { .. } | Plot::Curve3 { .. } | Plot::Point3 { .. } | Plot::ComplexSurface { .. } | Plot::CoordSurface { .. } | Plot::ParamSurface { .. } | Plot::Implicit3(_) | Plot::Field3 { .. } => {}
+            Plot::Surface { .. } | Plot::Curve3 { .. } | Plot::Point3 { .. } | Plot::ComplexSurface { .. } | Plot::CoordSurface { .. } | Plot::ParamSurface { .. } | Plot::Implicit3(_) | Plot::Field3 { .. } | Plot::TangentPlane { .. } => {}
         }
     }
     out.data

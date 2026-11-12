@@ -137,7 +137,6 @@ describe('the graph tab', () => {
     await screen.findByDisplayValue('z = (x^2 + y^2) / 5 - 6')
     const inputs = screen.getAllByRole('textbox', { name: /Expression/ })
     const trailing = inputs[inputs.length - 1]
-    expect(trailing.getAttribute('placeholder')).toBe('(u cos v, u sin v, v)')
     fireEvent.change(trailing, { target: { value: '((2 + cos v) cos u, (2 + cos v) sin u, sin v)' } })
     const torus = (await screen.findAllByRole('listitem'))[2]
     await waitFor(() => expect(torus.getAttribute('data-kind')).toBe('psurface'))
@@ -236,6 +235,32 @@ describe('the graph tab', () => {
     fireEvent.change(screen.getByRole('slider', { name: 'Value of c' }), { target: { value: '-1.5' } })
     await waitFor(() => expect(screen.getAllByRole('listitem')[6].querySelector('.grapher-value')?.textContent).toBe('y = −3x − 2.25'))
     expect(screen.getAllByRole('listitem')[6].querySelector('.gm-fn')?.textContent).toBe('tangent')
+  })
+
+  it('suggests the tangent plane of the fresh paraboloid with its equation, normal and a switch for the normal', async () => {
+    const mock = mount()
+    const { container } = render(<><Sidebar /><GraphTab /></>)
+    await pick('3D')
+    await screen.findByDisplayValue('z = (x^2 + y^2) / 5 - 6')
+    const inputs = screen.getAllByRole('textbox', { name: /Expression/ })
+    const trailing = inputs[inputs.length - 1]
+    expect(trailing.getAttribute('placeholder')).toBe('tangent((x^2 + y^2) / 5 - 6, 3, 2)')
+    fireEvent.change(trailing, { target: { value: 'tangent((x^2 + y^2) / 5 - 6, a, b)' } })
+    const plane = (await screen.findAllByRole('listitem'))[2]
+    await waitFor(() => expect(plane.getAttribute('data-kind')).toBe('error'))
+    fireEvent.click(within(plane).getByRole('button', { name: 'Add slider a' }))
+    fireEvent.click(within(screen.getAllByRole('listitem')[2]).getByRole('button', { name: 'Add slider b' }))
+    await waitFor(() => expect(screen.getAllByRole('listitem')[2].getAttribute('data-kind')).toBe('tplane'))
+    const values = () => [...screen.getAllByRole('listitem')[2].querySelectorAll('.grapher-value')].map((value) => value.textContent)
+    // At (1, 1): z = 0.4 − 6 + 0.4 (x − 1) + 0.4 (y − 1), normal (−0.4, −0.4, 1).
+    expect(values()).toEqual(['z = 0.4x + 0.4y − 6.4', 'n = (−0.4, −0.4, 1)'])
+    fireEvent.change(screen.getByRole('slider', { name: 'Value of a' }), { target: { value: '3' } })
+    await waitFor(() => expect(values()).toEqual(['z = 1.2x + 0.4y − 8', 'n = (−1.2, −0.4, 1)']))
+    const normal = within(screen.getAllByRole('listitem')[2]).getByRole('switch', { name: 'Normal vector' })
+    expect(normal.getAttribute('aria-checked')).toBe('true')
+    fireEvent.click(normal)
+    await waitFor(async () => expect(await mock.api.data.files.readText('graphs.json')).toContain('"normal": false'), { timeout: 2000 })
+    expect(container.querySelector('.grapher-hint')?.textContent).toContain('tangent(f, a, b) draws the tangent plane')
   })
 
   it('draws cylindrical surfaces with a range row for each of their two coordinates', async () => {

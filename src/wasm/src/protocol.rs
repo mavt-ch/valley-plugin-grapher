@@ -1,7 +1,8 @@
 //! The text the JavaScript side exchanges with the module. Rows are separated by U+001E and fields by U+001F,
 //! which an expression never contains (the plugin strips both before encoding).
 //!
-//! In: `text, from, to, hidden, from2, to2, levels, step, floor` per row (the fields after `hidden` are optional). Out, per row, a kind and its fields:
+//! In: `text, from, to, hidden, from2, to2, levels, step, floor, normal` per row (the fields after `hidden` are optional;
+//! `normal` is `0` when a tangent plane leaves out its normal vector). Out, per row, a kind and its fields:
 //! `empty` · `error key param missing,names` · `param name value slider` · `value number` · `function x|y` ·
 //! `definition name` · `polar from to` · `curve from to` · `point x y` · `implicit` · `surface x|y|z` ·
 //! `curve3 from to` · `point3 x y z` · `region strict|loose` · `cpoint re im name` · `csurface modulus|real` ·
@@ -9,7 +10,7 @@
 //! `psurface ufrom uto vfrom vto` (a parametric surface in u and v) · `implicit3` (a surface F(x, y, z) = 0) ·
 //! `field` and `field3` (vector fields in the plane and in space) · `contour name` (the level curves of `name(x, y)`) ·
 //! `integral value from to` (the area under a curve and its signed value) · `tangent slope intercept x y` (a tangent line
-//! and its point of contact).
+//! and its point of contact) · `tplane gx gy a b c` (a tangent plane at (a, b, c) with the surface's partial derivatives).
 
 use crate::sheet::{Outcome, Plot, RowInput, Sheet};
 
@@ -25,8 +26,8 @@ pub fn read_rows(text: &str) -> Vec<RowInput> {
             let mut fields = record.split(FIELD);
             let mut next = || fields.next().unwrap_or_default().to_string();
             let (text, from, to, hidden, from2, to2) = (next(), next(), next(), next(), next(), next());
-            let (levels, step, floor) = (next(), next(), next());
-            RowInput { text, from, to, hidden: hidden == "1", from2, to2, levels, step, floor: floor == "1" }
+            let (levels, step, floor, normal) = (next(), next(), next(), next());
+            RowInput { text, from, to, hidden: hidden == "1", from2, to2, levels, step, floor: floor == "1", hide_normal: normal == "0" }
         })
         .collect()
 }
@@ -71,6 +72,9 @@ pub fn write_outcomes(sheet: &Sheet) -> String {
                 Outcome::Plotted(Plot::Contour { name, .. }) => vec!["contour".into(), name.clone()],
                 Outcome::Plotted(Plot::Integral { value, from, to, .. }) => vec!["integral".into(), number(*value), number(*from), number(*to)],
                 Outcome::Plotted(Plot::Tangent { slope, intercept, x, y }) => vec!["tangent".into(), number(*slope), number(*intercept), number(*x), number(*y)],
+                Outcome::Plotted(Plot::TangentPlane { point, gradient, .. }) => {
+                    vec!["tplane".into(), number(gradient[0]), number(gradient[1]), number(point[0]), number(point[1]), number(point[2])]
+                }
                 Outcome::Plotted(Plot::ParamSurface { u, v, .. }) => vec!["psurface".into(), number(u.0), number(u.1), number(v.0), number(v.1)],
                 Outcome::Plotted(Plot::CoordSurface { system, given, u, v, .. }) => {
                     let names = system.names();
@@ -117,6 +121,9 @@ mod tests {
         assert_eq!(records[1], "coords\u{1f}z\u{1f}φ\u{1f}r\u{1f}0\u{1f}6.283185307179586\u{1f}0\u{1f}Infinity");
         let torus = write_outcomes(&analyze(Mode::Space, &read_rows("((2 + cos v) cos u, (2 + cos v) sin u, sin v)\u{1f}\u{1f}π\u{1f}0\u{1f}-1\u{1f}")));
         assert_eq!(torus, "psurface\u{1f}0\u{1f}3.141592653589793\u{1f}-1\u{1f}6.283185307179586");
+        let planes = read_rows("tangent(x y, 1, 2)\u{1f}\u{1f}\u{1f}0\u{1f}\u{1f}\u{1f}\u{1f}\u{1f}0\u{1f}0\u{1e}tangent(x y, 1, 2)");
+        assert!(planes[0].hide_normal && !planes[1].hide_normal);
+        assert_eq!(write_outcomes(&analyze(Mode::Space, &planes[..1])), "tplane\u{1f}2\u{1f}1\u{1f}1\u{1f}2\u{1f}2");
         let sphere = write_outcomes(&analyze(Mode::Spherical, &read_rows("φ = π/4")));
         assert_eq!(sphere, "coords\u{1f}φ\u{1f}θ\u{1f}ρ\u{1f}0\u{1f}6.283185307179586\u{1f}0\u{1f}Infinity");
     }

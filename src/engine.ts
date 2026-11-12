@@ -9,7 +9,7 @@ export { STRIDE }
 const MODULE_ID = 'plot'
 const RECORD = '\u001e'
 const FIELD = '\u001f'
-export type RowKind = 'empty' | 'error' | 'param' | 'value' | 'function' | 'definition' | 'polar' | 'curve' | 'point' | 'implicit' | 'surface' | 'curve3' | 'point3' | 'region' | 'cpoint' | 'csurface' | 'coords' | 'psurface' | 'implicit3' | 'field' | 'field3' | 'contour' | 'integral' | 'tangent'
+export type RowKind = 'empty' | 'error' | 'param' | 'value' | 'function' | 'definition' | 'polar' | 'curve' | 'point' | 'implicit' | 'surface' | 'curve3' | 'point3' | 'region' | 'cpoint' | 'csurface' | 'coords' | 'psurface' | 'implicit3' | 'field' | 'field3' | 'contour' | 'integral' | 'tangent' | 'tplane'
 
 export interface RowError {
   key: string
@@ -43,6 +43,8 @@ export interface RowAnalysis {
   /** `tangent` rows: the line y = slope · x + intercept, touching at (x, y). */
   slope?: number
   intercept?: number
+  /** `tplane` rows: the partial derivatives of the surface at the point of contact (x, y, z). */
+  gradient?: [number, number]
 }
 
 /** `contour` paths are level curves whose points carry their level as the parameter; `arrow` paths are a vector field's arrows: tail and head, the tail's parameter |F|, the head's |F| relative to the view's reference (0–1). */
@@ -79,7 +81,7 @@ export interface SpaceRecord {
   points: Float64Array
 }
 
-export const SPACE = { polygon: 0, segment: 1, point: 2, huePolygon: 3, arrow: 4, contour: 5, box: 10, grid: 11, gridMajor: 12, axis: 13, tick: 14, axisName: 15 } as const
+export const SPACE = { polygon: 0, segment: 1, point: 2, huePolygon: 3, arrow: 4, contour: 5, vector: 6, box: 10, grid: 11, gridMajor: 12, axis: 13, tick: 14, axisName: 15 } as const
 
 export interface PlotEngine {
   analyze(mode: Mode, rows: readonly Row[]): RowAnalysis[]
@@ -103,7 +105,7 @@ const EXPORTS: (keyof PlotExports)[] = ['plot_input', 'plot_analyze', 'plot_text
 const clean = (value: string): string => value.replace(/[\u001e\u001f]/g, ' ')
 
 export function encodeRows(rows: readonly Row[]): string {
-  return rows.map((row) => [clean(row.text), clean(row.from), clean(row.to), row.hidden ? '1' : '0', clean(row.from2), clean(row.to2), row.levels === undefined ? '' : String(row.levels), clean(row.step ?? ''), row.floor ? '1' : '0'].join(FIELD)).join(RECORD)
+  return rows.map((row) => [clean(row.text), clean(row.from), clean(row.to), row.hidden ? '1' : '0', clean(row.from2), clean(row.to2), row.levels === undefined ? '' : String(row.levels), clean(row.step ?? ''), row.floor ? '1' : '0', row.normal === false ? '0' : '1'].join(FIELD)).join(RECORD)
 }
 
 export function decodeOutcomes(text: string, count: number): RowAnalysis[] {
@@ -130,6 +132,7 @@ export function decodeOutcomes(text: string, count: number): RowAnalysis[] {
       case 'point': return { kind, x: Number(a), y: Number(b) }
       case 'integral': return { kind, value: Number(a), from: Number(b), to: Number(c) }
       case 'tangent': return { kind, slope: Number(a), intercept: Number(b), x: Number(c), y: Number(rest[0]) }
+      case 'tplane': return { kind, gradient: [Number(a), Number(b)], x: Number(c), y: Number(rest[0]), z: Number(rest[1]) }
       case 'implicit':
       case 'implicit3':
       case 'field':

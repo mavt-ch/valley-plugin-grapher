@@ -85,6 +85,14 @@ describe('sheets', () => {
     expect(named('F(x, y) = (-y, x) + 1')).toBe(false)
   })
 
+  it('keeps the normal-vector choice of a tangent plane only where it was made', () => {
+    const document = normalizeDocument({ version: 1, sheets: { space: [{ id: 'a', text: 'tangent(f, a, b)', normal: false }, { id: 'b', text: 'tangent(f, 1, 2)', normal: 'off' }, { id: 'c', text: 'z = x y' }] } })
+    expect(document.sheets.space[0].normal).toBe(false)
+    expect('normal' in document.sheets.space[1]).toBe(false)
+    expect('normal' in document.sheets.space[2]).toBe(false)
+    expect(viewOf('space').placeholder).toBe('tangent((x^2 + y^2) / 5 - 6, 3, 2)')
+  })
+
   it('typesets primes, integrals with their limits and tangents', () => {
     expect(parseMath("f'(x)")).toMatchObject({ k: 'seq', items: [{ k: 'post', base: { k: 'var', text: 'f' }, text: '′' }, { k: 'group' }] })
     expect(parseMath("f''(x)")).toMatchObject({ items: [{ k: 'post', text: '″' }, { k: 'group' }] })

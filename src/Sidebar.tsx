@@ -11,7 +11,7 @@ import { getStore, useGrapher } from './store'
 import { formatComplex, formatLinear, formatNumber, formatPolar } from './ticks'
 import { viewOf } from './views'
 
-const DRAWN = new Set(['function', 'polar', 'curve', 'point', 'implicit', 'surface', 'curve3', 'point3', 'region', 'cpoint', 'csurface', 'coords', 'psurface', 'implicit3', 'field', 'field3', 'contour', 'integral', 'tangent'])
+const DRAWN = new Set(['function', 'polar', 'curve', 'point', 'implicit', 'surface', 'curve3', 'point3', 'region', 'cpoint', 'csurface', 'coords', 'psurface', 'implicit3', 'field', 'field3', 'contour', 'integral', 'tangent', 'tplane'])
 
 /** The row whose input takes focus on its next render (after Enter adds a row or Backspace removes one). */
 let pendingFocus: string | null = null
@@ -279,6 +279,19 @@ const Details = (props: RowProps): ReactElement | null => {
       return <div className="grapher-value">= {formatNumber(analysis.value ?? Number.NaN, 8)}</div>
     case 'tangent':
       return <div className="grapher-value">y = {formatLinear([[analysis.slope ?? Number.NaN, 'x']], analysis.intercept ?? Number.NaN)}</div>
+    case 'tplane': {
+      const [gx, gy] = analysis.gradient ?? [Number.NaN, Number.NaN]
+      const [a, b, c] = [analysis.x ?? Number.NaN, analysis.y ?? Number.NaN, analysis.z ?? Number.NaN]
+      return (
+        <>
+          <div className="grapher-value">z = {formatLinear([[gx, 'x'], [gy, 'y']], c - gx * a - gy * b)}</div>
+          <div className="grapher-value">n = ({[-gx, -gy, 1].map((value) => formatNumber(value, 4)).join(', ')})</div>
+          <div className="grapher-options">
+            <OptionToggle label={uiText('row.normal')} checked={row.normal !== false} onChange={(checked) => props.edit((current) => ({ ...current, normal: checked }))} />
+          </div>
+        </>
+      )
+    }
     case 'cpoint': {
       const [re, im] = [analysis.x ?? Number.NaN, analysis.y ?? Number.NaN]
       return <div className="grapher-value">= {formatComplex(re, im, 6)} = {formatPolar(re, im, 6)}</div>

@@ -31,6 +31,8 @@ export interface Row {
   step?: string
   labels?: boolean
   floor?: boolean
+  /** Tangent planes: draw the normal vector (added later: absent means on). */
+  normal?: boolean
 }
 
 /** The most level curves a row may ask for, and the count it draws when it does not say. */
@@ -163,7 +165,8 @@ function normalizeRow(value: unknown, rows: readonly Row[]): Row | null {
     ...(typeof record.levels === 'number' && Number.isInteger(record.levels) && record.levels >= 1 && record.levels <= MAX_LEVELS ? { levels: record.levels } : {}),
     ...(typeof record.step === 'string' && record.step ? { step: text(record.step) } : {}),
     ...(typeof record.labels === 'boolean' ? { labels: record.labels } : {}),
-    ...(typeof record.floor === 'boolean' ? { floor: record.floor } : {})
+    ...(typeof record.floor === 'boolean' ? { floor: record.floor } : {}),
+    ...(typeof record.normal === 'boolean' ? { normal: record.normal } : {})
   }
 }
 

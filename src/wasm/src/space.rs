@@ -18,6 +18,10 @@
 //! to the 90th percentile of the magnitudes in the cube, capped at eight tenths of the edge, so it stays inside its
 //! cell. An arrow record holds its tail and head on screen and the relative magnitude; the canvas draws the head.
 //!
+//! A tangent plane is a square patch of the plane centred on its point of contact, its edge a fixed share of the cube's
+//! (whatever the slope, since its sides run along the plane), cut into cells, clipped to the cube and shaded like a
+//! surface; the point and the normal (−gx, −gy, 1), scaled to a fixed share of the cube, are drawn on it.
+//!
 //! Records: `[kind, row or axis, shade or value, count]`, then `count` screen points `[x, y]`.
 
 use std::f64::consts::TAU;
@@ -38,6 +42,8 @@ pub const HUE_POLYGON: f64 = 3.0;
 pub const ARROW: f64 = 4.0;
 /// A piece of a level curve on the floor of the cube under a surface z = f(x, y), with its level as the value.
 pub const CONTOUR: f64 = 5.0;
+/// A single vector, such as the normal of a tangent plane: tail and head, drawn bolder than a field's arrows.
+pub const VECTOR: f64 = 6.0;
 pub const BOX: f64 = 10.0;
 pub const GRID: f64 = 11.0;
 pub const GRID_MAJOR: f64 = 12.0;
@@ -53,6 +59,12 @@ const IMPLICIT_CELLS: usize = 40;
 const FIELD_CELLS: usize = 7;
 /// The share of a lattice cell's edge the longest arrow spans.
 const FIELD_REACH: f64 = 0.8;
+/// Half the edge of a tangent plane's square patch and the length of its normal, as shares of the cube's half edge, so
+/// both keep their size on screen while zooming.
+const PATCH: f64 = 0.35;
+const NORMAL_LENGTH: f64 = 0.4;
+/// Cells per edge of the patch, so it interleaves with the surface it touches when ordered back to front.
+const PATCH_CELLS: usize = 12;
 /// Light direction in camera space (right, up, toward the viewer), normalized at use.
 const LIGHT: [f64; 3] = [-0.35, 0.55, 1.0];
 
@@ -571,6 +583,46 @@ impl Scene<'_> {
         }
     }
 
+    /// The patch of a tangent plane around `point`, the point itself and, when `normal`, the normal vector there.
+    fn tangent_plane(&mut self, row: f64, point: Vec3, gradient: [f64; 2], normal: bool) {
+        let range = self.camera.range;
+        let up = [-gradient[0], -gradient[1], 1.0];
+        let (Some(along), Some(unit)) = (normalize([1.0, 0.0, gradient[0]]), normalize(up)) else { return };
+        let across = cross(unit, along);
+        let half = PATCH * range;
+        let step = 2.0 * half / PATCH_CELLS as f64;
+        let at = |s: f64, t: f64| -> Vec3 { std::array::from_fn(|k| point[k] + s * along[k] + t * across[k]) };
+        let shade = self.shade(Some(unit));
+        for j in 0..PATCH_CELLS {
+            for i in 0..PATCH_CELLS {
+                let (s, t) = (-half + step * i as f64, -half + step * j as f64);
+                let quad = [at(s, t), at(s + step, t), at(s + step, t + step), at(s, t + step)];
+                let clipped = clip_cube(&quad, &[0, 1, 2], range);
+                if clipped.len() >= 3 {
+                    self.push(POLYGON, row, shade, &clipped);
+                }
+            }
+        }
+        if point.iter().any(|value| value.abs() > range) {
+            return;
+        }
+        // The point and the normal sit on the patch: lifted by one cell in depth so the cells around them do not cover them.
+        let lift = step;
+        if normal {
+            let tip = std::array::from_fn(|k| point[k] + NORMAL_LENGTH * range * unit[k]);
+            if let Some((a, b)) = clip_segment(point, tip, range) {
+                self.push(VECTOR, row, 1.0, &[a, b]);
+                if let Some(item) = self.items.last_mut() {
+                    item.depth += lift;
+                }
+            }
+        }
+        self.push(POINT, row, 1.0, &[point]);
+        if let Some(item) = self.items.last_mut() {
+            item.depth += lift;
+        }
+    }
+
     fn point(&mut self, row: f64, p: Vec3) {
         if p.iter().all(|v| v.is_finite() && v.abs() <= self.camera.range) {
             self.push(POINT, row, 1.0, &[p]);
@@ -667,6 +719,7 @@ pub fn render(sheet: &mut Sheet, camera: Camera) -> Vec<f64> {
             Plot::CoordSurface { expr, system, given, u, v } => scene.coord_surface(index, expr, *system, *given, *u, *v),
             Plot::ParamSurface { x, y, z, u, v, slots } => scene.param_surface(index, (x, y, z), *u, *v, *slots),
             Plot::Field3 { x, y, z } => scene.field(index, (x, y, z)),
+            Plot::TangentPlane { point, gradient, normal } => scene.tangent_plane(index, *point, *gradient, *normal),
             _ => {}
         }
     }
@@ -772,6 +825,50 @@ mod tests {
         assert!(hues.iter().any(|hue| *hue < 0.1) && hues.iter().any(|hue| (0.45..0.55).contains(hue)) && hues.iter().any(|hue| *hue > 0.9));
         assert_eq!(found.iter().filter(|r| r.kind == POINT).map(|r| r.row).collect::<Vec<_>>(), [3.0]);
         assert!(found.iter().all(|r| r.kind != POLYGON));
+    }
+
+    #[test]
+    fn a_tangent_plane_is_a_patch_with_its_point_and_normal() {
+        let found = records(&["f(x, y) = (x^2 + y^2) / 5 - 6", "tangent(f, 3, 2)"], CAMERA);
+        let patch: Vec<&Record> = found.iter().filter(|r| r.kind == POLYGON && r.row == 1.0).collect();
+        assert_eq!(patch.len(), PATCH_CELLS * PATCH_CELLS);
+        // One flat plane: every cell has the same shade.
+        assert!(patch.iter().all(|cell| cell.value == patch[0].value));
+        let points: Vec<&Record> = found.iter().filter(|r| r.kind == POINT && r.row == 1.0).collect();
+        let vectors: Vec<&Record> = found.iter().filter(|r| r.kind == VECTOR && r.row == 1.0).collect();
+        assert_eq!((points.len(), vectors.len()), (1, 1));
+        // The normal starts at the point of contact and has a fixed share of the cube's size on screen.
+        let projector = Projector::new(&CAMERA);
+        let (px, py, _) = projector.screen([3.0, 2.0, 13.0 / 5.0 - 6.0]);
+        assert!((vectors[0].points[0].0 - px).abs() < 1e-9 && (vectors[0].points[0].1 - py).abs() < 1e-9);
+        assert!((points[0].points[0].0 - px).abs() < 1e-9);
+        let length = |camera: Camera| {
+            let found = records(&["f(x, y) = x y / 10", "tangent(f, 1, 0.5)"], camera);
+            let vector = found.iter().find(|r| r.kind == VECTOR).unwrap();
+            let patch: Vec<f64> = found.iter().filter(|r| r.kind == POLYGON && r.row == 1.0).flat_map(|r| r.points.iter().map(|p| p.0)).collect();
+            let width = patch.iter().copied().fold(f64::NEG_INFINITY, f64::max) - patch.iter().copied().fold(f64::INFINITY, f64::min);
+            ((vector.points[1].0 - vector.points[0].0).hypot(vector.points[1].1 - vector.points[0].1), width)
+        };
+        let (wide, near) = (length(CAMERA), length(Camera { range: 7.0, ..CAMERA }));
+        assert!((wide.0 - near.0).abs() < 1e-6 && (wide.1 - near.1).abs() < 1e-6, "{wide:?} {near:?}");
+        // Without its normal the row draws no vector; a point outside the cube draws only the part of its patch inside.
+        let inputs = [RowInput { text: "tangent(x y / 4, 2, 1)".into(), hide_normal: true, ..RowInput::default() }];
+        let mut sheet = analyze(Mode::Space, &inputs);
+        let data = render(&mut sheet, CAMERA);
+        let (mut at, mut kinds) = (0, Vec::new());
+        while at < data.len() {
+            kinds.push(data[at]);
+            at += 4 + 2 * data[at + 3] as usize;
+        }
+        assert!(kinds.contains(&POINT) && kinds.contains(&POLYGON) && !kinds.contains(&VECTOR));
+        let outside = records(&["tangent(x / 4, 11, 0)"], CAMERA);
+        assert!(outside.iter().all(|r| r.kind != POINT && r.kind != VECTOR));
+        assert!(outside.iter().any(|r| r.kind == POLYGON));
+        for record in outside.iter().filter(|r| r.kind == POLYGON) {
+            for (x, y) in &record.points {
+                assert!((0.0..=CAMERA.width).contains(x) && (0.0..=CAMERA.height).contains(y));
+            }
+        }
     }
 
     #[test]

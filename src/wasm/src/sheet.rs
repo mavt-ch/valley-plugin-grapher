@@ -5,7 +5,7 @@
 use std::cell::Cell;
 use std::collections::hash_map::Entry;
 use std::collections::{BTreeSet, HashMap, HashSet};
-use std::f64::consts::TAU;
+use std::f64::consts::{PI, TAU};
 
 use crate::builtins::Builtin;
 use crate::complex::{self, C64, CExpr, CUserFn};
@@ -19,15 +19,19 @@ pub const Y: usize = 1;
 pub const T: usize = 2;
 pub const THETA: usize = 3;
 pub const Z: usize = 4;
-/// The radius r and the azimuth φ of cylindrical coordinates, named only on that sheet.
+/// The radius r of cylindrical coordinates, φ (cylindrical azimuth, spherical polar angle) and the spherical radius ρ;
+/// named only on those sheets. The spherical azimuth θ shares the polar sheet's slot.
 pub const R: usize = 5;
 pub const PHI: usize = 6;
-const SLOTS: usize = 7;
+pub const RHO: usize = 7;
+const SLOTS: usize = 8;
 const RESERVED: [&str; 6] = ["x", "y", "z", "t", "θ", "r"];
 /// On the complex sheet `r`, `t` and θ are ordinary names (as in `r e^(iθ)`) and `i` is the imaginary unit.
 const RESERVED_COMPLEX: [&str; 4] = ["x", "y", "z", "i"];
 /// The cylindrical sheet reads (r, φ, z); θ and ρ are read as φ and r before analysis.
 const RESERVED_CYLINDRICAL: [&str; 5] = ["x", "y", "z", "r", "φ"];
+/// The spherical sheet reads (ρ, θ, φ); r is read as ρ before analysis.
+const RESERVED_SPHERICAL: [&str; 6] = ["x", "y", "z", "ρ", "θ", "φ"];
 
 thread_local! {
     /// Set by `analyze` for the sheet being read.
@@ -45,6 +49,7 @@ pub enum Mode {
     /// The complex plane as the floor of a 3D sheet: `w = f(z)` rises to |f(z)|, coloured by arg f(z).
     ComplexSpace,
     Cylindrical,
+    Spherical,
 }
 
 impl Mode {
@@ -57,6 +62,7 @@ impl Mode {
             5 => Self::Complex,
             6 => Self::ComplexSpace,
             7 => Self::Cylindrical,
+            8 => Self::Spherical,
             _ => Self::Cartesian,
         }
     }
@@ -65,6 +71,7 @@ impl Mode {
         match self {
             Self::Complex | Self::ComplexSpace => &RESERVED_COMPLEX,
             Self::Cylindrical => &RESERVED_CYLINDRICAL,
+            Self::Spherical => &RESERVED_SPHERICAL,
             _ => &RESERVED,
         }
     }
@@ -72,15 +79,18 @@ impl Mode {
     fn system(self) -> Option<System> {
         match self {
             Self::Cylindrical => Some(System::Cylindrical),
+            Self::Spherical => Some(System::Spherical),
             _ => None,
         }
     }
 }
 
-/// Curvilinear coordinates of a 3D sheet: cylindrical (r, φ, z) with the azimuth φ measured in the xy-plane from +x.
+/// Curvilinear coordinates of a 3D sheet, in the mathematics convention: cylindrical (r, φ, z) with the azimuth φ
+/// measured in the xy-plane from +x, spherical (ρ, θ, φ) with the azimuth θ from +x and the polar angle φ from +z.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum System {
     Cylindrical,
+    Spherical,
 }
 
 impl System {
@@ -88,19 +98,22 @@ impl System {
     pub fn names(self) -> [&'static str; 3] {
         match self {
             Self::Cylindrical => ["r", "φ", "z"],
+            Self::Spherical => ["ρ", "θ", "φ"],
         }
     }
 
     pub fn slots(self) -> [usize; 3] {
         match self {
             Self::Cylindrical => [R, PHI, Z],
+            Self::Spherical => [RHO, THETA, PHI],
         }
     }
 
-    /// The coordinate a bare expression gives: the height z, as on the 3D sheet.
+    /// The coordinate a bare expression gives: the height z (as on the 3D sheet) or the radius ρ (as on the polar one).
     fn bare(self) -> usize {
         match self {
             Self::Cylindrical => 2,
+            Self::Spherical => 0,
         }
     }
 
@@ -109,6 +122,7 @@ impl System {
     pub fn free(self, given: usize) -> [usize; 2] {
         let order = match self {
             Self::Cylindrical => [1, 0, 2],
+            Self::Spherical => [1, 2, 0],
         };
         let mut free = order.into_iter().filter(|coord| *coord != given);
         [free.next().unwrap_or(0), free.next().unwrap_or(0)]
@@ -117,24 +131,27 @@ impl System {
     pub fn is_angle(self, coord: usize) -> bool {
         match self {
             Self::Cylindrical => coord == 1,
+            Self::Spherical => coord != 0,
         }
     }
 
-    /// The range of a coordinate whose fields are empty: a full turn of the azimuth, radii from 0 and heights without
-    /// bound (both are cut to the visible cube when drawn).
+    /// The range of a coordinate whose fields are empty: a full turn of the azimuth, [0, π] of the polar angle, radii
+    /// from 0 and heights without bound (both are cut to the visible cube when drawn).
     pub fn default_span(self, coord: usize) -> (f64, f64) {
         match (self, coord) {
-            (Self::Cylindrical, 1) => (0.0, TAU),
+            (Self::Cylindrical | Self::Spherical, 1) => (0.0, TAU),
+            (Self::Spherical, 2) => (0.0, PI),
             (Self::Cylindrical, 2) => (f64::NEG_INFINITY, f64::INFINITY),
             _ => (0.0, f64::INFINITY),
         }
     }
 
-    /// How far a coordinate that is not an angle reaches into the cube [-1, 1]³: the height to its faces and the
-    /// cylindrical radius to its vertical edges.
+    /// How far a coordinate that is not an angle reaches into the cube [-1, 1]³: the height to its faces, the
+    /// cylindrical radius to its vertical edges and the spherical radius to its corners.
     pub fn reach(self, coord: usize) -> f64 {
         match (self, coord) {
             (Self::Cylindrical, 0) => std::f64::consts::SQRT_2,
+            (Self::Spherical, 0) => 3_f64.sqrt(),
             _ => 1.0,
         }
     }
@@ -143,6 +160,10 @@ impl System {
     pub fn cartesian(self, c: [f64; 3]) -> [f64; 3] {
         match self {
             Self::Cylindrical => [c[0] * c[1].cos(), c[0] * c[1].sin(), c[2]],
+            Self::Spherical => {
+                let ground = c[0] * c[2].sin();
+                [ground * c[1].cos(), ground * c[1].sin(), c[0] * c[2].cos()]
+            }
         }
     }
 }
@@ -718,8 +739,8 @@ impl Analysis<'_> {
         Ok(Outcome::Plotted(Plot::ComplexSurface { expr, hue, height }))
     }
 
-    /// Rows of a cylindrical sheet: one coordinate as a function of the other two (or a bare expression for the height
-    /// z), and constant triples as points.
+    /// Rows of a cylindrical or spherical sheet: one coordinate as a function of the other two (or a bare expression
+    /// for the height z or the radius ρ), and constant triples as points.
     fn plot_coords(&mut self, statement: &Statement, input: &RowInput, system: System) -> Result<Outcome, MathError> {
         if statement.relation != Relation::Eq {
             return Err(MathError::new("error.unsupported", ""));
@@ -821,10 +842,11 @@ pub fn analyze(mode: Mode, inputs: &[RowInput]) -> Sheet {
     let complex_names = matches!(mode, Mode::Complex | Mode::ComplexSpace);
     SHEET_MODE.with(|current| current.set(mode));
     // Other spellings of a coordinate: t for θ on the polar sheet (except in a parametric pair), θ and ρ for φ and
-    // r on the cylindrical sheet.
+    // r on the cylindrical sheet, r for ρ on the spherical one.
     let aliases: &[(&str, &str)] = match mode {
         Mode::Polar => &[("t", "θ")],
         Mode::Cylindrical => &[("θ", "φ"), ("ρ", "r")],
+        Mode::Spherical => &[("r", "ρ")],
         _ => &[],
     };
     let tokens: Vec<Option<Result<Vec<Tok>, MathError>>> =
@@ -1146,6 +1168,39 @@ mod tests {
         assert_eq!(error(&sheet, 3).missing, ["k"]);
         assert_eq!(error(&sheet, 4).key, "error.range");
         assert_eq!(System::Cylindrical.cartesian([2.0, PI, 1.0]).map(|value| (value * 1e9).round() / 1e9), [-2.0, 0.0, 1.0]);
+    }
+
+    #[test]
+    fn spherical_rows_read_the_mathematics_convention() {
+        let mut sheet = sheet(Mode::Spherical, &[
+            "ρ = 2", "rho = 1 + cos(theta)", "φ = π/4", "phi = pi/4", "θ = π/3", "1 + cos(φ)", "r = 3", "ρ = a", "a = 1.5", "(2, 0, π/2)", "z = 1", "ρ > 1",
+        ]);
+        assert_eq!(coords(&sheet, 0), (0, Span { coord: 1, from: 0.0, to: TAU }, Span { coord: 2, from: 0.0, to: PI }));
+        assert_eq!(coords(&sheet, 1).0, 0);
+        // φ = π/4 is the cone about +z, swept over the azimuth θ and the radius ρ.
+        assert_eq!(coords(&sheet, 2), (2, Span { coord: 1, from: 0.0, to: TAU }, Span { coord: 0, from: 0.0, to: f64::INFINITY }));
+        assert_eq!(coords(&sheet, 3).0, 2);
+        assert_eq!(coords(&sheet, 4), (1, Span { coord: 2, from: 0.0, to: PI }, Span { coord: 0, from: 0.0, to: f64::INFINITY }));
+        // A bare expression is the radius, and r is another spelling of ρ.
+        assert_eq!(coords(&sheet, 5).0, 0);
+        assert_eq!(coords(&sheet, 6).0, 0);
+        assert_eq!(coords(&sheet, 7).0, 0);
+        assert!(matches!(&sheet.rows[8].outcome, Outcome::Parameter { name, slider: true, .. } if name == "a"));
+        assert!(matches!(sheet.rows[9].plot(), Some(Plot::Point3 { x, y, z }) if (*x - 2.0).abs() < 1e-12 && y.abs() < 1e-12 && z.abs() < 1e-12));
+        assert_eq!(error(&sheet, 10).key, "error.unsupported");
+        assert_eq!(error(&sheet, 11).key, "error.unsupported");
+        let Some(Plot::CoordSurface { expr, .. }) = sheet.rows[1].plot().cloned() else { unreachable!() };
+        sheet.env[THETA] = PI;
+        assert_eq!(eval(&expr, &mut sheet.env, &sheet.functions), 0.0);
+        // θ turns from +x towards +y in the xy-plane; φ tips away from +z.
+        let at = |c: [f64; 3]| System::Spherical.cartesian(c).map(|value| (value * 1e9).round() / 1e9);
+        assert_eq!(at([2.0, 0.0, 0.0]), [0.0, 0.0, 2.0]);
+        assert_eq!(at([2.0, PI / 2.0, PI / 2.0]), [0.0, 2.0, 0.0]);
+        assert_eq!(at([2.0, 0.0, PI]), [0.0, 0.0, -2.0]);
+        let inputs = [RowInput { text: "ρ = 2".into(), from2: "0".into(), to2: "π/4".into(), ..RowInput::default() }, RowInput { text: "φ = π/4".into(), to2: "∞".into(), from: "0".into(), to: "inf".into(), ..RowInput::default() }];
+        let ranged = analyze(Mode::Spherical, &inputs);
+        assert_eq!(coords(&ranged, 0).2, Span { coord: 2, from: 0.0, to: PI / 4.0 });
+        assert_eq!(error(&ranged, 1).key, "error.range");
     }
 
     fn complex_point(sheet: &Sheet, row: usize) -> (f64, f64, String) {

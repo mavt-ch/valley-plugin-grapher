@@ -5,12 +5,13 @@ import { cylindrical } from './cylindrical'
 import { parametric } from './parametric'
 import { polar } from './polar'
 import { space } from './space'
+import { spherical } from './spherical'
 import type { Mode, ViewDefinition } from './types'
 
 export type { AxisUnits, Example, Mode, PlaneView, SpaceView, ViewDefinition } from './types'
 
 /** The views in header order. */
-export const VIEWS: readonly ViewDefinition[] = [cartesian, polar, parametric, space, cylindrical, complex, complexSpace]
+export const VIEWS: readonly ViewDefinition[] = [cartesian, polar, parametric, space, cylindrical, spherical, complex, complexSpace]
 export const MODES: readonly Mode[] = VIEWS.map((view) => view.id)
 
 const BY_ID = new Map<Mode, ViewDefinition>(VIEWS.map((view) => [view.id, view]))

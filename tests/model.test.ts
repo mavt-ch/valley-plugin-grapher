@@ -48,7 +48,7 @@ describe('sheets', () => {
   })
 
   it('keeps one folder per view, each with its own kernel mode', () => {
-    expect(MODES).toEqual(['cartesian', 'polar', 'parametric', 'space', 'cylindrical', 'complex', 'complexSpace'])
+    expect(MODES).toEqual(['cartesian', 'polar', 'parametric', 'space', 'cylindrical', 'spherical', 'complex', 'complexSpace'])
     expect(new Set(MODES.map((mode) => viewOf(mode).kernel)).size).toBe(MODES.length)
     expect(defaultDocument().sheets.complexSpace.map((row) => row.text)).toEqual(['w = (z^2 - 4) / 4', 'Re(z^2) / 5', '1 + 2i', ''])
     expect(normalizeDocument({ version: 1, sheets: {} }).sheets.complexSpace).toHaveLength(4)
@@ -67,6 +67,9 @@ describe('sheets', () => {
     expect(again.mode).toBe('cylindrical')
     expect(again.sheets.cylindrical[1]).toMatchObject({ text: 'z = φ / 2', from: '', to: '', from2: '0', to2: '3' })
     expect(viewOf('cylindrical')).toMatchObject({ canvas: 'space', kernel: 7, homeRange: 5 })
+    expect(older.sheets.spherical.map((row) => row.text)).toEqual(['ρ = 2', 'φ = π/4', ''])
+    expect(older.sheets.spherical[0]).toMatchObject({ from2: '0', to2: 'π/4' })
+    expect(viewOf('spherical')).toMatchObject({ canvas: 'space', kernel: 8, homeRange: 3 })
   })
 
   it('turns the old trigonometric sheet into Cartesian with π axes', () => {

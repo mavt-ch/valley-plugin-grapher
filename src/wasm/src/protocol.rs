@@ -103,5 +103,7 @@ mod tests {
         assert!(records[0].starts_with("coords\u{1f}r\u{1f}φ\u{1f}z\u{1f}0\u{1f}3.14159"), "{}", records[0]);
         assert!(records[0].ends_with("\u{1f}-1\u{1f}3"));
         assert_eq!(records[1], "coords\u{1f}z\u{1f}φ\u{1f}r\u{1f}0\u{1f}6.283185307179586\u{1f}0\u{1f}Infinity");
+        let sphere = write_outcomes(&analyze(Mode::Spherical, &read_rows("φ = π/4")));
+        assert_eq!(sphere, "coords\u{1f}φ\u{1f}θ\u{1f}ρ\u{1f}0\u{1f}6.283185307179586\u{1f}0\u{1f}Infinity");
     }
 }

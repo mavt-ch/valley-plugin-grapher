@@ -157,6 +157,22 @@ describe('the plot kernel through api.wasm', () => {
     }
   })
 
+  it('reads spherical rows in the mathematics convention and draws them inside the cube', () => {
+    const rows = sheet('ρ = 2', 'rho = 1 + cos(theta)', { text: 'φ = π/4', from2: '0', to2: '2' }, 'θ = π/3', 'r = 1', '(1, 0, 0)', 'z = 1', { text: 'ρ = 2', to2: '4' })
+    const analyses = engine.analyze('spherical', rows)
+    expect(analyses.map((row) => row.kind)).toEqual(['coords', 'coords', 'coords', 'coords', 'coords', 'point3', 'error', 'coords'])
+    expect(analyses[0]).toMatchObject({ given: 'ρ', over: ['θ', 'φ'], from: 0, from2: 0 })
+    expect(analyses[0].to2).toBeCloseTo(Math.PI, 12)
+    expect(analyses[2]).toMatchObject({ given: 'φ', over: ['θ', 'ρ'], from2: 0, to2: 2 })
+    expect(analyses[3]).toMatchObject({ given: 'θ', over: ['φ', 'ρ'], to2: Infinity })
+    expect(analyses[4].given).toBe('ρ')
+    expect(analyses[5]).toMatchObject({ x: 0, y: 0, z: 1 })
+    expect(analyses[7]).toMatchObject({ from2: 0, to2: 4 })
+    const records = engine.space('spherical', rows, 600, 400, { yaw: -0.6, pitch: 0.45, range: 3 })
+    for (const row of [0, 1, 2, 3, 4]) expect(records.filter((record) => record.kind === SPACE.polygon && record.row === row).length).toBeGreaterThan(500)
+    expect(records.filter((record) => record.kind === SPACE.point).map((record) => record.row)).toEqual([5])
+  })
+
   it('reads complex numbers in every notation and draws relations as regions', () => {
     const rows = sheet('w = 2e^(iπ/3)', 'cos(φ) + i sin(φ)', 'φ = 0.8', '3 - 2i', '|z + 2| < 3', '|z - w| = 1', 'Re(z) ≥ 1', 'z^2')
     const analyses = engine.analyze('complex', rows)

@@ -8,7 +8,7 @@ export type { AxisUnits }
  * `ViewDefinition`, an entry in `src/views/index.ts`, a kernel mode in `src/wasm/src/sheet.rs` and its locale keys
  * (`mode.<id>`, `mode.<id>.hint`, `hint.<id>`).
  */
-export type Mode = 'cartesian' | 'polar' | 'parametric' | 'space' | 'cylindrical' | 'complex' | 'complexSpace'
+export type Mode = 'cartesian' | 'polar' | 'parametric' | 'space' | 'cylindrical' | 'spherical' | 'complex' | 'complexSpace'
 
 /** An example row of a fresh sheet: its text, or its text with a parameter range (and a second one for a surface). */
 export type Example = string | readonly [text: string, from: string, to: string] | readonly [text: string, from: string, to: string, from2: string, to2: string]

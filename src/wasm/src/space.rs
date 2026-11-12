@@ -4,7 +4,7 @@
 //! has to fill in order. The frame (box, floor grid, axes, tick labels) comes first in the same stream.
 //!
 //! The complex 3D sheet uses the same frame with the complex plane as the floor: `w = f(z)` rises to |f(z)| and
-//! each cell is coloured by arg f(z). Surfaces in cylindrical coordinates are sampled over their two parameter
+//! each cell is coloured by arg f(z). Surfaces in cylindrical or spherical coordinates are sampled over their two parameter
 //! coordinates, converted to (x, y, z) and clipped to the cube on all three axes.
 //!
 //! Records: `[kind, row or axis, shade or value, count]`, then `count` screen points `[x, y]`.
@@ -575,6 +575,41 @@ mod tests {
         for record in records_in(Mode::Cylindrical, &["r = 2"], top).iter().filter(|r| r.kind == POLYGON) {
             for (x, y) in &record.points {
                 assert!((((x - cx).powi(2) + (y - cy).powi(2)).sqrt() - radius).abs() < 0.5, "{x}, {y}");
+            }
+        }
+    }
+
+    #[test]
+    fn spherical_surfaces_are_shaded_and_stay_inside_the_cube() {
+        let found = records_in(Mode::Spherical, &["ρ = 2", "φ = π/4", "ρ = 1 + cos(θ)", "θ = π/3", "ρ = 30"], CAMERA);
+        for row in 0..4 {
+            let polygons: Vec<&Record> = found.iter().filter(|r| r.kind == POLYGON && r.row == row as f64).collect();
+            assert!(polygons.len() > 1000, "row {row}: {}", polygons.len());
+            assert!(polygons.iter().all(|p| (0.3..=1.0).contains(&p.value) && p.points.len() >= 3));
+        }
+        // A sphere beyond the cube's corners draws nothing.
+        assert!(found.iter().all(|r| r.row != 4.0 || r.kind >= BOX));
+        // An orthographic sphere of radius 2 fills the disc of radius 2 about the projected centre.
+        let projector = Projector::new(&CAMERA);
+        let (cx, cy, _) = projector.screen([0.0, 0.0, 0.0]);
+        let radius = 2.0 * projector.scale;
+        let mut farthest: f64 = 0.0;
+        for record in records_in(Mode::Spherical, &["ρ = 2"], CAMERA).iter().filter(|r| r.kind == POLYGON) {
+            for (x, y) in &record.points {
+                farthest = farthest.max(((x - cx).powi(2) + (y - cy).powi(2)).sqrt());
+            }
+        }
+        assert!((farthest - radius).abs() < 0.5, "{farthest} vs {radius}");
+        // A sphere larger than the cube is cut to it: from above, nothing lies outside the projected cube's square.
+        let top = Camera { pitch: std::f64::consts::FRAC_PI_2, yaw: 0.0, ..CAMERA };
+        let projector = Projector::new(&top);
+        let (cx, cy, _) = projector.screen([0.0, 0.0, 0.0]);
+        let half = 10.0 * projector.scale;
+        let cut = records_in(Mode::Spherical, &["ρ = 12"], top);
+        assert!(cut.iter().filter(|r| r.kind == POLYGON).count() > 200);
+        for record in cut.iter().filter(|r| r.kind == POLYGON) {
+            for (x, y) in &record.points {
+                assert!((x - cx).abs() <= half + 1e-6 && (y - cy).abs() <= half + 1e-6, "{x}, {y}");
             }
         }
     }

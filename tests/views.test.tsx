@@ -43,7 +43,7 @@ describe('the sidebar', () => {
     expect(screen.getByDisplayValue('y = x^2 - 2')).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: 'View: Cartesian' }))
     const options = within(screen.getByRole('radiogroup', { name: 'Coordinate system' })).getAllByRole('radio')
-    expect(options.map((option) => option.querySelector('.grapher-view-option-name')?.textContent)).toEqual(['Cartesian', 'Polar', 'Parametric', '3D', 'Cylindrical', 'Complex', 'Complex 3D'])
+    expect(options.map((option) => option.querySelector('.grapher-view-option-name')?.textContent)).toEqual(['Cartesian', 'Polar', 'Parametric', '3D', 'Cylindrical', 'Spherical', 'Complex', 'Complex 3D'])
     expect(options[0].getAttribute('aria-checked')).toBe('true')
     expect(screen.queryByDisplayValue('y = x^2 - 2')).toBeNull()
     fireEvent.keyDown(options[0], { key: 'Escape' })
@@ -145,6 +145,24 @@ describe('the graph tab', () => {
     await waitFor(async () => expect(await mock.api.data.files.readText('graphs.json')).toContain('"to2": "2"'), { timeout: 2000 })
     expect(within(first).getByRole('textbox', { name: 'End of z' }).closest('.grapher-domain')?.textContent).toContain('≤ z ≤')
     expect(container.querySelector('.grapher-hint')?.textContent).toContain('r = 1 + cos(φ)')
+  })
+
+  it('draws spherical surfaces and states the convention in the hint', async () => {
+    mount()
+    const { container } = render(<><Sidebar /><GraphTab /></>)
+    await pick('Spherical')
+    expect(await screen.findByDisplayValue('ρ = 2')).toBeTruthy()
+    expect(await screen.findByLabelText(/^Spherical graph/)).toBeTruthy()
+    const [sphere, cone] = await screen.findAllByRole('listitem')
+    await waitFor(() => expect(cone.getAttribute('data-kind')).toBe('coords'))
+    expect(within(sphere).getByRole('textbox', { name: 'End of φ' }).getAttribute('value')).toBe('π/4')
+    expect(within(sphere).getByRole('textbox', { name: 'Start of θ' }).getAttribute('placeholder')).toBe('0')
+    expect(within(cone).getByRole('textbox', { name: 'End of ρ' }).getAttribute('value')).toBe('2')
+    expect(within(cone).getByRole('textbox', { name: 'End of θ' }).getAttribute('placeholder')).toBe('2π')
+    expect(sphere.querySelector('.grapher-typeset')?.textContent).toBe('ρ=2')
+    const hint = container.querySelector('.grapher-hint')?.textContent ?? ''
+    expect(hint).toContain('θ the azimuth in the xy-plane')
+    expect(hint).toContain('φ the polar angle from the z-axis')
   })
 
   it('draws w = f(z) over the complex plane in the complex 3D view', async () => {

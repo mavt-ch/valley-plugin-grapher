@@ -30,6 +30,9 @@ const GREEK: [(&str, char); 14] = [
     ("pi", 'π'),
 ];
 
+/// Words for the calculus rows, read like function names: `int(f, a, b)` (also `integral`, `∫`) and `tangent(f, a)`.
+pub const SPECIAL: [&str; 3] = ["integral", "int", "tangent"];
+
 /// The plot variables a trailing digit squares or cubes: `x2` is `x²`.
 const POWERED: [&str; 4] = ["x", "y", "t", "θ"];
 
@@ -62,6 +65,9 @@ fn split_word(letters: &[char], tokens: &mut Vec<Tok>) {
         consider("infinity", Tok::Ident("∞".into()));
         consider("inf", Tok::Ident("∞".into()));
         consider("deg", Tok::Op('°'));
+        for word in SPECIAL {
+            consider(word, Tok::Ident(word.into()));
+        }
         match best {
             Some((len, token)) => {
                 tokens.push(token);
@@ -203,6 +209,20 @@ pub fn tokenize(source: &str) -> Result<Vec<Tok>, MathError> {
                 tokens.push(Tok::Ident("∞".into()));
                 continue;
             }
+            '∫' => {
+                tokens.push(Tok::Ident("int".into()));
+                continue;
+            }
+            // Primes of a derivative: `f'`, `f′`, `f″`, `f‴`, and the typographic apostrophe a keyboard may substitute.
+            '\'' | '′' | '’' | '″' | '‴' => {
+                let count = match c {
+                    '″' => 2,
+                    '‴' => 3,
+                    _ => 1,
+                };
+                tokens.extend(std::iter::repeat_n(Tok::Op('\''), count));
+                continue;
+            }
             other => return Err(MathError::new("error.unexpected", other.to_string())),
         };
         tokens.push(Tok::Op(op));
@@ -271,5 +291,14 @@ mod tests {
         assert_eq!(idents("Re(z) + Im z"), ["real", "(", "z", ")", "+", "imag", "z"]);
         assert_eq!(idents("re^(iθ)"), ["r", "e", "^", "(", "i", "θ", ")"]);
         assert_eq!(idents("conj(z) arg z"), ["conj", "(", "z", ")", "arg", "z"]);
+    }
+
+    #[test]
+    fn primes_integrals_and_tangents() {
+        assert_eq!(idents("f'(x) + f″(x)"), ["f", "'", "(", "x", ")", "+", "f", "'", "'", "(", "x", ")"]);
+        assert_eq!(idents("g′ f’ h‴"), ["g", "'", "f", "'", "h", "'", "'", "'"]);
+        assert_eq!(idents("∫(sin x, 0, π) + integral(f, 1, 2) - int(x, a, b)"), ["int", "(", "sin", "x", ",", "0", ",", "π", ")", "+", "integral", "(", "f", ",", "1", ",", "2", ")", "-", "int", "(", "x", ",", "a", ",", "b", ")"]);
+        assert_eq!(idents("tangent(f, a) tan x"), ["tangent", "(", "f", ",", "a", ")", "tan", "x"]);
+        assert_eq!(idents("Tangent sint"), ["tangent", "sin", "t"]);
     }
 }

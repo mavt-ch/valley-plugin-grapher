@@ -47,6 +47,20 @@ export function formatNumber(value: number, digits = 4): string {
   return value < 0 && text !== '0' ? `${MINUS}${text}` : text
 }
 
+/** `2x − y + 3`: terms with their coefficients (1 and −1 written as a bare sign, 0 left out), then the constant. */
+export function formatLinear(terms: readonly (readonly [coefficient: number, name: string])[], constant: number, digits = 4): string {
+  const parts: string[] = []
+  const add = (value: number, name: string): void => {
+    const magnitude = formatNumber(Math.abs(value), digits)
+    if (magnitude === '0' && (name || parts.length)) return
+    const text = name && magnitude === '1' ? name : `${magnitude}${name}`
+    parts.push(parts.length ? `${value < 0 ? MINUS : '+'} ${text}` : `${value < 0 && magnitude !== '0' ? MINUS : ''}${text}`)
+  }
+  for (const [coefficient, name] of terms) add(coefficient, name)
+  add(constant, '')
+  return parts.join(' ')
+}
+
 function labelDigits(step: number): number {
   return Math.max(0, Math.min(12, -Math.floor(Math.log10(step) + 1e-9)))
 }

@@ -280,6 +280,60 @@ describe('the plot kernel through api.wasm', () => {
     expect(new Set(records.filter((record) => record.kind === SPACE.contour && record.row === 2).map((record) => record.value)).size).toBeLessThanOrEqual(3)
   })
 
+  it('differentiates defined functions exactly at every point and zoom', () => {
+    const rows = sheet('f(x) = sin x', "f'(x)", "f''(x)", 'g(x) = x^3', "g'(x)", "y = f'(x) + 1", "g''(2)")
+    expect(engine.analyze('cartesian', rows).map((row) => row.kind)).toEqual(['function', 'function', 'function', 'function', 'function', 'function', 'value'])
+    expect(engine.analyze('cartesian', rows)[6].value).toBeCloseTo(12, 12)
+    const expected: Record<number, (x: number) => number> = { 1: Math.cos, 2: (x) => -Math.sin(x), 4: (x) => 3 * x * x, 5: (x) => Math.cos(x) + 1 }
+    for (const view of [{ cx: 0, cy: 0, scale: 20 }, { cx: 3, cy: 0, scale: 5000 }, { cx: 1e4, cy: 0, scale: 0.05 }, { cx: -2, cy: 1, scale: 1e6 }]) {
+      const paths = engine.sample('cartesian', rows, 400, 300, view)
+      for (const [row, derivative] of Object.entries(expected)) {
+        const points = paths.filter((path) => path.row === Number(row)).flatMap((path) => Array.from({ length: path.points.length / STRIDE }, (_, k) => [path.points[k * STRIDE + 2], path.points[k * STRIDE + 3]]))
+        for (const [x, y] of points) expect(Math.abs(y - derivative(x))).toBeLessThan(1e-9 * Math.max(1, Math.abs(y)))
+      }
+    }
+    expect(engine.evaluate('cartesian', rows, 4, 2)).toBeCloseTo(12, 12)
+    const errors = engine.analyze('cartesian', sheet("k'(x)", "f''''(x)", 'f(x) = x', 'p(x, y) = x', "p'(x)"))
+    expect(errors.map((row) => row.error?.key)).toEqual(['error.derivative', 'error.prime', undefined, undefined, 'error.derivative'])
+  })
+
+  it('integrates to the signed value and shades the area between the curve and the axis', () => {
+    const rows = sheet('f(x) = x^2 - 1', 'int(f, -2, 3)', '∫(sin x, 0, π)', 'integral(f, 1, 1)', 'int(f, 1, -1)', 'int(f, 0, b)', 'int(q, 0, 1)', 'int(e^(-x^2), -inf, inf)')
+    const analyses = engine.analyze('cartesian', rows)
+    expect(analyses.slice(1, 5).map((row) => row.kind)).toEqual(['integral', 'integral', 'integral', 'integral'])
+    expect(analyses[1].value).toBeCloseTo(20 / 3, 12)
+    expect(analyses[1]).toMatchObject({ from: -2, to: 3 })
+    expect(analyses[2].value).toBeCloseTo(2, 12)
+    expect(analyses[3].value).toBe(0)
+    expect(analyses[4].value).toBeCloseTo(4 / 3, 12)
+    expect(analyses[5].error).toEqual({ key: 'error.unknown', param: 'b', missing: ['b'] })
+    expect(analyses[6].error?.key).toBe('error.function')
+    expect(analyses[7].value).toBeCloseTo(Math.sqrt(Math.PI), 9)
+    const regions = engine.sample('cartesian', rows, 400, 300, { cx: 0, cy: 0, scale: 20 }).filter((path) => path.row === 1)
+    expect(regions.map((path) => path.kind)).toEqual(['region'])
+    const { points } = regions[0]
+    for (let i = STRIDE; i < points.length - STRIDE; i += STRIDE) {
+      expect(points[i + 2]).toBeGreaterThanOrEqual(-2)
+      expect(points[i + 2]).toBeLessThanOrEqual(3)
+      expect(points[i + 3]).toBeCloseTo(points[i + 2] ** 2 - 1, 9)
+    }
+    expect([points[3], points[points.length - STRIDE + 3]]).toEqual([0, 0])
+  })
+
+  it('draws a tangent through its point and moves it with its slider', () => {
+    const rows = (a: string) => sheet('f(x) = x^3', 'tangent(f, a)', `a = ${a}`, 'tangent(|x|, 0)')
+    const analyses = engine.analyze('cartesian', rows('1'))
+    expect(analyses[1]).toMatchObject({ kind: 'tangent', slope: 3, intercept: -2, x: 1, y: 1 })
+    expect(analyses[3].error).toMatchObject({ key: 'error.tangent', param: 'x = 0' })
+    expect(engine.analyze('cartesian', rows('-2'))[1]).toMatchObject({ slope: 12, intercept: 16, x: -2, y: -8 })
+    const paths = engine.sample('cartesian', rows('0.5'), 400, 300, { cx: 0, cy: 0, scale: 20 }).filter((path) => path.row === 1)
+    expect(paths.map((path) => path.kind)).toEqual(['line', 'point'])
+    expect(Array.from(paths[1].points.slice(2, 4))).toEqual([0.5, 0.125])
+    const line = paths[0].points
+    expect((line[STRIDE + 3] - line[3]) / (line[STRIDE + 2] - line[2])).toBeCloseTo(0.75, 12)
+    expect(engine.analyze('cartesian', sheet('tangent(g, 1)'))[0].error).toMatchObject({ key: 'error.function', param: 'g' })
+  })
+
   it('shades inequalities on Cartesian sheets', () => {
     const rows = sheet('y > x^2', 'x^2 + y^2 ≤ 4')
     expect(engine.analyze('cartesian', rows)).toMatchObject([{ kind: 'region', strict: true }, { kind: 'region', strict: false }])

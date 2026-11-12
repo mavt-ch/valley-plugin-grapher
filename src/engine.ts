@@ -9,7 +9,7 @@ export { STRIDE }
 const MODULE_ID = 'plot'
 const RECORD = '\u001e'
 const FIELD = '\u001f'
-export type RowKind = 'empty' | 'error' | 'param' | 'value' | 'function' | 'definition' | 'polar' | 'curve' | 'point' | 'implicit' | 'surface' | 'curve3' | 'point3' | 'region' | 'cpoint' | 'csurface' | 'coords' | 'psurface' | 'implicit3' | 'field' | 'field3' | 'contour'
+export type RowKind = 'empty' | 'error' | 'param' | 'value' | 'function' | 'definition' | 'polar' | 'curve' | 'point' | 'implicit' | 'surface' | 'curve3' | 'point3' | 'region' | 'cpoint' | 'csurface' | 'coords' | 'psurface' | 'implicit3' | 'field' | 'field3' | 'contour' | 'integral' | 'tangent'
 
 export interface RowError {
   key: string
@@ -40,6 +40,9 @@ export interface RowAnalysis {
   over?: [string, string]
   from2?: number
   to2?: number
+  /** `tangent` rows: the line y = slope · x + intercept, touching at (x, y). */
+  slope?: number
+  intercept?: number
 }
 
 /** `contour` paths are level curves whose points carry their level as the parameter; `arrow` paths are a vector field's arrows: tail and head, the tail's parameter |F|, the head's |F| relative to the view's reference (0–1). */
@@ -125,6 +128,8 @@ export function decodeOutcomes(text: string, count: number): RowAnalysis[] {
       case 'polar':
       case 'curve': return { kind, from: Number(a), to: Number(b) }
       case 'point': return { kind, x: Number(a), y: Number(b) }
+      case 'integral': return { kind, value: Number(a), from: Number(b), to: Number(c) }
+      case 'tangent': return { kind, slope: Number(a), intercept: Number(b), x: Number(c), y: Number(rest[0]) }
       case 'implicit':
       case 'implicit3':
       case 'field':

@@ -25,12 +25,13 @@ type MNode =
   | { k: 'group'; open: string; close: string; closed: boolean; body: MNode }
   | { k: 'root'; body: MNode; index?: MNode }
   | { k: 'post'; base: MNode; text: string }
+  | { k: 'integral'; body: MNode; from: MNode; to: MNode }
 
 const FUNCTIONS = [
   'sin', 'cos', 'tan', 'cot', 'sec', 'csc', 'arcsin', 'asin', 'arccos', 'acos', 'arctan', 'atan', 'arccot', 'acot',
   'sinh', 'cosh', 'tanh', 'coth', 'arsinh', 'arcsinh', 'asinh', 'arcosh', 'arccosh', 'acosh', 'artanh', 'arctanh', 'atanh',
   'sqrt', 'cbrt', 'abs', 'sign', 'sgn', 'ln', 'log', 'lg', 'exp', 'floor', 'ceil', 'round', 'min', 'max', 'mod', 'root',
-  'nthroot', 'real', 'imag', 'conj', 'arg'
+  'nthroot', 'real', 'imag', 'conj', 'arg', 'integral', 'int', 'tangent'
 ]
 const GREEK: Record<string, string> = {
   epsilon: 'ε', lambda: 'λ', alpha: 'α', gamma: 'γ', delta: 'δ', omega: 'ω', sigma: 'σ', theta: 'θ', beta: 'β', phi: 'φ', rho: 'ρ', tau: 'τ', mu: 'μ', pi: 'π'
@@ -43,7 +44,10 @@ const WORDS: [string, Tok][] = [
   ['deg', { t: 'op', v: '°' }]
 ]
 const SUPERSCRIPTS: Record<string, string> = { '⁰': '0', '¹': '1', '²': '2', '³': '3', '⁴': '4', '⁵': '5', '⁶': '6', '⁷': '7', '⁸': '8', '⁹': '9', '⁻': '-' }
-const DISPLAY_FN: Record<string, string> = { real: 'Re', imag: 'Im', sgn: 'sign', lg: 'log', asin: 'sin⁻¹', acos: 'cos⁻¹', atan: 'tan⁻¹', nthroot: 'root' }
+const DISPLAY_FN: Record<string, string> = { real: 'Re', imag: 'Im', sgn: 'sign', lg: 'log', asin: 'sin⁻¹', acos: 'cos⁻¹', atan: 'tan⁻¹', nthroot: 'root', int: '∫', integral: '∫' }
+/** Primes as typed (`'`, the typographic apostrophe, ′, ″, ‴), counted. */
+const PRIMES: Record<string, number> = { "'": 1, '’': 1, '′': 1, '″': 2, '‴': 3 }
+const primeText = (count: number): string => (count === 2 ? '″' : count === 3 ? '‴' : '′'.repeat(count))
 const RELATIONS = new Set(['=', '<', '>', '≤', '≥', '≔'])
 const OPERATORS: Record<string, string> = { '-': '−', '−': '−', '+': '+', '*': '·', '×': '·', '·': '·', '⋅': '·', '∗': '·', '<=': '≤', '>=': '≥', '⩽': '≤', '⩾': '≥', ':=': '≔' }
 
@@ -104,6 +108,16 @@ export function tokenizeMath(source: string): Tok[] {
           i = braced && source[k] === '}' ? k + 1 : k
         }
       }
+      continue
+    }
+    if (c === '∫') {
+      tokens.push({ t: 'fn', v: 'int' })
+      i++
+      continue
+    }
+    if (c in PRIMES) {
+      for (let k = 0; k < PRIMES[c]; k++) tokens.push({ t: 'op', v: "'" })
+      i++
       continue
     }
     if (c in SUPERSCRIPTS) {
@@ -244,7 +258,12 @@ class Parser {
       if (token?.t === 'sup') {
         this.at++
         node = { k: 'pow', base: node, exp: { k: 'num', text: token.v.replace('-', '−') } }
-      } else if (token?.t === 'op' && ['!', '°', "'"].includes(token.v)) {
+      } else if (token?.t === 'op' && token.v === "'") {
+        // `f''` is one double prime on f.
+        let count = 0
+        while (this.isOp("'")) { this.at++; count++ }
+        node = { k: 'post', base: node, text: primeText(count) }
+      } else if (token?.t === 'op' && ['!', '°'].includes(token.v)) {
         this.at++
         node = { k: 'post', base: node, text: token.v }
       } else {
@@ -299,6 +318,8 @@ class Parser {
       case 'root':
       case 'nthroot': if (args.length === 2) return { k: 'root', body: args[0], index: args[1] }; break
       case 'abs': if (inner) return { k: 'group', open: '|', close: '|', closed: inner.closed, body: inner.body }; break
+      case 'int':
+      case 'integral': if (args.length === 3) return { k: 'integral', body: bracketSum(args[0]), from: args[1], to: args[2] }; break
     }
     return { k: 'fn', text: DISPLAY_FN[token.v] ?? token.v, sub: token.sub, exp, arg }
   }
@@ -307,6 +328,12 @@ class Parser {
 function seq(items: MNode[]): MNode {
   const flat = items.flatMap((item) => (item.k === 'seq' ? item.items : [item]))
   return flat.length === 1 ? flat[0] : { k: 'seq', items: flat }
+}
+
+/** An integrand that is a sum is bracketed before its dx, as in print. */
+function bracketSum(node: MNode): MNode {
+  const sum = node.k === 'seq' && node.items.some((item, index) => index > 0 && item.k === 'op' && !item.sign && (item.text === '+' || item.text === '−'))
+  return sum ? { k: 'group', open: '(', close: ')', closed: true, body: node } : node
 }
 
 /** The arguments of `root(a, n)`, split at its top-level commas. */
@@ -329,6 +356,7 @@ const tall = (node: MNode): boolean => {
     case 'root': return tall(node.body)
     case 'post': return tall(node.base)
     case 'fn': return node.arg ? tall(node.arg) : false
+    case 'integral': return true
     default: return false
   }
 }
@@ -368,7 +396,19 @@ function render(node: MNode, key: string | number = 0): ReactNode {
           <span className="gm-radicand">{render(node.body)}</span>
         </span>
       )
-    case 'post': return <span key={key}>{render(node.base)}<span className="gm-sym">{node.text}</span></span>
+    case 'post': return <span key={key}>{render(node.base)}<span className={node.text.startsWith('′') || node.text === '″' || node.text === '‴' ? 'gm-sym gm-prime' : 'gm-sym'}>{node.text}</span></span>
+    case 'integral':
+      return (
+        <span key={key} className="gm-int">
+          <span className="gm-int-sign">∫</span>
+          <span className="gm-int-limits">
+            <span className="gm-int-to">{render(node.to)}</span>
+            <span className="gm-int-from">{render(node.from)}</span>
+          </span>
+          <span className="gm-int-body">{render(node.body)}</span>
+          <span className="gm-dx"><span className="gm-fn">d</span><span className="gm-var">x</span></span>
+        </span>
+      )
     case 'fn':
       return (
         <span key={key} className="gm-call">

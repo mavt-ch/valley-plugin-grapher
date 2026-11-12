@@ -7,7 +7,9 @@
 //! `curve3 from to` · `point3 x y z` · `region strict|loose` · `cpoint re im name` · `csurface modulus|real` ·
 //! `coords given u v ufrom uto vfrom vto` (a surface in curvilinear coordinates; the names are its coordinates) ·
 //! `psurface ufrom uto vfrom vto` (a parametric surface in u and v) · `implicit3` (a surface F(x, y, z) = 0) ·
-//! `field` and `field3` (vector fields in the plane and in space) · `contour name` (the level curves of `name(x, y)`).
+//! `field` and `field3` (vector fields in the plane and in space) · `contour name` (the level curves of `name(x, y)`) ·
+//! `integral value from to` (the area under a curve and its signed value) · `tangent slope intercept x y` (a tangent line
+//! and its point of contact).
 
 use crate::sheet::{Outcome, Plot, RowInput, Sheet};
 
@@ -67,6 +69,8 @@ pub fn write_outcomes(sheet: &Sheet) -> String {
                 Outcome::Plotted(Plot::Field { .. }) => vec!["field".into()],
                 Outcome::Plotted(Plot::Field3 { .. }) => vec!["field3".into()],
                 Outcome::Plotted(Plot::Contour { name, .. }) => vec!["contour".into(), name.clone()],
+                Outcome::Plotted(Plot::Integral { value, from, to, .. }) => vec!["integral".into(), number(*value), number(*from), number(*to)],
+                Outcome::Plotted(Plot::Tangent { slope, intercept, x, y }) => vec!["tangent".into(), number(*slope), number(*intercept), number(*x), number(*y)],
                 Outcome::Plotted(Plot::ParamSurface { u, v, .. }) => vec!["psurface".into(), number(u.0), number(u.1), number(v.0), number(v.1)],
                 Outcome::Plotted(Plot::CoordSurface { system, given, u, v, .. }) => {
                     let names = system.names();

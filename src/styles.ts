@@ -115,6 +115,13 @@ button.grapher-handle:hover { color:var(--text-color); }
 .gm-root-index { font-size:0.6em; margin-right:-0.35em; align-self:flex-start; }
 .gm-radical { display:inline-flex; align-items:flex-end; }
 .gm-radicand { display:inline-flex; align-items:center; border-top:1px solid currentColor; padding:0.06em 0.12em 0 0.06em; margin-top:0.08em; }
+.gm-prime { padding-left:0.04em; }
+.gm-int { display:inline-flex; align-items:stretch; padding:0.12em 0; }
+.gm-int-sign { display:inline-flex; align-items:center; font-size:1.35em; line-height:1.15; font-style:italic; }
+.gm-int-limits { display:inline-flex; flex-direction:column; justify-content:space-between; font-size:0.62em; line-height:1; margin:0 0.32em 0 0.06em; }
+.gm-int-from { margin-left:-0.32em; }
+.gm-int-body { display:inline-flex; align-items:center; }
+.gm-dx { display:inline-flex; align-items:center; margin-left:0.3em; }
 .grapher-delete, .grapher-row-spacer { width:28px; height:36px; }
 .grapher-delete { display:inline-flex; align-items:center; justify-content:center; padding:0; border:none; background:none;
   color:var(--text-tertiary); cursor:pointer; opacity:0; transition:opacity var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out); }

@@ -8,10 +8,10 @@ import { uiText } from './localization'
 import { MathText } from './MathText'
 import { COLORS, DEFAULT_LEVELS, MAIN_GRAPH, MAX_LEVELS, MODES, createRow, graphOf, moveRow, rangeVariable, unitsOf, type AxisUnits, type Mode, type Row } from './model'
 import { getStore, useGrapher } from './store'
-import { formatComplex, formatNumber, formatPolar } from './ticks'
+import { formatComplex, formatLinear, formatNumber, formatPolar } from './ticks'
 import { viewOf } from './views'
 
-const DRAWN = new Set(['function', 'polar', 'curve', 'point', 'implicit', 'surface', 'curve3', 'point3', 'region', 'cpoint', 'csurface', 'coords', 'psurface', 'implicit3', 'field', 'field3', 'contour'])
+const DRAWN = new Set(['function', 'polar', 'curve', 'point', 'implicit', 'surface', 'curve3', 'point3', 'region', 'cpoint', 'csurface', 'coords', 'psurface', 'implicit3', 'field', 'field3', 'contour', 'integral', 'tangent'])
 
 /** The row whose input takes focus on its next render (after Enter adds a row or Backspace removes one). */
 let pendingFocus: string | null = null
@@ -275,7 +275,10 @@ const Details = (props: RowProps): ReactElement | null => {
       )
     }
     case 'value':
+    case 'integral':
       return <div className="grapher-value">= {formatNumber(analysis.value ?? Number.NaN, 8)}</div>
+    case 'tangent':
+      return <div className="grapher-value">y = {formatLinear([[analysis.slope ?? Number.NaN, 'x']], analysis.intercept ?? Number.NaN)}</div>
     case 'cpoint': {
       const [re, im] = [analysis.x ?? Number.NaN, analysis.y ?? Number.NaN]
       return <div className="grapher-value">= {formatComplex(re, im, 6)} = {formatPolar(re, im, 6)}</div>

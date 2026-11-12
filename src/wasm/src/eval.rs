@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use std::f64::consts::{E, PI, TAU};
 
 use crate::builtins::Builtin;
+use crate::calculus;
 use crate::error::MathError;
 use crate::parser::{BinOp, Callee, Node};
 
@@ -18,6 +19,10 @@ pub enum Expr {
     Builtin(Builtin, Vec<Expr>),
     User(usize, Vec<Expr>),
     Fact(Box<Expr>),
+    /// `f'(u)`: the derivative of the given order of the user function `index` (of one variable) at `arg`.
+    Derivative { index: usize, order: usize, arg: Box<Expr> },
+    /// `int(g, a, b)`: ∫ₐᵇ `body` over the variable in `slot`.
+    Integral { body: Box<Expr>, slot: usize, from: Box<Expr>, to: Box<Expr> },
 }
 
 #[derive(Clone, Debug)]
@@ -58,14 +63,40 @@ pub fn compile(node: &Node, scope: &Scope) -> Result<Expr, MathError> {
         Node::Call(Callee::Builtin(builtin), args) => {
             Expr::Builtin(*builtin, args.iter().map(|arg| compile(arg, scope)).collect::<Result<_, _>>()?)
         }
+        // `f` alone, inside `int` or `tangent`: f called with x (and y, z for more parameters).
+        Node::Call(Callee::User(name), args) if args.is_empty() => match scope.functions.get(name) {
+            Some((index, arity)) => Expr::User(*index, reference(scope, *arity)),
+            None => return Err(MathError::new("error.unknown", name.clone())),
+        },
         Node::Call(Callee::User(name), args) => match scope.functions.get(name) {
             Some((index, arity)) if *arity == args.len() => Expr::User(*index, args.iter().map(|arg| compile(arg, scope)).collect::<Result<_, _>>()?),
             Some(_) => return Err(MathError::new("error.arity", name.clone())),
             None => return Err(MathError::new("error.unknown", name.clone())),
         },
+        Node::Call(Callee::Derivative(name, order), args) => match (scope.functions.get(name), args.as_slice()) {
+            (Some((index, 1)), []) => Expr::Derivative { index: *index, order: *order, arg: Box::new(reference(scope, 1).remove(0)) },
+            (Some((index, 1)), [arg]) => Expr::Derivative { index: *index, order: *order, arg: Box::new(compile(arg, scope)?) },
+            (Some((_, 1)), _) => return Err(MathError::new("error.arity", name.clone())),
+            _ => return Err(MathError::new("error.derivative", name.clone())),
+        },
+        Node::Call(Callee::Integral, args) => match args.as_slice() {
+            [body, from, to] => {
+                let slot = scope.slots.get("x").copied().ok_or_else(|| MathError::new("error.unsupported", ""))?;
+                // The integrand's x is its own variable of integration, whatever the row around it may read.
+                let inner = Scope { slots: scope.slots, functions: scope.functions, allow: &|name| name == "x" || (scope.allow)(name) };
+                Expr::Integral { body: Box::new(compile(body, &inner)?), slot, from: Box::new(compile(from, scope)?), to: Box::new(compile(to, scope)?) }
+            }
+            _ => return Err(MathError::new("error.arity", "int")),
+        },
+        Node::Call(Callee::Tangent, _) => return Err(MathError::new("error.tangentRow", "")),
         Node::Fact(arg) => Expr::Fact(Box::new(compile(arg, scope)?)),
         Node::Tuple(_) => return Err(MathError::new("error.tuple", "")),
     })
+}
+
+/// The arguments a function referenced by its name alone is called with: x, then y and z.
+fn reference(scope: &Scope, arity: usize) -> Vec<Expr> {
+    ["x", "y", "z"].iter().take(arity).map(|name| scope.slots.get(*name).map_or(Expr::Num(f64::NAN), |slot| Expr::Slot(*slot))).collect()
 }
 
 pub fn eval(expr: &Expr, env: &mut [f64], functions: &[UserFn]) -> f64 {
@@ -109,6 +140,14 @@ pub fn eval(expr: &Expr, env: &mut [f64], functions: &[UserFn]) -> f64 {
             result
         }
         Expr::Fact(arg) => factorial(eval(arg, env, functions)),
+        Expr::Derivative { index, order, arg } => {
+            let at = eval(arg, env, functions);
+            calculus::derivative(&functions[*index], *order, at, env, functions)
+        }
+        Expr::Integral { body, slot, from, to } => {
+            let (a, b) = (eval(from, env, functions), eval(to, env, functions));
+            calculus::integrate(body, *slot, a, b, env, functions)
+        }
     }
 }
 

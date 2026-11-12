@@ -168,7 +168,6 @@ describe('the graph tab', () => {
     await screen.findByDisplayValue('y = x^2 - 2')
     const inputs = screen.getAllByRole('textbox', { name: /Expression/ })
     const trailing = inputs[inputs.length - 1]
-    expect(trailing.getAttribute('placeholder')).toBe('F(x, y) = (-y, x)')
     fireEvent.change(trailing, { target: { value: 'F(x, y) = (-y, x)' } })
     const field = (await screen.findAllByRole('listitem'))[4]
     await waitFor(() => expect(field.getAttribute('data-kind')).toBe('field'))
@@ -207,6 +206,36 @@ describe('the graph tab', () => {
     expect(within(paraboloid).getByRole('spinbutton', { name: 'Number of levels' })).toBeTruthy()
     fireEvent.click(within(paraboloid).getByRole('switch', { name: 'Level curves on the floor' }))
     await waitFor(() => expect(within(paraboloid).queryByRole('spinbutton', { name: 'Number of levels' })).toBeNull())
+  })
+
+  it('suggests an integral, shades it with its value and draws a tangent with a slider and its equation', async () => {
+    mount()
+    render(<><Sidebar /><GraphTab /></>)
+    await screen.findByDisplayValue('y = x^2 - 2')
+    const inputs = screen.getAllByRole('textbox', { name: /Expression/ })
+    const trailing = inputs[inputs.length - 1]
+    expect(trailing.getAttribute('placeholder')).toBe('int(sin(x), 0, π)')
+    fireEvent.change(trailing, { target: { value: 'int(sin(x), 0, π)' } })
+    const integral = (await screen.findAllByRole('listitem'))[4]
+    await waitFor(() => expect(integral.getAttribute('data-kind')).toBe('integral'))
+    expect(integral.querySelector('.grapher-value')?.textContent).toBe('= 2')
+    expect(integral.querySelector('.gm-int-sign')?.textContent).toBe('∫')
+    expect(integral.querySelector('.gm-int-to')?.textContent).toBe('π')
+    expect(integral.querySelector('.gm-dx')?.textContent).toBe('dx')
+    expect(within(integral).getByRole('button', { name: 'Hide graph' })).toBeTruthy()
+    const more = screen.getAllByRole('textbox', { name: /Expression/ })
+    fireEvent.change(more[more.length - 1], { target: { value: 'f(x) = x^2' } })
+    await waitFor(() => expect(screen.getAllByRole('textbox', { name: /Expression/ })).toHaveLength(7))
+    const last = screen.getAllByRole('textbox', { name: /Expression/ })
+    fireEvent.change(last[last.length - 1], { target: { value: "tangent(f, c)" } })
+    const tangent = (await screen.findAllByRole('listitem'))[6]
+    await waitFor(() => expect(tangent.getAttribute('data-kind')).toBe('error'))
+    fireEvent.click(within(tangent).getByRole('button', { name: 'Add slider c' }))
+    await waitFor(() => expect(screen.getAllByRole('listitem')[6].getAttribute('data-kind')).toBe('tangent'))
+    expect(screen.getAllByRole('listitem')[6].querySelector('.grapher-value')?.textContent).toBe('y = 2x − 1')
+    fireEvent.change(screen.getByRole('slider', { name: 'Value of c' }), { target: { value: '-1.5' } })
+    await waitFor(() => expect(screen.getAllByRole('listitem')[6].querySelector('.grapher-value')?.textContent).toBe('y = −3x − 2.25'))
+    expect(screen.getAllByRole('listitem')[6].querySelector('.gm-fn')?.textContent).toBe('tangent')
   })
 
   it('draws cylindrical surfaces with a range row for each of their two coordinates', async () => {

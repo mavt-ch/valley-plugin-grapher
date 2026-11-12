@@ -10,15 +10,16 @@ const Icon = (p: IconProps): ReactElement => (
 )
 
 /**
- * y = f(x), x = g(y), equations and inequalities in x and y, points and vector fields; the x-axis in decimals or multiples
- * of π. The empty row suggests a vector field, the fresh sheet keeps its two lines and sliders.
+ * y = f(x), x = g(y), derivatives, integrals and tangents, equations and inequalities in x and y, points, vector fields and
+ * level curves; the x-axis in decimals or multiples of π. The empty row suggests an integral (a shaded area with its value),
+ * the fresh sheet keeps its two lines and sliders.
  */
 export const cartesian: PlaneView = {
   id: 'cartesian',
   kernel: 0,
   canvas: 'plane',
   icon: Icon,
-  placeholder: 'F(x, y) = (-y, x)',
+  placeholder: 'int(sin(x), 0, π)',
   examples: ['y = x^2 - 2', 'y = a x + b', 'a = 1', 'b = 0'],
   homeSpan: 20,
   grid: planeGrid(),

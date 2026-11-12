@@ -85,6 +85,18 @@ describe('sheets', () => {
     expect(named('F(x, y) = (-y, x) + 1')).toBe(false)
   })
 
+  it('typesets primes, integrals with their limits and tangents', () => {
+    expect(parseMath("f'(x)")).toMatchObject({ k: 'seq', items: [{ k: 'post', base: { k: 'var', text: 'f' }, text: '′' }, { k: 'group' }] })
+    expect(parseMath("f''(x)")).toMatchObject({ items: [{ k: 'post', text: '″' }, { k: 'group' }] })
+    expect(parseMath('g‴(x) + h’(x)')).toMatchObject({ items: [{ k: 'post', text: '‴' }, { k: 'group' }, { k: 'op', text: '+' }, { k: 'post', text: '′' }, { k: 'group' }] })
+    expect(parseMath('int(f, 0, 1)')).toMatchObject({ k: 'integral', body: { k: 'var', text: 'f' }, from: { k: 'num', text: '0' }, to: { k: 'num', text: '1' } })
+    expect(parseMath('∫(x^2 + 1, a, π)')).toMatchObject({ k: 'integral', body: { k: 'group', open: '(' }, from: { k: 'var', text: 'a' }, to: { k: 'sym', text: 'π' } })
+    expect(parseMath("integral(f', -1, b)")).toMatchObject({ k: 'integral', body: { k: 'post', text: '′' } })
+    expect(parseMath('int(x^2, 0')).toMatchObject({ k: 'fn', text: '∫' })
+    expect(parseMath('tangent(f, a)')).toMatchObject({ k: 'fn', text: 'tangent', arg: { k: 'group' } })
+    expect(tokenizeMath('tangent tan')).toEqual([{ t: 'fn', v: 'tangent' }, { t: 'fn', v: 'tan' }])
+  })
+
   it('reads level-curve settings additively and starts the 3D paraboloid with its floor curves', () => {
     const document = normalizeDocument({ version: 1, sheets: { cartesian: [{ id: 'a', text: 'f(x, y) = x y', levels: 12, step: '0.5', labels: false }, { id: 'b', text: 'g(x, y) = x', levels: 0, step: 3 }, { id: 'c', text: 'z' }], space: [{ id: 'd', text: 'x y', floor: true }] } })
     expect(document.sheets.cartesian[0]).toMatchObject({ levels: 12, step: '0.5', labels: false })

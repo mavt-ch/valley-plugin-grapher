@@ -8,6 +8,7 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 use std::f64::consts::{PI, TAU};
 
 use crate::builtins::Builtin;
+use crate::calculus;
 use crate::complex::{self, C64, CExpr, CUserFn};
 use crate::error::MathError;
 use crate::eval::{Expr, Scope, UserFn, compile, constant, eval};
@@ -245,6 +246,10 @@ pub enum Plot {
     /// A surface in cylindrical or spherical coordinates: `given` is the coordinate the expression gives as a
     /// function of the other two, which run over `u` (the row's range) and `v` (its second range).
     CoordSurface { expr: Expr, system: System, given: usize, u: Span, v: Span },
+    /// `int(g, a, b)` on the Cartesian sheet: the area between g(x) and the x-axis from a to b, and its signed value.
+    Integral { body: Expr, from: f64, to: f64, value: f64 },
+    /// `tangent(g, a)`: the line y = slope · x + intercept touching g at (x, y).
+    Tangent { slope: f64, intercept: f64, x: f64, y: f64 },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -378,13 +383,32 @@ fn collect(node: &Node, names: &mut BTreeSet<String>, calls: &mut BTreeSet<Strin
             collect(right, names, calls);
         }
         Node::Call(callee, args) => {
-            if let Callee::User(name) = callee {
+            if let Callee::User(name) | Callee::Derivative(name, _) = callee {
                 calls.insert(name.clone());
             }
-            args.iter().for_each(|arg| collect(arg, names, calls));
+            match (callee, args.split_first()) {
+                // The integrand of `int` and the function of `tangent` read x (and y in 3D) as their own variables.
+                (Callee::Integral | Callee::Tangent, Some((body, rest))) => {
+                    let mut inner = BTreeSet::new();
+                    collect(body, &mut inner, calls);
+                    names.extend(inner.into_iter().filter(|name| !BOUND.contains(&name.as_str())));
+                    rest.iter().for_each(|arg| collect(arg, names, calls));
+                }
+                _ => args.iter().for_each(|arg| collect(arg, names, calls)),
+            }
         }
         Node::Tuple(items) => items.iter().for_each(|item| collect(item, names, calls)),
     }
+}
+
+/// The variables the first argument of `int` and `tangent` binds.
+const BOUND: [&str; 2] = ["x", "y"];
+
+/// A number as an error message shows it: at most six decimals, a real minus sign.
+fn short(value: f64) -> String {
+    let text = format!("{value:.6}");
+    let text = if text.contains('.') { text.trim_end_matches('0').trim_end_matches('.') } else { &text };
+    text.replace('-', "−")
 }
 
 /// Every name a node reads, reserved or not, constants left out.
@@ -436,7 +460,7 @@ fn real_valued(node: &Node) -> bool {
         Node::Neg(arg) | Node::Fact(arg) => real_valued(arg),
         Node::Bin(_, left, right) => real_valued(left) && real_valued(right),
         Node::Call(Callee::Builtin(builtin), args) => TO_REAL.contains(builtin) || args.iter().all(real_valued),
-        Node::Call(Callee::User(_), _) | Node::Tuple(_) => false,
+        Node::Call(Callee::User(_) | Callee::Derivative(..) | Callee::Integral | Callee::Tangent, _) | Node::Tuple(_) => false,
     }
 }
 
@@ -711,12 +735,27 @@ impl Analysis<'_> {
         if let Some(params) = field_params(&statement) {
             return self.plot_field(mode, &statement.right, &params);
         }
+        // `int(f, …)` or `tangent(f, …)` with an f that is neither a function nor a parameter.
+        if let (None, Node::Call(Callee::Integral | Callee::Tangent, args)) = (&statement.left, &statement.right)
+            && let Some(Node::Var(name)) = args.first()
+            && !is_reserved(name)
+            && constant(name).is_none()
+            && !self.definitions.contains_key(name)
+            && !self.duplicates.contains(name)
+        {
+            return Err(MathError::new("error.function", name.clone()));
+        }
         let mut nodes = vec![&statement.right];
         if let Some(left) = &statement.left {
             nodes.push(left);
         }
         let own: &[&str] = if mode == Mode::Space && self.sweeps(&statement) { &SURFACE_PARAMETERS } else { &[] };
         self.require(&nodes, own)?;
+        if let (None, Node::Call(callee @ (Callee::Integral | Callee::Tangent), args)) = (&statement.left, &statement.right)
+            && matches!(mode, Mode::Cartesian | Mode::Trig)
+        {
+            return if *callee == Callee::Integral { self.integral(args) } else { self.tangent(args) };
+        }
         if mode == Mode::Complex {
             return self.plot_complex(&statement);
         }
@@ -797,6 +836,31 @@ impl Analysis<'_> {
             }
         };
         Ok(Outcome::Plotted(plot))
+    }
+
+    /// `int(g, a, b)` as a row of its own: g as an expression in x, and its value from a to b (either may be ±∞).
+    fn integral(&mut self, args: &[Node]) -> Result<Outcome, MathError> {
+        let [body, from, to] = args else { return Err(MathError::new("error.arity", "int")) };
+        let body = self.compile(body, &|name| name == "x" || !is_reserved(name))?;
+        let (from, to) = (self.constant(from)?, self.constant(to)?);
+        if from.is_nan() || to.is_nan() {
+            return Err(MathError::new("error.range", ""));
+        }
+        let value = calculus::integrate(&body, X, from, to, &mut self.env, &self.functions);
+        Ok(Outcome::Plotted(Plot::Integral { body, from, to, value }))
+    }
+
+    /// `tangent(g, a)`: the slope g'(a) and the point (a, g(a)); refused where g is undefined or has no derivative.
+    fn tangent(&mut self, args: &[Node]) -> Result<Outcome, MathError> {
+        let [body, at] = args else { return Err(MathError::new("error.arity", "tangent")) };
+        let body = self.compile(body, &|name| name == "x" || !is_reserved(name))?;
+        let x = self.constant(at)?;
+        let jet = calculus::taylor(&body, X, x, 1, &mut self.env, &self.functions);
+        let (y, slope) = (jet.value(), jet.derivative(1));
+        if !(x.is_finite() && y.is_finite() && slope.is_finite()) {
+            return Err(MathError::new("error.tangent", format!("x = {}", short(x))));
+        }
+        Ok(Outcome::Plotted(Plot::Tangent { slope, intercept: y - slope * x, x, y }))
     }
 
     /// `F(x, y) = (P, Q)` on the Cartesian sheet or `F(x, y, z) = (P, Q, R)` on the 3D sheet; anything else named
@@ -1338,6 +1402,68 @@ mod tests {
         assert!(matches!(space.rows[3].plot(), Some(Plot::Surface { floor: Some(_), .. })));
         assert!(matches!(space.rows[4].plot(), Some(Plot::Surface { axis: Axis3::X, floor: None, .. })));
         assert_eq!(error(&space, 5).key, "error.step");
+    }
+
+    #[test]
+    fn derivatives_of_defined_functions() {
+        let mut sheet = sheet(Mode::Cartesian, &[
+            "f(x) = sin x", "f'(x)", "f''(x)", "y = f'(x) + 1", "g(x) = f'(x)", "g'(x)", "h(t) = t^3", "h'(x)", "h''(2)", "h‴(x)", "k'(x)", "p(x, y) = x y", "p'(x)", "f''''(x)", "h'(2x)",
+        ]);
+        for (row, x, expected) in [(1, 0.7, 0.7_f64.cos()), (2, 0.7, -0.7_f64.sin()), (3, 0.7, 0.7_f64.cos() + 1.0), (4, 2.0, 2.0_f64.cos()), (5, 2.0, -2.0_f64.sin()), (7, -1.5, 6.75), (9, 4.0, 6.0), (14, 1.5, 27.0)] {
+            let got = at(&mut sheet, row, X, x);
+            assert!((got - expected).abs() < 1e-12, "row {row} at {x}: {got} != {expected}");
+        }
+        assert!(matches!(sheet.rows[8].outcome, Outcome::Value(value) if (value - 12.0).abs() < 1e-12));
+        assert_eq!(error(&sheet, 10).key, "error.derivative");
+        assert_eq!(error(&sheet, 12).key, "error.derivative");
+        assert_eq!(error(&sheet, 13).key, "error.prime");
+        // Derivatives are real: the complex sheets refuse them.
+        assert_eq!(error(&self::sheet(Mode::Complex, &["f(z) = z^2", "f'(1)"]), 1).key, "error.unsupported");
+    }
+
+    #[test]
+    fn integral_rows_carry_their_signed_value() {
+        let input = |text: &str| RowInput { text: text.into(), ..RowInput::default() };
+        let sheet = analyze(Mode::Cartesian, &[
+            input("f(x) = x^2"), input("int(f, 0, 1)"), input("∫(sin x, 0, 2π)"), input("integral(x, -1, 3)"), input("int(f, 1, 0)"), input("int(f, a, a)"), input("a = 2"),
+            input("int(f, 0, b)"), input("int(q, 0, 1)"), input("int(e^(-x^2), -inf, inf)"), input("2 int(f, 0, 3)"), input("F(x) = int(f, 0, x)"), input("F'(x)"), input("int(f', 0, 2)"), input("int(x y, 0, 1)"), input("int(f, 0)"),
+        ]);
+        let value = |row: usize| match sheet.rows[row].plot() {
+            Some(Plot::Integral { value, .. }) => *value,
+            other => panic!("row {row} is no integral: {other:?}"),
+        };
+        assert!((value(1) - 1.0 / 3.0).abs() < 1e-13);
+        assert!(value(2).abs() < 1e-12, "{}", value(2));
+        assert!((value(3) - 4.0).abs() < 1e-13);
+        assert!((value(4) + 1.0 / 3.0).abs() < 1e-13);
+        assert_eq!(value(5), 0.0);
+        assert_eq!(error(&sheet, 7).missing, ["b"]);
+        assert_eq!(error(&sheet, 8).key, "error.function");
+        assert!((value(9) - PI.sqrt()).abs() < 1e-10);
+        assert!(matches!(sheet.rows[10].outcome, Outcome::Value(value) if (value - 18.0).abs() < 1e-12), "{:?}", sheet.rows[10].outcome);
+        assert!((value(13) - 4.0).abs() < 1e-13);
+        assert_eq!(error(&sheet, 14).key, "error.unknown");
+        assert_eq!(error(&sheet, 15).key, "error.arity");
+        // An integral with a variable bound is a function of x, and its derivative the integrand.
+        let mut sheet = sheet;
+        assert!((at(&mut sheet, 11, X, 3.0) - 9.0).abs() < 1e-12);
+        assert!((at(&mut sheet, 12, X, 1.5) - 2.25).abs() < 1e-12);
+    }
+
+    #[test]
+    fn tangent_rows_touch_their_function() {
+        let sheet = sheet(Mode::Cartesian, &["f(x) = x^2", "tangent(f, 1)", "tangent(f, a)", "tangent(sin x, π)", "tangent(|x|, 0)", "tangent(g, 1)", "tangent(f', 2)", "tangent(sqrt x, -1)", "y = tangent(f, 1)", "tangent(f, 1, 2)"]);
+        assert!(matches!(sheet.rows[1].plot(), Some(Plot::Tangent { slope, intercept, x, y }) if (*slope, *intercept, *x, *y) == (2.0, -1.0, 1.0, 1.0)), "{:?}", sheet.rows[1].outcome);
+        assert_eq!(error(&sheet, 2).missing, ["a"]);
+        let Some(Plot::Tangent { slope, intercept, .. }) = sheet.rows[3].plot() else { panic!("{:?}", sheet.rows[3].outcome) };
+        assert!((slope + 1.0).abs() < 1e-12 && (intercept - PI).abs() < 1e-12);
+        assert_eq!(error(&sheet, 4).key, "error.tangent");
+        assert_eq!(error(&sheet, 4).param, "x = 0");
+        assert_eq!(error(&sheet, 5).key, "error.function");
+        assert!(matches!(sheet.rows[6].plot(), Some(Plot::Tangent { slope, x, y, .. }) if (*slope, *x, *y) == (2.0, 2.0, 4.0)));
+        assert_eq!(error(&sheet, 7).param, "x = −1");
+        assert_eq!(error(&sheet, 8).key, "error.tangentRow");
+        assert_eq!(error(&sheet, 9).key, "error.arity");
     }
 
     #[test]

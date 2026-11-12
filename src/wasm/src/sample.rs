@@ -295,6 +295,62 @@ impl Graph<'_> {
         self.refine_curve(curve, (pm, qm), b, depth + 1);
     }
 
+    // ---- the area under int(g, a, b) and the line of tangent(g, a) ----
+
+    fn world_point(&mut self, x: f64, y: f64) {
+        self.out.push(self.view.sx(x), self.view.sy(y), x, y, x);
+    }
+
+    /// The region between g(x) and the x-axis over [a, b] within the view, one sample per pixel: a polygon per stretch
+    /// where g is finite, closed along the axis.
+    fn area(&mut self, expr: &Expr, from: f64, to: f64) {
+        let view = self.view;
+        let (lo, hi) = (from.min(to).max(view.wx(-MARGIN)), from.max(to).min(view.wx(view.width + MARGIN)));
+        if hi <= lo {
+            return;
+        }
+        let n = ((hi - lo) * view.scale).ceil().clamp(1.0, 20_000.0) as usize;
+        let mut last: Option<f64> = None;
+        for i in 0..=n {
+            let x = lo + (hi - lo) * i as f64 / n as f64;
+            let y = self.at(expr, X, x);
+            if y.is_finite() {
+                if last.is_none() {
+                    self.out.begin(REGION);
+                    self.world_point(x, 0.0);
+                }
+                self.world_point(x, y);
+                last = Some(x);
+            } else if let Some(end) = last.take() {
+                self.world_point(end, 0.0);
+                self.out.end();
+            }
+        }
+        if let Some(end) = last {
+            self.world_point(end, 0.0);
+            self.out.end();
+        }
+    }
+
+    /// The tangent line across the view (cut to the view's height, so a steep line keeps its slope) and its point of contact.
+    fn tangent(&mut self, slope: f64, intercept: f64, (x, y): (f64, f64)) {
+        let view = self.view;
+        let (mut lo, mut hi) = (view.wx(-MARGIN), view.wx(view.width + MARGIN));
+        if slope != 0.0 {
+            let (a, b) = ((view.wy(view.height + MARGIN) - intercept) / slope, (view.wy(-MARGIN) - intercept) / slope);
+            (lo, hi) = (lo.max(a.min(b)), hi.min(a.max(b)));
+        }
+        if hi > lo {
+            self.out.begin(LINE);
+            self.world_point(lo, slope * lo + intercept);
+            self.world_point(hi, slope * hi + intercept);
+            self.out.end();
+        }
+        self.out.begin(POINT);
+        self.world_point(x, y);
+        self.out.end();
+    }
+
     // ---- vector fields F(x, y) = (P, Q) ----
 
     fn field(&mut self, p: &Expr, q: &Expr) {
@@ -625,6 +681,8 @@ pub fn sample(sheet: &mut Sheet, view: View) -> Vec<f64> {
             Plot::Field { x, y } => graph.field(x, y),
             Plot::Contour { field, levels, .. } => graph.contours(field, *levels),
             Plot::Region { field, relation } => graph.region(field, *relation),
+            Plot::Integral { body, from, to, .. } => graph.area(body, *from, *to),
+            Plot::Tangent { slope, intercept, x, y } => graph.tangent(*slope, *intercept, (*x, *y)),
             Plot::Surface { .. } | Plot::Curve3 { .. } | Plot::Point3 { .. } | Plot::ComplexSurface { .. } | Plot::CoordSurface { .. } | Plot::ParamSurface { .. } | Plot::Implicit3(_) | Plot::Field3 { .. } => {}
         }
     }
@@ -792,6 +850,44 @@ mod tests {
         assert_eq!(level_values(&mut values, Levels { count: 3, step: None }), [50.0]);
         assert!(level_values(&mut [3.0, 3.0, 3.0], Levels { count: 10, step: None }).is_empty());
         assert_eq!(level_values(&mut [0.0, 1.0], Levels { count: 10, step: Some(1e-6) }).len(), 200);
+    }
+
+    #[test]
+    fn an_integral_shades_between_its_curve_and_the_axis() {
+        let found = paths(Mode::Cartesian, &["f(x) = x^2 - 1", "int(f, -2, 3)", "int(1/x, -1, 1)"], VIEW);
+        let regions: Vec<&Path> = found.iter().filter(|path| path.row == 1).collect();
+        assert_eq!(regions.len(), 1);
+        let polygon = &regions[0].points;
+        assert_eq!(regions[0].kind, REGION);
+        assert!((polygon[0][2] + 2.0).abs() < 1e-12 && polygon[0][3] == 0.0 && (polygon.last().unwrap()[2] - 3.0).abs() < 1e-12);
+        for point in &polygon[1..polygon.len() - 1] {
+            assert!((-2.0..=3.0).contains(&point[2]) && (point[3] - (point[2] * point[2] - 1.0)).abs() < 1e-9, "{point:?}");
+        }
+        // The shoelace area of the polygon is the area of the region, |∫| counted per lobe.
+        let n = polygon.len();
+        let area = (0..n).map(|k| { let (a, b) = (polygon[k], polygon[(k + 1) % n]); a[2] * b[3] - b[2] * a[3] }).sum::<f64>().abs() / 2.0;
+        assert!((area - 20.0 / 3.0).abs() < 0.05, "{area}");
+        // Where the integrand is not finite the area breaks: 1/x is two polygons either side of 0, or the sample at 0 is skipped.
+        assert!(found.iter().filter(|path| path.row == 2).count() >= 1);
+    }
+
+    #[test]
+    fn a_tangent_is_a_line_through_its_point() {
+        let found = paths(Mode::Cartesian, &["f(x) = x^3", "tangent(f, 1)", "tangent(f, a)", "a = 0.5", "tangent(1000 x^2, 1)"], VIEW);
+        let line = found.iter().find(|path| path.row == 1 && path.kind == LINE).unwrap();
+        for point in &line.points {
+            assert!((point[3] - (3.0 * point[2] - 2.0)).abs() < 1e-9);
+        }
+        // y = 3x − 2 leaves the 400 × 300 view through its bottom and top edges (64 px beyond them).
+        assert!((line.points[0][1] - (VIEW.height + MARGIN)).abs() < 1e-9 && (line.points[1][1] + MARGIN).abs() < 1e-9, "{:?}", line.points);
+        let point = found.iter().find(|path| path.row == 1 && path.kind == POINT).unwrap();
+        assert_eq!(point.points[0][2..4], [1.0, 1.0]);
+        let slider = found.iter().find(|path| path.row == 2 && path.kind == POINT).unwrap();
+        assert_eq!(slider.points[0][2..4], [0.5, 0.125]);
+        // A steep line is cut to the view's height rather than clamped, so it keeps its slope.
+        let steep = found.iter().find(|path| path.row == 4 && path.kind == LINE).unwrap();
+        let [a, b] = [steep.points[0], steep.points[1]];
+        assert!(((b[3] - a[3]) / (b[2] - a[2]) - 2000.0).abs() < 1e-6 && a[1].abs() < 100.0 + VIEW.height);
     }
 
     #[test]

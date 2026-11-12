@@ -1,7 +1,17 @@
 import { describe, expect, it } from 'vitest'
-import { decimalAxis, decimalStep, formatComplex, formatImaginary, formatNumber, formatPi, formatPolar, piAxis, piTicks } from '../src/ticks'
+import { decimalAxis, decimalStep, formatComplex, formatImaginary, formatLinear, formatNumber, formatPi, formatPolar, piAxis, piTicks } from '../src/ticks'
 
 describe('axis ticks', () => {
+  it('writes the equations of tangents with signs and without unit coefficients', () => {
+    expect(formatLinear([[2, 'x']], -1)).toBe('2x − 1')
+    expect(formatLinear([[-1, 'x']], 3.14159265)).toBe('−x + 3.1416')
+    expect(formatLinear([[0, 'x']], 4)).toBe('4')
+    expect(formatLinear([[1, 'x']], 0)).toBe('x')
+    expect(formatLinear([[0, 'x']], 0)).toBe('0')
+    expect(formatLinear([[0.5, 'x'], [-1.5, 'y']], -2)).toBe('0.5x − 1.5y − 2')
+    expect(formatLinear([[0, 'x'], [-1, 'y']], 0)).toBe('−y')
+  })
+
   it('labels a 3D axis in multiples of π near the decimal spacing', () => {
     expect(piTicks(10, 5).map((label) => label.text)).toEqual(['−3π', '−2π', '−π', 'π', '2π', '3π'])
     expect(piTicks(1, 0.5).map((label) => label.text)).toEqual(['−π/6', 'π/6'])

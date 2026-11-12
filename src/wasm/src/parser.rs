@@ -23,8 +23,18 @@ pub enum BinOp {
 #[derive(Clone, Debug, PartialEq)]
 pub enum Callee {
     Builtin(Builtin),
+    /// A user function; without arguments, inside `int` or `tangent`, a reference to the function itself (`int(f, 0, 1)`).
     User(String),
+    /// `f'(x)`, `f''(x)`: the derivative of the given order of a user function of one variable.
+    Derivative(String, usize),
+    /// `int(g, a, b)`: the integral of `g` (an expression in x, or a function) from a to b.
+    Integral,
+    /// `tangent(g, a)`: the tangent line at x = a; `tangent(g, a, b)` the tangent plane at (a, b) in 3D.
+    Tangent,
 }
+
+/// The most primes a derivative takes: `f‴(x)`.
+pub const MAX_PRIMES: usize = 3;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Node {
@@ -228,6 +238,22 @@ impl Parser<'_> {
         match token {
             Tok::Num(value) => Ok(Node::Num(value)),
             Tok::Ident(name) => {
+                match name.as_str() {
+                    "int" | "integral" => return self.special(Callee::Integral, &name, 3, 3),
+                    "tangent" => return self.special(Callee::Tangent, &name, 2, 3),
+                    _ => {}
+                }
+                let primes = self.primes();
+                if primes > 0 {
+                    if !self.functions.contains(&name) {
+                        return Err(MathError::new("error.derivative", name));
+                    }
+                    if primes > MAX_PRIMES {
+                        return Err(MathError::new("error.prime", name));
+                    }
+                    self.pos += primes;
+                    return self.call(Callee::Derivative(name.clone(), primes), &name);
+                }
                 if let Some(builtin) = Builtin::lookup(&name) {
                     return self.call(Callee::Builtin(builtin), &name);
                 }
@@ -259,6 +285,45 @@ impl Parser<'_> {
         }
     }
 
+    /// The primes written right after the current position, not consumed.
+    fn primes(&self) -> usize {
+        self.tokens[self.pos..].iter().take_while(|token| **token == Tok::Op('\'')).count()
+    }
+
+    /// `int(g, a, b)` or `tangent(g, a)`: the first argument is an expression or the name of a user function, with
+    /// primes for its derivative (`int(f', 0, 1)`), which becomes a call without arguments.
+    fn special(&mut self, callee: Callee, name: &str, min: usize, max: usize) -> Result<Node, MathError> {
+        if !self.eat('(') {
+            return Err(MathError::new("error.arity", name));
+        }
+        let bars = std::mem::replace(&mut self.bars, 0);
+        let first = match self.peek().cloned() {
+            Some(Tok::Ident(function)) if self.functions.contains(&function) => {
+                let primes = self.tokens[self.pos + 1..].iter().take_while(|token| **token == Tok::Op('\'')).count();
+                if matches!(self.tokens.get(self.pos + 1 + primes), Some(Tok::Op(',' | ')')) | None) {
+                    if primes > MAX_PRIMES {
+                        return Err(MathError::new("error.prime", function));
+                    }
+                    self.pos += 1 + primes;
+                    Node::Call(if primes > 0 { Callee::Derivative(function, primes) } else { Callee::User(function) }, Vec::new())
+                } else {
+                    self.expr()?
+                }
+            }
+            _ => self.expr()?,
+        };
+        let mut args = vec![first];
+        while self.eat(',') {
+            args.push(self.expr()?);
+        }
+        self.close(')')?;
+        self.bars = bars;
+        if args.len() < min || args.len() > max {
+            return Err(MathError::new("error.arity", name));
+        }
+        Ok(Node::Call(callee, args))
+    }
+
     /// After an opening parenthesis: comma-separated expressions up to the closing one.
     fn group(&mut self) -> Result<Vec<Node>, MathError> {
         let bars = std::mem::replace(&mut self.bars, 0);
@@ -276,7 +341,8 @@ impl Parser<'_> {
         let args = if self.eat('(') { self.group()? } else { vec![self.argument()?] };
         let (min, max) = match &callee {
             Callee::Builtin(builtin) => builtin.arity(),
-            Callee::User(_) => (1, 3),
+            Callee::User(_) | Callee::Derivative(..) => (1, 3),
+            Callee::Integral | Callee::Tangent => (0, 0),
         };
         if args.len() < min || args.len() > max {
             return Err(MathError::new("error.arity", name));
@@ -404,5 +470,27 @@ mod tests {
         assert_eq!(fail("(x))(y"), "error.unexpected");
         assert_eq!(fail("mod(1)"), "error.arity");
         assert_eq!(fail("x = 1 = 2"), "error.unexpected");
+    }
+
+    #[test]
+    fn derivatives_integrals_and_tangents() {
+        let derivative = |name: &str, order: usize, arg: Node| Node::Call(Callee::Derivative(name.into(), order), vec![arg]);
+        assert_eq!(read("f'(x)").right, derivative("f", 1, var("x")));
+        assert_eq!(read("f''(2x) + 1").right, bin(BinOp::Add, derivative("f", 2, bin(BinOp::Mul, Node::Num(2.0), var("x"))), Node::Num(1.0)));
+        assert_eq!(read("f‴ x").right, derivative("f", 3, var("x")));
+        let reference = |callee: Callee| Node::Call(callee, Vec::new());
+        assert_eq!(read("int(f, 0, 1)").right, Node::Call(Callee::Integral, vec![reference(Callee::User("f".into())), Node::Num(0.0), Node::Num(1.0)]));
+        assert_eq!(read("∫(f', a, b)").right, Node::Call(Callee::Integral, vec![reference(Callee::Derivative("f".into(), 1)), var("a"), var("b")]));
+        assert_eq!(read("integral(x^2, 0, 1").right, Node::Call(Callee::Integral, vec![bin(BinOp::Pow, var("x"), Node::Num(2.0)), Node::Num(0.0), Node::Num(1.0)]));
+        assert_eq!(read("int(f(x)^2, 0, 1)").right, Node::Call(Callee::Integral, vec![bin(BinOp::Pow, Node::Call(Callee::User("f".into()), vec![var("x")]), Node::Num(2.0)), Node::Num(0.0), Node::Num(1.0)]));
+        assert_eq!(read("tangent(f, a)").right, Node::Call(Callee::Tangent, vec![reference(Callee::User("f".into())), var("a")]));
+        assert_eq!(read("tangent(f, a, b)").right, Node::Call(Callee::Tangent, vec![reference(Callee::User("f".into())), var("a"), var("b")]));
+        let fail = |source: &str| parse(&tokenize(source).unwrap(), &["f".to_string()].into()).unwrap_err();
+        assert_eq!(fail("g'(x)").key, "error.derivative");
+        assert_eq!(fail("sin'(x)").key, "error.derivative");
+        assert_eq!(fail("f''''(x)").key, "error.prime");
+        assert_eq!(fail("int(f, 1)").key, "error.arity");
+        assert_eq!(fail("tangent(f)").key, "error.arity");
+        assert_eq!(fail("int x").key, "error.arity");
     }
 }

@@ -252,6 +252,8 @@ pub fn compile(node: &Node, scope: &Scope) -> Result<CExpr, MathError> {
         },
         Node::Fact(arg) => CExpr::Fact(Box::new(compile(arg, scope)?)),
         Node::Tuple(_) => return Err(MathError::new("error.tuple", "")),
+        // Derivatives, integrals and tangents are real.
+        Node::Call(Callee::Derivative(..) | Callee::Integral | Callee::Tangent, _) => return Err(MathError::new("error.unsupported", "")),
     })
 }
 

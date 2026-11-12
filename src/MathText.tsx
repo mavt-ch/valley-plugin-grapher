@@ -16,7 +16,7 @@ type Tok =
   | { t: 'op'; v: string }
 
 type MNode =
-  | { k: 'num' | 'var' | 'sym'; text: string; sub?: string }
+  | { k: 'num' | 'var' | 'sym'; text: string; sub?: string; vector?: boolean }
   | { k: 'fn'; text: string; sub?: string; exp?: MNode; arg?: MNode }
   | { k: 'op'; text: string; relation?: boolean; sign?: boolean }
   | { k: 'seq'; items: MNode[] }
@@ -338,7 +338,7 @@ function render(node: MNode, key: string | number = 0): ReactNode {
     case 'num': return <span key={key} className="gm-num">{node.text}</span>
     case 'sym': return <span key={key} className="gm-sym">{node.text}</span>
     case 'var':
-      return <span key={key} className="gm-var">{node.text}{node.sub ? <sub className="gm-sub">{node.sub}</sub> : null}</span>
+      return <span key={key} className={node.vector ? 'gm-var gm-vec' : 'gm-var'}>{node.text}{node.sub ? <sub className="gm-sub">{node.sub}</sub> : null}</span>
     case 'op':
       return <span key={key} className={node.relation ? 'gm-op gm-rel' : node.sign ? 'gm-sign' : node.text === ',' ? 'gm-comma' : 'gm-op'}>{node.text}</span>
     case 'seq': return <React.Fragment key={key}>{node.items.map((item, index) => render(item, index))}</React.Fragment>
@@ -380,8 +380,22 @@ function render(node: MNode, key: string | number = 0): ReactNode {
   }
 }
 
+const isComma = (node: MNode): boolean => node.k === 'op' && node.text === ','
+const commaList = (node: MNode): MNode[] => (node.k === 'seq' ? node.items : [node])
+
+/** `F(x, y) = (P, Q)` and `F(x, y, z) = (P, Q, R)`: the name of a vector field is set upright and bold, as in print. */
+function markVectorField(node: MNode): MNode {
+  if (node.k !== 'seq') return node
+  const [name, params, equals, value, ...rest] = node.items
+  if (rest.length || name?.k !== 'var' || params?.k !== 'group' || params.open !== '(' || equals?.k !== 'op' || equals.text !== '=' || value?.k !== 'group' || value.open !== '(') return node
+  const names = commaList(params.body)
+  const variables = names.filter((item, index) => (index % 2 === 0 ? item.k === 'var' : isComma(item)))
+  if (variables.length !== names.length || names.length < 3 || !commaList(value.body).some(isComma)) return node
+  return { k: 'seq', items: [{ ...name, vector: true }, params, equals, value] }
+}
+
 export function parseMath(source: string): MNode {
-  return new Parser(tokenizeMath(source)).parse()
+  return markVectorField(new Parser(tokenizeMath(source)).parse())
 }
 
 export const MathText = ({ text }: { text: string }): ReactElement => {

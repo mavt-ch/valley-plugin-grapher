@@ -96,7 +96,7 @@ export const GraphCanvas = ({ view: plane, units, rows, analyses, engine, graph 
     const theme = readTheme(canvas)
     plane.grid(ctx, view, size, theme, units)
     const colors = rows.map((row) => colorOf(row.color))
-    drawPaths(ctx, pathsRef.current, colors, theme, rows.map((_, index) => Boolean(analyses[index]?.strict)))
+    drawPaths(ctx, pathsRef.current, colors, theme, rows.map((_, index) => Boolean(analyses[index]?.strict)), rows.map((row) => row.magnitude === false))
     if (plane.complex) {
       const arrows = analyses.flatMap((analysis, index) => analysis.kind === 'cpoint' && !rows[index]?.hidden && analysis.x !== undefined && analysis.y !== undefined
         ? [{ x: analysis.x, y: analysis.y, color: colors[index] ?? theme.axis }] : [])

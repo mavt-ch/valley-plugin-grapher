@@ -72,6 +72,19 @@ describe('sheets', () => {
     expect(viewOf('spherical')).toMatchObject({ canvas: 'space', kernel: 8, homeRange: 3 })
   })
 
+  it('keeps the vector field shading choice only where it was made', () => {
+    const document = normalizeDocument({ version: 1, sheets: { cartesian: [{ id: 'a', text: '(-y, x)', magnitude: false }, { id: 'b', text: '(y, x)', magnitude: 'no' }, { id: 'c', text: 'x' }] } })
+    expect(document.sheets.cartesian[0].magnitude).toBe(false)
+    expect('magnitude' in document.sheets.cartesian[1]).toBe(false)
+    expect('magnitude' in document.sheets.cartesian[2]).toBe(false)
+    expect(parseMath('F(x, y) = (-y, x)')).toMatchObject({ k: 'seq', items: [{ k: 'var', text: 'F', vector: true }, { k: 'group' }, { k: 'op', text: '=' }, { k: 'group' }] })
+    const named = (text: string): boolean => { const node = parseMath(text); return node.k === 'seq' && node.items[0].k === 'var' && node.items[0].vector === true }
+    expect(named('F(x, y, z) = (y, z, x)')).toBe(true)
+    expect(named('f(x) = (x + 1)')).toBe(false)
+    expect(named('f(x, y) = x y')).toBe(false)
+    expect(named('F(x, y) = (-y, x) + 1')).toBe(false)
+  })
+
   it('turns the old trigonometric sheet into Cartesian with π axes', () => {
     const row = (id: string, text: string) => ({ id, text, color: 'palette:red' })
     const examples = normalizeDocument({ version: 1, mode: 'trig', sheets: { cartesian: [row('a', 'y = x')], trig: ['sin(x)', 'cos(x)', 'y = A sin(k x)', 'A = 2', 'k = 0.5'].map((text, at) => row(`t${at}`, text)) } })

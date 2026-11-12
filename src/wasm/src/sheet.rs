@@ -210,6 +210,10 @@ pub enum Plot {
     /// `z = f(x, y)`, `x = f(y, z)` or `y = f(x, z)`: `axis` is the one the expression gives.
     Surface { expr: Expr, axis: Axis3 },
     Curve3 { x: Expr, y: Expr, z: Expr, from: f64, to: f64 },
+    /// A vector field `F(x, y) = (P, Q)` or a bare pair in x and y on the Cartesian sheet, drawn as arrows.
+    Field { x: Expr, y: Expr },
+    /// A vector field `F(x, y, z) = (P, Q, R)` or a bare triple in x, y and z on the 3D sheet.
+    Field3 { x: Expr, y: Expr, z: Expr },
     /// `(x(u, v), y(u, v), z(u, v))`: `u` and `v` are the parameter ranges, `slots` the env slots of u and v.
     ParamSurface { x: Expr, y: Expr, z: Expr, u: (f64, f64), v: (f64, f64), slots: [usize; 2] },
     /// `F(x, y, z) = 0` on the 3D sheet, any equation in x, y and z that is not an explicit surface: `left - right`.
@@ -308,12 +312,23 @@ pub struct Sheet {
     pub meshes: HashMap<usize, Mesh>,
 }
 
+/// One polygon in world coordinates with its normal.
+pub type Face = (Vec<[f64; 3]>, Option<[f64; 3]>);
+
 /// The polygons of an implicit surface in world coordinates with their normals, extracted for the cube [-range, range]³;
 /// orbiting reuses them, zooming extracts them again.
 #[derive(Clone, Debug, Default)]
 pub struct Mesh {
     pub range: f64,
-    pub polygons: Vec<(Vec<[f64; 3]>, Option<[f64; 3]>)>,
+    pub polygons: Vec<Face>,
+}
+
+const PLANE: [&str; 2] = ["x", "y"];
+const SPACE: [&str; 3] = ["x", "y", "z"];
+
+/// Every item reads only `axes`, and at least one reads one of them: the components of a vector field.
+fn in_plane_or_space(items: &[Node], axes: &[&str]) -> bool {
+    items.iter().all(|item| only(item, axes)) && items.iter().any(|item| !variables(item).is_empty())
 }
 
 fn is_reserved(name: &str) -> bool {
@@ -416,24 +431,51 @@ fn complex_part(node: &Node) -> Option<&Node> {
     }
 }
 
-/// The name a row of the shape `f(v) = …` defines.
+/// The most parameters a user function takes: `f(x)`, `f(x, y)`, `F(x, y, z)`.
+const MAX_PARAMS: usize = 3;
+
+/// The name a row of the shape `f(v) = …`, `f(x, y) = …` or `F(x, y, z) = …` defines: one to three distinct names.
 fn defined_function(tokens: &[Tok]) -> Option<String> {
-    match tokens {
-        [Tok::Ident(name), Tok::Op('('), Tok::Ident(param), Tok::Op(')'), Tok::Op('='), ..]
-            if !is_reserved(name) && constant(name).is_none() && crate::builtins::Builtin::lookup(name).is_none()
-                && name.chars().next().is_some_and(char::is_alphabetic)
-                && name.split('_').next().is_some_and(|stem| stem.chars().count() == 1)
-                && constant(param).is_none() =>
-        {
-            Some(name.clone())
+    let [Tok::Ident(name), Tok::Op('('), rest @ ..] = tokens else { return None };
+    if is_reserved(name) || constant(name).is_some() || crate::builtins::Builtin::lookup(name).is_some()
+        || !name.chars().next().is_some_and(char::is_alphabetic)
+        || !name.split('_').next().is_some_and(|stem| stem.chars().count() == 1)
+    {
+        return None;
+    }
+    let mut params: Vec<&str> = Vec::new();
+    let mut at = 0;
+    loop {
+        let Some(Tok::Ident(param)) = rest.get(at) else { return None };
+        if constant(param).is_some() || params.contains(&param.as_str()) {
+            return None;
         }
+        params.push(param);
+        match rest.get(at + 1) {
+            Some(Tok::Op(',')) if params.len() < MAX_PARAMS => at += 2,
+            Some(Tok::Op(')')) => break,
+            _ => return None,
+        }
+    }
+    matches!(rest.get(at + 2), Some(Tok::Op('='))).then(|| name.clone())
+}
+
+/// The parameters of `f(a, b, …)` on the left of a definition, when each is a plain name.
+fn params_of(args: &[Node]) -> Option<Vec<String>> {
+    args.iter().map(|arg| if let Node::Var(name) = arg { Some(name.clone()) } else { None }).collect()
+}
+
+/// `F(x, y) = (P, Q)` or `F(x, y, z) = (P, Q, R)`: a vector field, named by a definition whose body is a tuple; its parameters.
+fn field_params(statement: &Statement) -> Option<Vec<String>> {
+    match (&statement.left, &statement.right) {
+        (Some(Node::Call(Callee::User(_), args)), Node::Tuple(_)) if statement.relation == Relation::Eq => params_of(args),
         _ => None,
     }
 }
 
 enum Definition {
     Parameter(usize),
-    Function { row: usize, param: String },
+    Function { row: usize, params: Vec<String> },
 }
 
 enum Resolution {
@@ -447,7 +489,7 @@ struct Analysis<'a> {
     definitions: HashMap<String, Definition>,
     duplicates: HashSet<String>,
     slots: HashMap<String, usize>,
-    function_index: HashMap<String, usize>,
+    function_index: HashMap<String, (usize, usize)>,
     env: Vec<f64>,
     functions: Vec<UserFn>,
     complex: bool,
@@ -518,31 +560,31 @@ impl Analysis<'_> {
     }
 
     fn define(&mut self, name: &str) -> Result<(), MathError> {
-        let (row, param) = match &self.definitions[name] {
+        let (row, params) = match &self.definitions[name] {
             Definition::Parameter(row) => (*row, None),
-            Definition::Function { row, param } => (*row, Some(param.clone())),
+            Definition::Function { row, params } => (*row, Some(params.clone())),
         };
         if self.complex {
             let body = self.statement(row).right.clone();
-            let own: Vec<&str> = param.iter().map(String::as_str).collect();
+            let own: Vec<&str> = params.iter().flatten().map(String::as_str).collect();
             self.require(&[&body], &own)?;
-            match param {
+            match params {
                 None => {
                     let value = self.constant_c(&body)?;
                     let slot = self.slots[name];
                     self.cenv[slot] = value;
                     self.env[slot] = if value.is_real() { value.re } else { f64::NAN };
                 }
-                Some(param) => {
-                    let allowed = param.clone();
-                    let expr = self.compile_c(&body, &move |name| name == allowed || !is_reserved(name))?;
-                    let index = self.function_index[name];
-                    self.cfunctions[index] = CUserFn { slot: self.slots[&param], body: expr };
+                Some(params) => {
+                    let slots = params.iter().map(|param| self.slots[param]).collect();
+                    let expr = self.compile_c(&body, &move |name| params.iter().any(|param| param == name) || !is_reserved(name))?;
+                    let index = self.function_index[name].0;
+                    self.cfunctions[index] = CUserFn { slots, body: expr };
                 }
             }
             return Ok(());
         }
-        match param {
+        match params {
             None => {
                 let right = self.statement(row).right.clone();
                 self.require(&[&right], &[])?;
@@ -550,13 +592,14 @@ impl Analysis<'_> {
                 let value = eval(&expr, &mut self.env, &self.functions);
                 self.env[self.slots[name]] = value;
             }
-            Some(param) => {
+            Some(params) => {
                 let body = self.statement(row).right.clone();
-                self.require(&[&body], &[param.as_str()])?;
-                let allowed = param.clone();
-                let expr = self.compile(&body, &move |name| name == allowed || !is_reserved(name))?;
-                let index = self.function_index[name];
-                self.functions[index] = UserFn { slot: self.slots[&param], body: expr };
+                let own: Vec<&str> = params.iter().map(String::as_str).collect();
+                self.require(&[&body], &own)?;
+                let slots = params.iter().map(|param| self.slots[param]).collect();
+                let expr = self.compile(&body, &move |name| params.iter().any(|param| param == name) || !is_reserved(name))?;
+                let index = self.function_index[name].0;
+                self.functions[index] = UserFn { slots, body: expr };
             }
         }
         Ok(())
@@ -626,6 +669,10 @@ impl Analysis<'_> {
         if mode == Mode::ComplexSpace {
             return self.plot_complex_space(&statement);
         }
+        // `F(x, y) = (P, Q)` names its field; only the components have to resolve.
+        if let Some(params) = field_params(&statement) {
+            return self.plot_field(mode, &statement.right, &params);
+        }
         let mut nodes = vec![&statement.right];
         if let Some(left) = &statement.left {
             nodes.push(left);
@@ -664,6 +711,8 @@ impl Analysis<'_> {
                 [x, y] if variables(x).is_empty() && variables(y).is_empty() => {
                     Plot::Point { x: self.constant(x)?, y: self.constant(y)? }
                 }
+                // A pair in x and y is a vector field (it read as an error before).
+                [_, _] if matches!(mode, Mode::Cartesian | Mode::Trig) && in_plane_or_space(items, &PLANE) => return self.field(items, &PLANE),
                 [_, _] => return Err(MathError::new("error.pair", "")),
                 _ => return Err(MathError::new("error.tuple", "")),
             },
@@ -710,6 +759,33 @@ impl Analysis<'_> {
             }
         };
         Ok(Outcome::Plotted(plot))
+    }
+
+    /// `F(x, y) = (P, Q)` on the Cartesian sheet or `F(x, y, z) = (P, Q, R)` on the 3D sheet; anything else named
+    /// like a field (other parameters, other sheets, a tuple of the wrong length) is refused with the rule.
+    fn plot_field(&mut self, mode: Mode, right: &Node, params: &[String]) -> Result<Outcome, MathError> {
+        let axes: &[&str] = match mode {
+            Mode::Cartesian | Mode::Trig => &PLANE,
+            Mode::Space => &SPACE,
+            _ => return Err(MathError::new("error.field", "")),
+        };
+        let Node::Tuple(items) = right else { return Err(MathError::new("error.field", "")) };
+        if params.len() != axes.len() || params.iter().zip(axes).any(|(param, axis)| param != axis) || items.len() != axes.len() {
+            return Err(MathError::new("error.field", ""));
+        }
+        self.require(&[right], &[])?;
+        self.field(items, axes)
+    }
+
+    /// The arrows of a field whose components read only `axes`.
+    fn field(&mut self, items: &[Node], axes: &[&'static str]) -> Result<Outcome, MathError> {
+        let axes: Vec<&'static str> = axes.to_vec();
+        let component = |analysis: &Self, node: &Node| analysis.compile(node, &|name| axes.contains(&name) || !is_reserved(name));
+        Ok(Outcome::Plotted(match items {
+            [x, y] => Plot::Field { x: component(self, x)?, y: component(self, y)? },
+            [x, y, z] => Plot::Field3 { x: component(self, x)?, y: component(self, y)?, z: component(self, z)? },
+            _ => return Err(MathError::new("error.field", "")),
+        }))
     }
 
     /// Rows of the complex sheet: numbers in any notation become points, relations in `z` (or its parts `x`
@@ -850,6 +926,8 @@ impl Analysis<'_> {
                 [x, y, z] if [x, y, z].iter().all(|item| variables(item).is_empty()) => {
                     Ok(Outcome::Plotted(Plot::Point3 { x: self.constant(x)?, y: self.constant(y)?, z: self.constant(z)? }))
                 }
+                // A triple in x, y and z is a vector field (it read as an error before).
+                [_, _, _] if in_plane_or_space(items, &SPACE) => self.field(items, &SPACE),
                 _ => Err(MathError::new("error.triple", "")),
             },
             (None, expr) => {
@@ -929,10 +1007,10 @@ pub fn analyze(mode: Mode, inputs: &[RowInput]) -> Sheet {
             Some(Node::Var(name)) if statement.relation == Relation::Eq && !is_reserved(name) && constant(name).is_none() && plane_free(&statement.right) => {
                 Some((name.clone(), Definition::Parameter(row)))
             }
-            Some(Node::Call(Callee::User(name), args)) if statement.relation == Relation::Eq => match args.as_slice() {
-                [Node::Var(param)] => Some((name.clone(), Definition::Function { row, param: param.clone() })),
-                _ => None,
-            },
+            // A tuple body is a vector field, drawn by its row rather than defined.
+            Some(Node::Call(Callee::User(name), args)) if statement.relation == Relation::Eq && !matches!(statement.right, Node::Tuple(_)) => {
+                params_of(args).map(|params| (name.clone(), Definition::Function { row, params }))
+            }
             _ => None,
         };
         if let Some((name, definition)) = definition {
@@ -967,19 +1045,21 @@ pub fn analyze(mode: Mode, inputs: &[RowInput]) -> Sheet {
     let mut names: Vec<&String> = definitions.keys().collect();
     names.sort();
     for name in names {
-        let param = match &definitions[name] {
-            Definition::Parameter(_) => name.clone(),
-            Definition::Function { param, .. } => {
-                function_index.insert(name.clone(), functions.len());
-                functions.push(UserFn { slot: 0, body: Expr::Num(f64::NAN) });
-                cfunctions.push(CUserFn { slot: 0, body: CExpr::Num(C64::NAN) });
-                param.clone()
+        let params = match &definitions[name] {
+            Definition::Parameter(_) => vec![name.clone()],
+            Definition::Function { params, .. } => {
+                function_index.insert(name.clone(), (functions.len(), params.len()));
+                functions.push(UserFn { slots: Vec::new(), body: Expr::Num(f64::NAN) });
+                cfunctions.push(CUserFn { slots: Vec::new(), body: CExpr::Num(C64::NAN) });
+                params.clone()
             }
         };
-        if let Entry::Vacant(entry) = slots.entry(param) {
-            entry.insert(env.len());
-            env.push(f64::NAN);
-            cenv.push(C64::NAN);
+        for param in params {
+            if let Entry::Vacant(entry) = slots.entry(param) {
+                entry.insert(env.len());
+                env.push(f64::NAN);
+                cenv.push(C64::NAN);
+            }
         }
     }
 
@@ -1019,12 +1099,12 @@ pub fn analyze(mode: Mode, inputs: &[RowInput]) -> Sheet {
                             _ => false,
                         },
                     },
-                    Definition::Function { param, .. } if param == "z" && mode == Mode::ComplexSpace => {
-                        let body = analysis.cfunctions[analysis.function_index[name]].body.clone();
+                    Definition::Function { params, .. } if params == &["z"] && mode == Mode::ComplexSpace => {
+                        let body = analysis.cfunctions[analysis.function_index[name].0].body.clone();
                         Outcome::Plotted(Plot::ComplexSurface { expr: body.clone(), hue: body, height: Height::Modulus })
                     }
-                    Definition::Function { param, .. } if param == "x" && !analysis.complex => {
-                        let index = analysis.function_index[name];
+                    Definition::Function { params, .. } if params == &["x"] && !analysis.complex => {
+                        let index = analysis.function_index[name].0;
                         Outcome::Plotted(Plot::FunctionX(analysis.functions[index].body.clone()))
                     }
                     Definition::Function { .. } => Outcome::Definition { name: name.clone() },
@@ -1112,7 +1192,7 @@ mod tests {
 
     #[test]
     fn values_points_curves_and_implicit_equations() {
-        let mut sheet = sheet(Mode::Cartesian, &["2 + 3", "(1, a)", "a = 4", "(cos t, sin t)", "x^2 + y^2 = 1", "(x, 1)", "e = 3"]);
+        let mut sheet = sheet(Mode::Cartesian, &["2 + 3", "(1, a)", "a = 4", "(cos t, sin t)", "x^2 + y^2 = 1", "(x, t)", "e = 3"]);
         assert!(matches!(sheet.rows[0].outcome, Outcome::Value(value) if value == 5.0));
         assert!(matches!(sheet.rows[1].plot(), Some(Plot::Point { x, y }) if *x == 1.0 && *y == 4.0));
         assert!(matches!(sheet.rows[3].plot(), Some(Plot::Curve { from, to, .. }) if *from == 0.0 && *to == TAU));
@@ -1120,6 +1200,56 @@ mod tests {
         assert_eq!(at(&mut sheet, 4, X, 1.0), 0.0);
         assert_eq!(error(&sheet, 5).key, "error.pair");
         assert_eq!(error(&sheet, 6).key, "error.reserved");
+    }
+
+    #[test]
+    fn vector_fields_in_the_plane_and_in_space() {
+        let mut plane = sheet(Mode::Cartesian, &[
+            "F(x, y) = (-y, x)", "(-y, x)", "(1, 2)", "(cos t, sin t)", "(x, t)", "G(x) = (x, 1)", "F_2(x, y) = (k y, x)", "H(x, y) = (1, 2, 3)", "(x, 1)", "E(y, x) = (x, y)",
+        ]);
+        assert!(matches!(plane.rows[0].plot(), Some(Plot::Field { .. })), "{:?}", plane.rows[0].outcome);
+        assert!(matches!(plane.rows[1].plot(), Some(Plot::Field { .. })));
+        assert!(matches!(plane.rows[2].plot(), Some(Plot::Point { .. })));
+        assert!(matches!(plane.rows[3].plot(), Some(Plot::Curve { .. })));
+        assert_eq!(error(&plane, 4).key, "error.pair");
+        assert_eq!(error(&plane, 5).key, "error.field");
+        assert_eq!(error(&plane, 6).missing, ["k"]);
+        assert_eq!(error(&plane, 7).key, "error.field");
+        assert!(matches!(plane.rows[8].plot(), Some(Plot::Field { .. })));
+        assert_eq!(error(&plane, 9).key, "error.field");
+        let Some(Plot::Field { x, y }) = plane.rows[0].plot().cloned() else { unreachable!() };
+        (plane.env[X], plane.env[Y]) = (1.0, 2.0);
+        assert_eq!((eval(&x, &mut plane.env, &plane.functions), eval(&y, &mut plane.env, &plane.functions)), (-2.0, 1.0));
+        // Only the Cartesian sheet reads a pair in x and y as a field.
+        assert_eq!(error(&sheet(Mode::Parametric, &["(-y, x)"]), 0).key, "error.pair");
+        assert_eq!(error(&sheet(Mode::Polar, &["F(x, y) = (-y, x)"]), 0).key, "error.field");
+        let space = sheet(Mode::Space, &["F(x, y, z) = (-y, x, z / 4)", "(y, -x, 1)", "F(x, y) = (1, 2)", "(1, 2, 3)", "(cos t, sin t, t)", "(u cos v, u sin v, v)", "(x, y, t)"]);
+        assert!(matches!(space.rows[0].plot(), Some(Plot::Field3 { .. })), "{:?}", space.rows[0].outcome);
+        assert!(matches!(space.rows[1].plot(), Some(Plot::Field3 { .. })));
+        assert_eq!(error(&space, 2).key, "error.field");
+        assert!(matches!(space.rows[3].plot(), Some(Plot::Point3 { .. })));
+        assert!(matches!(space.rows[4].plot(), Some(Plot::Curve3 { .. })));
+        assert!(matches!(space.rows[5].plot(), Some(Plot::ParamSurface { .. })));
+        assert_eq!(error(&space, 6).key, "error.triple");
+    }
+
+    #[test]
+    fn user_functions_take_up_to_three_parameters() {
+        let mut sheet = sheet(Mode::Cartesian, &["f(x, y) = x y + 1", "f(2, 3)", "h(x) = f(x, 2) - 1", "g(a, b, c) = a + 2b + 3c", "g(1, 1, 1)", "f(1)", "k(x, x) = x"]);
+        assert!(matches!(&sheet.rows[0].outcome, Outcome::Definition { name } if name == "f"), "{:?}", sheet.rows[0].outcome);
+        assert!(matches!(sheet.rows[1].outcome, Outcome::Value(value) if value == 7.0));
+        assert_eq!(at(&mut sheet, 2, X, 3.0), 6.0);
+        assert!(matches!(sheet.rows[4].outcome, Outcome::Value(value) if value == 6.0));
+        assert_eq!(error(&sheet, 5).key, "error.arity");
+        assert!(matches!(sheet.rows[6].outcome, Outcome::Error(_)));
+        // f(y, x) swaps its arguments and leaves x and y as they were.
+        let mut swap = self::sheet(Mode::Cartesian, &["f(x, y) = x - 2y", "x = f(y, x)"]);
+        let Some(Plot::Implicit(Field::Real(expr))) = swap.rows[1].plot().cloned() else { panic!("{:?}", swap.rows[1].outcome) };
+        (swap.env[X], swap.env[Y]) = (1.0, 5.0);
+        assert_eq!(eval(&expr, &mut swap.env, &swap.functions), 1.0 - (5.0 - 2.0));
+        assert_eq!((swap.env[X], swap.env[Y]), (1.0, 5.0));
+        let complex = self::sheet(Mode::Complex, &["f(z, w) = z w", "f(i, i)"]);
+        assert!(matches!(complex.rows[1].plot(), Some(Plot::ComplexPoint { re, im, .. }) if *re == -1.0 && *im == 0.0), "{:?}", complex.rows[1].outcome);
     }
 
     #[test]

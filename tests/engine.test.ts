@@ -233,6 +233,28 @@ describe('the plot kernel through api.wasm', () => {
     }
   })
 
+  it('draws vector fields as centred arrows in the plane and in space', () => {
+    const rows = sheet('F(x, y) = (-y, x)', '(y, -x)', '(1, 2)', '(x, t)', 'G(x) = (x, 1)', 'f(x, y) = x y', 'f(2, 3)')
+    expect(engine.analyze('cartesian', rows).map((row) => row.kind)).toEqual(['field', 'field', 'point', 'error', 'error', 'definition', 'value'])
+    expect(engine.analyze('cartesian', rows)[4].error?.key).toBe('error.field')
+    expect(engine.analyze('cartesian', rows)[6].value).toBe(6)
+    const paths = engine.sample('cartesian', rows, 400, 300, { cx: 0, cy: 0, scale: 20 }).filter((path) => path.row === 0)
+    expect(paths.length).toBeGreaterThan(250)
+    for (const path of paths) {
+      expect(path.kind).toBe('arrow')
+      expect(path.points.length).toBe(2 * STRIDE)
+      const [tx, ty, hx, hy] = [path.points[0], path.points[1], path.points[STRIDE], path.points[STRIDE + 1]]
+      expect(Math.hypot(hx - tx, hy - ty)).toBeLessThanOrEqual(0.9 * 20 + 1e-9)
+      expect(path.points[STRIDE + 4]).toBeGreaterThan(0)
+      expect(path.points[STRIDE + 4]).toBeLessThanOrEqual(1)
+    }
+    const space = sheet('F(x, y, z) = (-y, x, z / 4)', '(0, 0, 1 + 0z)', 'F(x, y) = (1, 2)')
+    expect(engine.analyze('space', space).map((row) => row.kind)).toEqual(['field3', 'field3', 'error'])
+    const records = engine.space('space', space, 600, 400, { yaw: -0.6, pitch: 0.45, range: 10 })
+    expect(records.filter((record) => record.kind === SPACE.arrow && record.row === 0)).toHaveLength(342)
+    expect(records.filter((record) => record.kind === SPACE.arrow && record.row === 1).every((record) => record.value === 1 && record.points.length === 4)).toBe(true)
+  })
+
   it('shades inequalities on Cartesian sheets', () => {
     const rows = sheet('y > x^2', 'x^2 + y^2 ≤ 4')
     expect(engine.analyze('cartesian', rows)).toMatchObject([{ kind: 'region', strict: true }, { kind: 'region', strict: false }])

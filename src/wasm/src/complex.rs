@@ -221,13 +221,13 @@ pub enum CExpr {
     Neg(Box<CExpr>),
     Bin(BinOp, Box<CExpr>, Box<CExpr>),
     Builtin(Builtin, Vec<CExpr>),
-    User(usize, Box<CExpr>),
+    User(usize, Vec<CExpr>),
     Fact(Box<CExpr>),
 }
 
 #[derive(Clone, Debug)]
 pub struct CUserFn {
-    pub slot: usize,
+    pub slots: Vec<usize>,
     pub body: CExpr,
 }
 
@@ -245,10 +245,10 @@ pub fn compile(node: &Node, scope: &Scope) -> Result<CExpr, MathError> {
         Node::Call(Callee::Builtin(builtin), args) => {
             CExpr::Builtin(*builtin, args.iter().map(|arg| compile(arg, scope)).collect::<Result<_, _>>()?)
         }
-        Node::Call(Callee::User(name), args) => match (scope.functions.get(name), args.as_slice()) {
-            (Some(index), [arg]) => CExpr::User(*index, Box::new(compile(arg, scope)?)),
-            (Some(_), _) => return Err(MathError::new("error.arity", name.clone())),
-            (None, _) => return Err(MathError::new("error.unknown", name.clone())),
+        Node::Call(Callee::User(name), args) => match scope.functions.get(name) {
+            Some((index, arity)) if *arity == args.len() => CExpr::User(*index, args.iter().map(|arg| compile(arg, scope)).collect::<Result<_, _>>()?),
+            Some(_) => return Err(MathError::new("error.arity", name.clone())),
+            None => return Err(MathError::new("error.unknown", name.clone())),
         },
         Node::Fact(arg) => CExpr::Fact(Box::new(compile(arg, scope)?)),
         Node::Tuple(_) => return Err(MathError::new("error.tuple", "")),
@@ -278,12 +278,14 @@ pub fn eval(expr: &CExpr, env: &mut [C64], functions: &[CUserFn]) -> C64 {
                 apply(*builtin, &values)
             }
         },
-        CExpr::User(index, arg) => {
-            let value = eval(arg, env, functions);
+        CExpr::User(index, args) => {
             let function = &functions[*index];
-            let saved = std::mem::replace(&mut env[function.slot], value);
+            let values: Vec<C64> = args.iter().map(|arg| eval(arg, env, functions)).collect();
+            let saved: Vec<C64> = function.slots.iter().zip(&values).map(|(slot, value)| std::mem::replace(&mut env[*slot], *value)).collect();
             let result = eval(&function.body, env, functions);
-            env[function.slot] = saved;
+            for (slot, value) in function.slots.iter().zip(saved).rev() {
+                env[*slot] = value;
+            }
             result
         }
         CExpr::Fact(arg) => {

@@ -23,6 +23,8 @@ export interface Row {
   from2: string
   to2: string
   slider: Slider
+  /** Vector fields: shade each arrow by its magnitude (added later: absent means on). */
+  magnitude?: boolean
 }
 
 /** One graph: what a single Grapher tab shows and the sidebar edits while that tab is focused. */
@@ -141,7 +143,8 @@ function normalizeRow(value: unknown, rows: readonly Row[]): Row | null {
     to: text(record.to),
     from2: text(record.from2),
     to2: text(record.to2),
-    slider: min < max && step > 0 ? { min, max, step } : { ...DEFAULT_SLIDER }
+    slider: min < max && step > 0 ? { min, max, step } : { ...DEFAULT_SLIDER },
+    ...(typeof record.magnitude === 'boolean' ? { magnitude: record.magnitude } : {})
   }
 }
 

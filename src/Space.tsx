@@ -1,6 +1,6 @@
 import { React } from './runtime'
 import type { KeyboardEvent, PointerEvent, ReactElement } from 'react'
-import { colorOf, readTheme, type Size, type Theme } from './draw'
+import { colorOf, fieldArrow, magnitudeOpacity, readTheme, type Size, type Theme } from './draw'
 import { SPACE, type Camera, type PlotEngine, type SpaceRecord } from './engine'
 import { Fit, Minus, Plus } from './icons'
 import { uiText } from './localization'
@@ -50,7 +50,8 @@ export function hueFill(value: number): string {
   return `hsl(${Math.round(hue * 360)}, 70%, ${Math.round(18 + shade * 46)}%)`
 }
 
-export function drawSpace(ctx: CanvasRenderingContext2D, records: readonly SpaceRecord[], colors: readonly string[], size: Size, theme: Theme, axisNames: readonly string[] = ['x', 'y', 'z'], units: AxisUnits = 'decimal', range = HOME_CAMERA.range): void {
+/** `uniform` marks vector fields whose arrows are not shaded by magnitude. */
+export function drawSpace(ctx: CanvasRenderingContext2D, records: readonly SpaceRecord[], colors: readonly string[], size: Size, theme: Theme, axisNames: readonly string[] = ['x', 'y', 'z'], units: AxisUnits = 'decimal', range = HOME_CAMERA.range, uniform: readonly boolean[] = []): void {
   ctx.fillStyle = theme.background
   ctx.fillRect(0, 0, size.width, size.height)
   ctx.lineJoin = 'round'
@@ -81,6 +82,9 @@ export function drawSpace(ctx: CanvasRenderingContext2D, records: readonly Space
       ctx.lineWidth = 2.5
       trace(ctx, record.points)
       ctx.stroke()
+    } else if (record.kind === SPACE.arrow && record.points.length >= 4) {
+      const [ax, ay, bx, by] = record.points
+      fieldArrow(ctx, ax, ay, bx, by, color, uniform[record.row] ? 1 : magnitudeOpacity(record.value))
     } else if (record.kind === SPACE.point) {
       ctx.beginPath()
       ctx.arc(record.points[0], record.points[1], 4.5, 0, Math.PI * 2)
@@ -166,7 +170,7 @@ export const SpaceCanvas = ({ view, rows, engine, graph, units }: SpaceProps): R
     }
     const dpr = canvas.ownerDocument.defaultView?.devicePixelRatio || 1
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
-    drawSpace(ctx, records, rows.map((row) => colorOf(row.color)), size, readTheme(canvas), view.axisNames, units, cameraRef.current.range)
+    drawSpace(ctx, records, rows.map((row) => colorOf(row.color)), size, readTheme(canvas), view.axisNames, units, cameraRef.current.range, rows.map((row) => row.magnitude === false))
   }, [])
 
   const invalidate = React.useCallback((): void => {

@@ -276,7 +276,7 @@ impl Parser<'_> {
         let args = if self.eat('(') { self.group()? } else { vec![self.argument()?] };
         let (min, max) = match &callee {
             Callee::Builtin(builtin) => builtin.arity(),
-            Callee::User(_) => (1, 1),
+            Callee::User(_) => (1, 3),
         };
         if args.len() < min || args.len() > max {
             return Err(MathError::new("error.arity", name));

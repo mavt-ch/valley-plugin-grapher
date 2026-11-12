@@ -11,7 +11,7 @@ import { getStore, useGrapher } from './store'
 import { formatComplex, formatNumber, formatPolar } from './ticks'
 import { viewOf } from './views'
 
-const DRAWN = new Set(['function', 'polar', 'curve', 'point', 'implicit', 'surface', 'curve3', 'point3', 'region', 'cpoint', 'csurface', 'coords', 'psurface', 'implicit3'])
+const DRAWN = new Set(['function', 'polar', 'curve', 'point', 'implicit', 'surface', 'curve3', 'point3', 'region', 'cpoint', 'csurface', 'coords', 'psurface', 'implicit3', 'field', 'field3'])
 
 /** The row whose input takes focus on its next render (after Enter adds a row or Backspace removes one). */
 let pendingFocus: string | null = null
@@ -206,6 +206,14 @@ const RangeControl = ({ mode, row, analysis, edit }: Pick<RowProps, 'mode' | 'ro
   return <Domain row={row} edit={edit} keys={['from', 'to']} variable={rangeVariable(analysis.kind)} placeholders={['0', '2π']} />
 }
 
+/** A row option that is on or off, as a compact chip under the row. */
+const OptionToggle = ({ label, checked, onChange }: { label: string; checked: boolean; onChange: (checked: boolean) => void }): ReactElement => (
+  <button type="button" role="switch" aria-checked={checked} className="grapher-option" onClick={() => onChange(!checked)}>
+    <span className="grapher-option-box">{checked ? <Check /> : null}</span>
+    {label}
+  </button>
+)
+
 const Details = (props: RowProps): ReactElement | null => {
   const { analysis, row } = props
   if (!analysis || !row.text.trim()) return null
@@ -243,6 +251,13 @@ const Details = (props: RowProps): ReactElement | null => {
     case 'coords':
     case 'psurface':
       return <RangeControl {...props} />
+    case 'field':
+    case 'field3':
+      return (
+        <div className="grapher-options">
+          <OptionToggle label={uiText('row.magnitude')} checked={row.magnitude !== false} onChange={(checked) => props.edit((current) => ({ ...current, magnitude: checked }))} />
+        </div>
+      )
     default:
       return null
   }

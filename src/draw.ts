@@ -187,6 +187,44 @@ function axisNames(ctx: CanvasRenderingContext2D, view: Viewport, size: Size, th
   ctx.font = theme.font
 }
 
+/**
+ * An arrow from (ax, ay) to (bx, by): a stroked shaft up to the base of a filled head, the shape of the complex
+ * sheet's arrows. `head` is the head's length and `half` its half-width, in pixels.
+ */
+export function arrowShape(ctx: CanvasRenderingContext2D, ax: number, ay: number, bx: number, by: number, head: number, half: number, width: number): void {
+  const length = Math.hypot(bx - ax, by - ay)
+  if (length <= 0) return
+  const [ux, uy] = [(bx - ax) / length, (by - ay) / length]
+  const [cx, cy] = [bx - ux * head, by - uy * head]
+  ctx.lineWidth = width
+  ctx.beginPath()
+  ctx.moveTo(ax, ay)
+  ctx.lineTo(cx, cy)
+  ctx.stroke()
+  ctx.beginPath()
+  ctx.moveTo(bx, by)
+  ctx.lineTo(cx - uy * half, cy + ux * half)
+  ctx.lineTo(cx + uy * half, cy - ux * half)
+  ctx.closePath()
+  ctx.fill()
+}
+
+/** A vector field's arrow: the head scales with short arrows; `opacity` carries the magnitude when shading is on. */
+export function fieldArrow(ctx: CanvasRenderingContext2D, ax: number, ay: number, bx: number, by: number, color: string, opacity: number): void {
+  const length = Math.hypot(bx - ax, by - ay)
+  if (length < 2) return
+  const head = Math.min(7, length * 0.4)
+  ctx.save()
+  ctx.globalAlpha = opacity
+  ctx.strokeStyle = color
+  ctx.fillStyle = color
+  arrowShape(ctx, ax, ay, bx, by, head, head * 0.45, 1.5)
+  ctx.restore()
+}
+
+/** The opacity of an arrow whose magnitude is `relative` (0–1) of the field's reference: faint when small, full at the reference. */
+export const magnitudeOpacity = (relative: number): number => 0.3 + 0.7 * Math.max(0, Math.min(1, relative))
+
 /** Complex numbers as arrows from 0, with their value beside the tip. */
 export function drawArrows(ctx: CanvasRenderingContext2D, arrows: readonly { x: number; y: number; color: string }[], view: Viewport, size: Size, theme: Theme): void {
   const ox = toScreenX(view, size, 0)
@@ -198,20 +236,9 @@ export function drawArrows(ctx: CanvasRenderingContext2D, arrows: readonly { x: 
     const length = Math.hypot(tx - ox, ty - oy)
     if (length < 8) continue
     const [ux, uy] = [(tx - ox) / length, (ty - oy) / length]
-    const [bx, by] = [tx - ux * 11, ty - uy * 11]
     ctx.strokeStyle = arrow.color
     ctx.fillStyle = arrow.color
-    ctx.lineWidth = 2
-    ctx.beginPath()
-    ctx.moveTo(ox, oy)
-    ctx.lineTo(bx, by)
-    ctx.stroke()
-    ctx.beginPath()
-    ctx.moveTo(tx, ty)
-    ctx.lineTo(bx - uy * 5, by + ux * 5)
-    ctx.lineTo(bx + uy * 5, by - ux * 5)
-    ctx.closePath()
-    ctx.fill()
+    arrowShape(ctx, ox, oy, tx, ty, 11, 5, 2)
     ctx.textAlign = ux >= 0 ? 'left' : 'right'
     ctx.textBaseline = uy >= 0 ? 'top' : 'bottom'
     haloText(ctx, theme, formatComplex(arrow.x, arrow.y), tx + (ux >= 0 ? 7 : -7), ty + (uy >= 0 ? 5 : -5))
@@ -219,8 +246,8 @@ export function drawArrows(ctx: CanvasRenderingContext2D, arrows: readonly { x: 
 }
 
 /** Regions are filled first, translucent and once per row so neighbouring cells never double up; `dashed` marks
- * rows whose boundary is excluded (strict inequalities). */
-export function drawPaths(ctx: CanvasRenderingContext2D, paths: readonly SamplePath[], colors: readonly string[], theme: Theme, dashed: readonly boolean[] = []): void {
+ * rows whose boundary is excluded (strict inequalities), and `uniform` vector fields whose arrows are not shaded by magnitude. */
+export function drawPaths(ctx: CanvasRenderingContext2D, paths: readonly SamplePath[], colors: readonly string[], theme: Theme, dashed: readonly boolean[] = [], uniform: readonly boolean[] = []): void {
   ctx.lineJoin = 'round'
   ctx.lineCap = 'round'
   const regions = new Map<number, Path2D>()
@@ -245,6 +272,10 @@ export function drawPaths(ctx: CanvasRenderingContext2D, paths: readonly SampleP
     if (path.kind === 'region') continue
     const color = colors[path.row] ?? theme.axis
     const { points } = path
+    if (path.kind === 'arrow') {
+      fieldArrow(ctx, clamp(points[0]), clamp(points[1]), clamp(points[STRIDE]), clamp(points[STRIDE + 1]), color, uniform[path.row] ? 1 : magnitudeOpacity(points[STRIDE + 4]))
+      continue
+    }
     if (path.kind === 'point') {
       ctx.beginPath()
       ctx.arc(clamp(points[0]), clamp(points[1]), 4.5, 0, Math.PI * 2)
@@ -289,7 +320,7 @@ export function findHit(paths: readonly SamplePath[], px: number, py: number, ra
   let lineDistance = radius
   for (const path of paths) {
     const { points } = path
-    if (path.kind === 'region') continue
+    if (path.kind === 'region' || path.kind === 'arrow') continue
     if (path.kind === 'point') {
       const distance = Math.hypot(points[0] - px, points[1] - py)
       if (distance <= pointDistance) {

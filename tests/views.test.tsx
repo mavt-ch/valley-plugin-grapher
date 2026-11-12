@@ -162,6 +162,25 @@ describe('the graph tab', () => {
     expect(container.querySelector('.grapher-hint')?.textContent).toContain('implicit surface F(x, y, z) = 0')
   })
 
+  it('draws a vector field typed as F(x, y) = (…) and saves whether it is shaded by magnitude', async () => {
+    const mock = mount()
+    const { container } = render(<><Sidebar /><GraphTab /></>)
+    await screen.findByDisplayValue('y = x^2 - 2')
+    const inputs = screen.getAllByRole('textbox', { name: /Expression/ })
+    const trailing = inputs[inputs.length - 1]
+    expect(trailing.getAttribute('placeholder')).toBe('F(x, y) = (-y, x)')
+    fireEvent.change(trailing, { target: { value: 'F(x, y) = (-y, x)' } })
+    const field = (await screen.findAllByRole('listitem'))[4]
+    await waitFor(() => expect(field.getAttribute('data-kind')).toBe('field'))
+    expect(field.querySelector('.gm-vec')?.textContent).toBe('F')
+    const shading = within(field).getByRole('switch', { name: 'Shade by magnitude' })
+    expect(shading.getAttribute('aria-checked')).toBe('true')
+    fireEvent.click(shading)
+    expect(within(field).getByRole('switch', { name: 'Shade by magnitude' }).getAttribute('aria-checked')).toBe('false')
+    await waitFor(async () => expect(await mock.api.data.files.readText('graphs.json')).toContain('"magnitude": false'), { timeout: 2000 })
+    expect(container.querySelector('.grapher-hint')?.textContent).toContain('vector field F(x, y) = (−y, x)')
+  })
+
   it('draws cylindrical surfaces with a range row for each of their two coordinates', async () => {
     const mock = mount()
     const { container } = render(<><Sidebar /><GraphTab /></>)

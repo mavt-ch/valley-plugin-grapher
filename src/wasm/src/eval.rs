@@ -1,6 +1,6 @@
 //! Compiled expressions: variables resolve to slots of one environment array, user functions to indices.
-//! A user-function call writes its argument into the parameter's slot, evaluates the body and restores the
-//! slot, so `f(x + 1)` inside a plot of `x` sees the outer `x` again afterwards.
+//! A user-function call evaluates its arguments, writes them into the parameters' slots, evaluates the body and
+//! restores the slots, so `f(x + 1)` inside a plot of `x` sees the outer `x` again afterwards and `f(y, x)` swaps.
 
 use std::collections::HashMap;
 use std::f64::consts::{E, PI, TAU};
@@ -16,13 +16,14 @@ pub enum Expr {
     Neg(Box<Expr>),
     Bin(BinOp, Box<Expr>, Box<Expr>),
     Builtin(Builtin, Vec<Expr>),
-    User(usize, Box<Expr>),
+    User(usize, Vec<Expr>),
     Fact(Box<Expr>),
 }
 
 #[derive(Clone, Debug)]
 pub struct UserFn {
-    pub slot: usize,
+    /// The slot of each parameter, in order.
+    pub slots: Vec<usize>,
     pub body: Expr,
 }
 
@@ -36,10 +37,11 @@ pub fn constant(name: &str) -> Option<f64> {
     }
 }
 
-/// What a compiled expression may name: `slots` for variables it is allowed to read, `functions` for calls.
+/// What a compiled expression may name: `slots` for variables it is allowed to read, `functions` for calls (each
+/// user function's index and number of parameters).
 pub struct Scope<'a> {
     pub slots: &'a HashMap<String, usize>,
-    pub functions: &'a HashMap<String, usize>,
+    pub functions: &'a HashMap<String, (usize, usize)>,
     pub allow: &'a dyn Fn(&str) -> bool,
 }
 
@@ -56,10 +58,10 @@ pub fn compile(node: &Node, scope: &Scope) -> Result<Expr, MathError> {
         Node::Call(Callee::Builtin(builtin), args) => {
             Expr::Builtin(*builtin, args.iter().map(|arg| compile(arg, scope)).collect::<Result<_, _>>()?)
         }
-        Node::Call(Callee::User(name), args) => match (scope.functions.get(name), args.as_slice()) {
-            (Some(index), [arg]) => Expr::User(*index, Box::new(compile(arg, scope)?)),
-            (Some(_), _) => return Err(MathError::new("error.arity", name.clone())),
-            (None, _) => return Err(MathError::new("error.unknown", name.clone())),
+        Node::Call(Callee::User(name), args) => match scope.functions.get(name) {
+            Some((index, arity)) if *arity == args.len() => Expr::User(*index, args.iter().map(|arg| compile(arg, scope)).collect::<Result<_, _>>()?),
+            Some(_) => return Err(MathError::new("error.arity", name.clone())),
+            None => return Err(MathError::new("error.unknown", name.clone())),
         },
         Node::Fact(arg) => Expr::Fact(Box::new(compile(arg, scope)?)),
         Node::Tuple(_) => return Err(MathError::new("error.tuple", "")),
@@ -89,12 +91,21 @@ pub fn eval(expr: &Expr, env: &mut [f64], functions: &[UserFn]) -> f64 {
                 builtin.apply(&values)
             }
         },
-        Expr::User(index, arg) => {
-            let value = eval(arg, env, functions);
+        Expr::User(index, args) => {
             let function = &functions[*index];
-            let saved = std::mem::replace(&mut env[function.slot], value);
+            if let ([arg], [slot]) = (args.as_slice(), function.slots.as_slice()) {
+                let value = eval(arg, env, functions);
+                let saved = std::mem::replace(&mut env[*slot], value);
+                let result = eval(&function.body, env, functions);
+                env[*slot] = saved;
+                return result;
+            }
+            let values: Vec<f64> = args.iter().map(|arg| eval(arg, env, functions)).collect();
+            let saved: Vec<f64> = function.slots.iter().zip(&values).map(|(slot, value)| std::mem::replace(&mut env[*slot], *value)).collect();
             let result = eval(&function.body, env, functions);
-            env[function.slot] = saved;
+            for (slot, value) in function.slots.iter().zip(saved).rev() {
+                env[*slot] = value;
+            }
             result
         }
         Expr::Fact(arg) => factorial(eval(arg, env, functions)),

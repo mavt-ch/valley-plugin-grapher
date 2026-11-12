@@ -13,6 +13,11 @@
 //! cell it crosses. The grid reaches one cell beyond the cube and the quads are clipped to it. The mesh is kept with the
 //! sheet for the cube it was extracted in: orbiting only projects it again, zooming extracts it anew.
 //!
+//! A vector field F(x, y, z) is drawn as one arrow at the centre of each cell of a 7 × 7 × 7 lattice over the cube
+//! (343 arrows, so orbiting stays as cheap as one surface); its length is the cell's edge times the magnitude relative
+//! to the 90th percentile of the magnitudes in the cube, capped at eight tenths of the edge, so it stays inside its
+//! cell. An arrow record holds its tail and head on screen and the relative magnitude; the canvas draws the head.
+//!
 //! Records: `[kind, row or axis, shade or value, count]`, then `count` screen points `[x, y]`.
 
 use std::f64::consts::TAU;
@@ -21,13 +26,16 @@ use crate::complex::{self, C64, CExpr, CUserFn};
 use crate::eval::{Expr, UserFn, eval};
 use std::collections::HashMap;
 
-use crate::sheet::{Axis3, Height, Mesh, Plot, Sheet, Span, System, T, X, Y, Z};
+use crate::sample::percentile;
+use crate::sheet::{Axis3, Face, Height, Mesh, Plot, Sheet, Span, System, T, X, Y, Z};
 
 pub const POLYGON: f64 = 0.0;
 pub const SEGMENT: f64 = 1.0;
 pub const POINT: f64 = 2.0;
 /// A domain-coloured cell: the value is `32 · shade` rounded, plus the hue in [0, 1).
 pub const HUE_POLYGON: f64 = 3.0;
+/// An arrow of a vector field: tail and head, with the magnitude relative to the field's reference as the value.
+pub const ARROW: f64 = 4.0;
 pub const BOX: f64 = 10.0;
 pub const GRID: f64 = 11.0;
 pub const GRID_MAJOR: f64 = 12.0;
@@ -39,6 +47,10 @@ pub const AXIS_NAME: f64 = 15.0;
 const CELLS: usize = 64;
 /// Grid cells per axis of the cube for an implicit surface (see `implicit_mesh` and the timings in the lane notes).
 const IMPLICIT_CELLS: usize = 40;
+/// Arrows per axis of a 3D vector field (see the module notes).
+const FIELD_CELLS: usize = 7;
+/// The share of a lattice cell's edge the longest arrow spans.
+const FIELD_REACH: f64 = 0.8;
 /// Light direction in camera space (right, up, toward the viewer), normalized at use.
 const LIGHT: [f64; 3] = [-0.35, 0.55, 1.0];
 
@@ -202,7 +214,7 @@ fn clip_segment(a: Vec3, b: Vec3, range: f64) -> Option<(Vec3, Vec3)> {
 const CELL_EDGES: [(usize, usize); 12] = [(0, 1), (2, 3), (4, 5), (6, 7), (0, 2), (1, 3), (4, 6), (5, 7), (0, 4), (1, 5), (2, 6), (3, 7)];
 
 /// The zero set of `field` inside the cube [-range, range]³ as quads in world coordinates with their normals.
-fn implicit_mesh(env: &mut [f64], functions: &[UserFn], field: &Expr, range: f64) -> Vec<(Vec<Vec3>, Option<Vec3>)> {
+fn implicit_mesh(env: &mut [f64], functions: &[UserFn], field: &Expr, range: f64) -> Vec<Face> {
     let step = 2.0 * range / IMPLICIT_CELLS as f64;
     // One cell beyond the cube on every side, so the surface reaches the faces before it is clipped to them.
     let cells = IMPLICIT_CELLS + 2;
@@ -494,6 +506,35 @@ impl Scene<'_> {
         }
     }
 
+    /// `F(x, y, z) = (P, Q, R)`: one centred arrow per lattice cell, scaled to the field's magnitudes in the cube.
+    fn field(&mut self, row: f64, (p, q, r): (&Expr, &Expr, &Expr)) {
+        let range = self.camera.range;
+        let edge = 2.0 * range / FIELD_CELLS as f64;
+        let at = |i: usize| -range + edge * (i as f64 + 0.5);
+        let mut arrows = Vec::with_capacity(FIELD_CELLS.pow(3));
+        for k in 0..FIELD_CELLS {
+            for j in 0..FIELD_CELLS {
+                for i in 0..FIELD_CELLS {
+                    let point = [at(i), at(j), at(k)];
+                    (self.env[X], self.env[Y], self.env[Z]) = (point[0], point[1], point[2]);
+                    let value = [eval(p, self.env, self.functions), eval(q, self.env, self.functions), eval(r, self.env, self.functions)];
+                    let magnitude = dot(value, value).sqrt();
+                    if magnitude.is_finite() && magnitude > 0.0 {
+                        arrows.push((point, value.map(|v| v / magnitude), magnitude));
+                    }
+                }
+            }
+        }
+        let mut magnitudes: Vec<f64> = arrows.iter().map(|arrow| arrow.2).collect();
+        let Some(reference) = percentile(&mut magnitudes, 0.9) else { return };
+        for (point, unit, magnitude) in arrows {
+            let relative = (magnitude / reference).min(1.0);
+            let half = 0.5 * FIELD_REACH * edge * relative;
+            let reach = unit.map(|v| v * half);
+            self.push(ARROW, row, relative, &[sub(point, reach), [point[0] + reach[0], point[1] + reach[1], point[2] + reach[2]]]);
+        }
+    }
+
     fn point(&mut self, row: f64, p: Vec3) {
         if p.iter().all(|v| v.is_finite() && v.abs() <= self.camera.range) {
             self.push(POINT, row, 1.0, &[p]);
@@ -589,6 +630,7 @@ pub fn render(sheet: &mut Sheet, camera: Camera) -> Vec<f64> {
             Plot::ComplexPoint { re, im, .. } => scene.point(index, [*re, *im, 0.0]),
             Plot::CoordSurface { expr, system, given, u, v } => scene.coord_surface(index, expr, *system, *given, *u, *v),
             Plot::ParamSurface { x, y, z, u, v, slots } => scene.param_surface(index, (x, y, z), *u, *v, *slots),
+            Plot::Field3 { x, y, z } => scene.field(index, (x, y, z)),
             _ => {}
         }
     }
@@ -832,6 +874,25 @@ mod tests {
         assert!(sheet.meshes[&0].polygons.len() < quads);
         // A pole is no surface: 1/x = 0 has no zero, though 1/x changes sign across x = 0.
         assert!(records(&["1/x = 0"], small).iter().all(|r| r.kind != POLYGON));
+    }
+
+    #[test]
+    fn vector_fields_draw_one_arrow_per_lattice_cell() {
+        let found = records(&["F(x, y, z) = (-y, x, z / 4)", "(0, 0, 1 + 0z)"], CAMERA);
+        let arrows = |row: f64| found.iter().filter(move |r| r.kind == ARROW && r.row == row);
+        // The rotating field vanishes only at the centre cell (the origin); the uniform one fills every cell.
+        assert_eq!(arrows(0.0).count(), FIELD_CELLS.pow(3) - 1);
+        assert_eq!(arrows(1.0).count(), FIELD_CELLS.pow(3));
+        assert!(arrows(0.0).all(|r| r.points.len() == 2 && (0.0..=1.0).contains(&r.value)));
+        assert!(arrows(1.0).all(|r| r.value == 1.0));
+        // Seen from above, a uniform field along z projects to nothing longer than a pixel; one along x spans 0.8 of a cell.
+        let top = Camera { pitch: std::f64::consts::FRAC_PI_2, yaw: 0.0, ..CAMERA };
+        let projector = Projector::new(&top);
+        let edge = 2.0 * top.range / FIELD_CELLS as f64 * projector.scale;
+        for record in records(&["(1 + 0x, 0, 0)"], top).iter().filter(|r| r.kind == ARROW) {
+            let length = (record.points[1].0 - record.points[0].0).hypot(record.points[1].1 - record.points[0].1);
+            assert!((length - FIELD_REACH * edge).abs() < 1e-6, "{length} vs {edge}");
+        }
     }
 
     #[test]

@@ -7,8 +7,15 @@
 //! squares traces where the field crosses zero (joined into polylines), and regions are filled from whole cells plus the clipped parts of
 //! the cells their boundary passes through.
 //!
+//! A vector field is drawn as one arrow per point of a square lattice in world coordinates whose spacing is a 1, 2 or
+//! 5 × 10ⁿ step nearest to a twentieth of the view's width, so about 13 to 32 arrows cross it at any zoom and they keep
+//! their places while panning. Each arrow is centred on its lattice point; its length is the cell's width times the
+//! magnitude relative to the 90th percentile of the magnitudes in view, capped at nine tenths of the cell, so no arrow
+//! reaches into a neighbour's cell.
+//!
 //! Output is one flat `f64` stream of paths: `[row, kind, count]`, then `count` points of
-//! `[screen x, screen y, world x, world y, parameter]`.
+//! `[screen x, screen y, world x, world y, parameter]`. An arrow is two points, tail then head; the tail's parameter
+//! is the magnitude |F| and the head's the magnitude relative to the view's reference, in [0, 1].
 
 use std::f64::consts::TAU;
 
@@ -21,7 +28,16 @@ pub const LINE: f64 = 0.0;
 pub const POINT: f64 = 1.0;
 /// One filled polygon of a region.
 pub const REGION: f64 = 3.0;
+/// One arrow of a vector field.
+pub const ARROW: f64 = 4.0;
 pub const STRIDE: usize = 5;
+
+/// Lattice steps across the view's width that a vector field aims for (see the module notes).
+const ARROWS_ACROSS: f64 = 20.0;
+/// The most arrows one field draws; a taller view coarsens its lattice.
+const ARROW_BUDGET: usize = 2500;
+/// The share of a lattice cell the longest arrow spans.
+const ARROW_REACH: f64 = 0.9;
 
 const FUNCTION_DEPTH: u32 = 12;
 const CURVE_DEPTH: u32 = 10;
@@ -271,6 +287,50 @@ impl Graph<'_> {
         self.refine_curve(curve, (pm, qm), b, depth + 1);
     }
 
+    // ---- vector fields F(x, y) = (P, Q) ----
+
+    fn field(&mut self, p: &Expr, q: &Expr) {
+        let view = self.view;
+        let mut step = nice_near(view.width / (ARROWS_ACROSS * view.scale));
+        let span = |lo: f64, hi: f64, step: f64| ((lo / step).ceil() as i64, (hi / step).floor() as i64);
+        let (mut columns, mut rows) = (span(view.wx(0.0), view.wx(view.width), step), span(view.wy(view.height), view.wy(0.0), step));
+        while ((columns.1 - columns.0 + 1).max(0) * (rows.1 - rows.0 + 1).max(0)) as usize > ARROW_BUDGET {
+            step *= 2.0;
+            columns = span(view.wx(0.0), view.wx(view.width), step);
+            rows = span(view.wy(view.height), view.wy(0.0), step);
+        }
+        let mut arrows = Vec::new();
+        for j in rows.0..=rows.1 {
+            for i in columns.0..=columns.1 {
+                let (wx, wy) = (i as f64 * step, j as f64 * step);
+                self.env[X] = wx;
+                self.env[Y] = wy;
+                let (fx, fy) = (eval(p, self.env, self.functions), eval(q, self.env, self.functions));
+                let magnitude = fx.hypot(fy);
+                if magnitude.is_finite() && magnitude > 0.0 {
+                    arrows.push((wx, wy, fx / magnitude, fy / magnitude, magnitude));
+                }
+            }
+        }
+        let mut magnitudes: Vec<f64> = arrows.iter().map(|arrow| arrow.4).collect();
+        let Some(reference) = percentile(&mut magnitudes, 0.9) else { return };
+        let cell = step * view.scale;
+        for (wx, wy, ux, uy, magnitude) in arrows {
+            let relative = (magnitude / reference).min(1.0);
+            let half = 0.5 * ARROW_REACH * cell * relative;
+            if half < 1.0 {
+                continue;
+            }
+            let (sx, sy) = (view.sx(wx), view.sy(wy));
+            let (dx, dy) = (ux * half, -uy * half);
+            let world = half / view.scale;
+            self.out.begin(ARROW);
+            self.out.push(sx - dx, sy - dy, wx - ux * world, wy - uy * world, magnitude);
+            self.out.push(sx + dx, sy + dy, wx + ux * world, wy + uy * world, relative);
+            self.out.end();
+        }
+    }
+
     // ---- F(x, y) = 0 by marching squares, and the regions where F < 0 or F > 0 ----
 
     /// The field at a screen point. A complex field counts only where its value is real.
@@ -324,7 +384,7 @@ impl Graph<'_> {
     }
 
     /// The segment between the crossings on two edges; edge `e` runs from corner `e` to corner `e + 1`.
-    fn segment(&mut self, field: &Field, corners: [(f64, f64, f64); 4], from: usize, to: usize) -> Option<((f64, f64), (f64, f64))> {
+    fn segment(&mut self, field: &Field, corners: [(f64, f64, f64); 4], from: usize, to: usize) -> Option<Segment> {
         let a = self.crossing(field, corners[from], corners[(from + 1) % 4])?;
         let b = self.crossing(field, corners[to], corners[(to + 1) % 4])?;
         Some((a, b))
@@ -425,9 +485,27 @@ impl Graph<'_> {
     }
 }
 
+/// A piece of a contour line between two screen points.
+type Segment = ((f64, f64), (f64, f64));
+
+/// The 1, 2 or 5 × 10ⁿ step nearest to `raw` on a logarithmic scale.
+pub fn nice_near(raw: f64) -> f64 {
+    let base = 10_f64.powf(raw.log10().floor());
+    [1.0, 2.0, 5.0, 10.0].map(|factor| factor * base).into_iter().min_by(|a, b| (a / raw).ln().abs().total_cmp(&(b / raw).ln().abs())).unwrap_or(raw)
+}
+
+/// The value below which `share` of the finite `values` lie; `None` when there are none. Reorders `values`.
+pub fn percentile(values: &mut [f64], share: f64) -> Option<f64> {
+    if values.is_empty() {
+        return None;
+    }
+    let at = ((values.len() - 1) as f64 * share).round() as usize;
+    Some(*values.select_nth_unstable_by(at, f64::total_cmp).1)
+}
+
 /// Joins segments that share endpoints into polylines. Neighbouring cells compute a shared crossing from the same
 /// edge, so endpoints agree up to rounding; they are matched on a 1/1024-pixel grid.
-fn chain(segments: &[((f64, f64), (f64, f64))]) -> Vec<Vec<(f64, f64)>> {
+fn chain(segments: &[Segment]) -> Vec<Vec<(f64, f64)>> {
     use std::collections::HashMap;
     let key = |p: (f64, f64)| ((p.0 * 1024.0).round() as i64, (p.1 * 1024.0).round() as i64);
     let mut ends: HashMap<(i64, i64), Vec<usize>> = HashMap::new();
@@ -494,8 +572,9 @@ pub fn sample(sheet: &mut Sheet, view: View) -> Vec<f64> {
                 graph.out.end();
             }
             Plot::Implicit(field) => graph.implicit(field),
+            Plot::Field { x, y } => graph.field(x, y),
             Plot::Region { field, relation } => graph.region(field, *relation),
-            Plot::Surface { .. } | Plot::Curve3 { .. } | Plot::Point3 { .. } | Plot::ComplexSurface { .. } | Plot::CoordSurface { .. } | Plot::ParamSurface { .. } | Plot::Implicit3(_) => {}
+            Plot::Surface { .. } | Plot::Curve3 { .. } | Plot::Point3 { .. } | Plot::ComplexSurface { .. } | Plot::CoordSurface { .. } | Plot::ParamSurface { .. } | Plot::Implicit3(_) | Plot::Field3 { .. } => {}
         }
     }
     out.data
@@ -595,6 +674,37 @@ mod tests {
         assert!(sample(&mut sheet, VIEW).is_empty());
         assert_eq!(evaluate(&mut sheet, 0, 2.0), 8.0);
         assert!(evaluate(&mut sheet, 5, 2.0).is_nan());
+    }
+
+    #[test]
+    fn vector_fields_draw_centred_arrows_that_stay_in_their_cells() {
+        let found = paths(Mode::Cartesian, &["F(x, y) = (-y, x)"], VIEW);
+        assert!(found.iter().all(|path| path.kind == ARROW && path.points.len() == 2));
+        // 400 × 300 px at 20 px per unit: a twentieth of the width is one unit, so 21 × 15 lattice points, less the origin
+        // (no direction) and its four neighbours, whose arrows would be shorter than two pixels.
+        assert_eq!(found.len(), 21 * 15 - 5, "{} arrows", found.len());
+        let cell = VIEW.scale;
+        for path in &found {
+            let [tail, head] = [path.points[0], path.points[1]];
+            let (mx, my) = (0.5 * (tail[2] + head[2]), 0.5 * (tail[3] + head[3]));
+            assert!((mx - mx.round()).abs() < 1e-9 && (my - my.round()).abs() < 1e-9, "centred on the lattice");
+            let length = (head[0] - tail[0]).hypot(head[1] - tail[1]);
+            assert!(length <= ARROW_REACH * cell + 1e-9, "{length}");
+            // Perpendicular to the position: (−y, x) turns counter-clockwise.
+            assert!(((head[2] - tail[2]) * mx + (head[3] - tail[3]) * my).abs() < 1e-9);
+            assert!((0.0..=1.0).contains(&head[4]) && (tail[4] - mx.hypot(my)).abs() < 1e-9);
+        }
+        // A uniform field draws every arrow at full length, and zooming out keeps the count about the same.
+        let uniform = paths(Mode::Cartesian, &["(1, 0.5)"], VIEW);
+        assert!(uniform.len() == 1 && uniform[0].kind == POINT, "a pair of numbers stays a point");
+        let uniform = paths(Mode::Cartesian, &["(1 + 0x, 0)"], VIEW);
+        assert!(uniform.iter().all(|path| ((path.points[1][0] - path.points[0][0]) - ARROW_REACH * cell).abs() < 1e-9));
+        let wide = paths(Mode::Cartesian, &["(1 + 0x, 0)"], View { scale: 0.2, ..VIEW });
+        assert_eq!(wide.len(), uniform.len());
+        assert_eq!(nice_near(0.7), 0.5);
+        assert_eq!(nice_near(1.5), 2.0);
+        assert_eq!(nice_near(3.0), 2.0);
+        assert_eq!(nice_near(8.0), 10.0);
     }
 
     #[test]

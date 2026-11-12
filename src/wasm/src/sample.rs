@@ -470,7 +470,7 @@ pub fn sample(sheet: &mut Sheet, view: View) -> Vec<f64> {
     if !view.valid() {
         return out.data;
     }
-    let Sheet { env, functions, cenv, cfunctions, rows } = sheet;
+    let Sheet { env, functions, cenv, cfunctions, rows, .. } = sheet;
     for (index, row) in rows.iter().enumerate() {
         let Some(plot) = row.plot().filter(|_| !row.hidden) else { continue };
         out.row = index as f64;
@@ -495,7 +495,7 @@ pub fn sample(sheet: &mut Sheet, view: View) -> Vec<f64> {
             }
             Plot::Implicit(field) => graph.implicit(field),
             Plot::Region { field, relation } => graph.region(field, *relation),
-            Plot::Surface { .. } | Plot::Curve3 { .. } | Plot::Point3 { .. } | Plot::ComplexSurface { .. } | Plot::CoordSurface { .. } | Plot::ParamSurface { .. } => {}
+            Plot::Surface { .. } | Plot::Curve3 { .. } | Plot::Point3 { .. } | Plot::ComplexSurface { .. } | Plot::CoordSurface { .. } | Plot::ParamSurface { .. } | Plot::Implicit3(_) => {}
         }
     }
     out.data

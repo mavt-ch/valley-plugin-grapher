@@ -6,7 +6,7 @@
 //! `definition name` · `polar from to` · `curve from to` · `point x y` · `implicit` · `surface x|y|z` ·
 //! `curve3 from to` · `point3 x y z` · `region strict|loose` · `cpoint re im name` · `csurface modulus|real` ·
 //! `coords given u v ufrom uto vfrom vto` (a surface in curvilinear coordinates; the names are its coordinates) ·
-//! `psurface ufrom uto vfrom vto` (a parametric surface in u and v).
+//! `psurface ufrom uto vfrom vto` (a parametric surface in u and v) · `implicit3` (a surface F(x, y, z) = 0).
 
 use crate::sheet::{Outcome, Plot, RowInput, Sheet};
 
@@ -61,6 +61,7 @@ pub fn write_outcomes(sheet: &Sheet) -> String {
                 Outcome::Plotted(Plot::Curve3 { from, to, .. }) => vec!["curve3".into(), number(*from), number(*to)],
                 Outcome::Plotted(Plot::Point3 { x, y, z }) => vec!["point3".into(), number(*x), number(*y), number(*z)],
                 Outcome::Plotted(Plot::ComplexSurface { height, .. }) => vec!["csurface".into(), height.name().into()],
+                Outcome::Plotted(Plot::Implicit3(_)) => vec!["implicit3".into()],
                 Outcome::Plotted(Plot::ParamSurface { u, v, .. }) => vec!["psurface".into(), number(u.0), number(u.1), number(v.0), number(v.1)],
                 Outcome::Plotted(Plot::CoordSurface { system, given, u, v, .. }) => {
                     let names = system.names();

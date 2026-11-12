@@ -148,6 +148,20 @@ describe('the graph tab', () => {
     expect(container.querySelector('.grapher-hint')?.textContent).toContain('A triple in u and v is a surface, in t a curve')
   })
 
+  it('draws an equation in x, y and z as an implicit surface with a colour swatch and no range rows', async () => {
+    mount()
+    const { container } = render(<><Sidebar /><GraphTab /></>)
+    await pick('3D')
+    await screen.findByDisplayValue('z = (x^2 + y^2) / 5 - 6')
+    const inputs = screen.getAllByRole('textbox', { name: /Expression/ })
+    fireEvent.change(inputs[inputs.length - 1], { target: { value: 'x^2 + y^2 + z^2 = 16' } })
+    const sphere = (await screen.findAllByRole('listitem'))[2]
+    await waitFor(() => expect(sphere.getAttribute('data-kind')).toBe('implicit3'))
+    expect(within(sphere).getByRole('button', { name: 'Hide graph' })).toBeTruthy()
+    expect(within(sphere).queryByRole('textbox', { name: /^Start of/ })).toBeNull()
+    expect(container.querySelector('.grapher-hint')?.textContent).toContain('implicit surface F(x, y, z) = 0')
+  })
+
   it('draws cylindrical surfaces with a range row for each of their two coordinates', async () => {
     const mock = mount()
     const { container } = render(<><Sidebar /><GraphTab /></>)

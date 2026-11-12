@@ -11,7 +11,7 @@ import { getStore, useGrapher } from './store'
 import { formatComplex, formatNumber, formatPolar } from './ticks'
 import { viewOf } from './views'
 
-const DRAWN = new Set(['function', 'polar', 'curve', 'point', 'implicit', 'surface', 'curve3', 'point3', 'region', 'cpoint', 'csurface', 'coords', 'psurface'])
+const DRAWN = new Set(['function', 'polar', 'curve', 'point', 'implicit', 'surface', 'curve3', 'point3', 'region', 'cpoint', 'csurface', 'coords', 'psurface', 'implicit3'])
 
 /** The row whose input takes focus on its next render (after Enter adds a row or Backspace removes one). */
 let pendingFocus: string | null = null

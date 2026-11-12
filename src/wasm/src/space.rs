@@ -5,7 +5,13 @@
 //!
 //! The complex 3D sheet uses the same frame with the complex plane as the floor: `w = f(z)` rises to |f(z)| and
 //! each cell is coloured by arg f(z). Surfaces in cylindrical or spherical coordinates are sampled over their two parameter
-//! coordinates, converted to (x, y, z) and clipped to the cube on all three axes.
+//! coordinates, converted to (x, y, z) and clipped to the cube on all three axes; parametric surfaces likewise over u and v.
+//!
+//! An implicit surface F(x, y, z) = 0 is extracted from a grid over the cube by surface nets, the dual form of marching
+//! cubes: each grid cell the surface passes through gets one vertex (the mean of the zero crossings on its edges) and
+//! each grid edge with a sign change one quad joining the four cells around it, so the mesh has about one quad per
+//! cell it crosses. The grid reaches one cell beyond the cube and the quads are clipped to it. The mesh is kept with the
+//! sheet for the cube it was extracted in: orbiting only projects it again, zooming extracts it anew.
 //!
 //! Records: `[kind, row or axis, shade or value, count]`, then `count` screen points `[x, y]`.
 
@@ -13,7 +19,9 @@ use std::f64::consts::TAU;
 
 use crate::complex::{self, C64, CExpr, CUserFn};
 use crate::eval::{Expr, UserFn, eval};
-use crate::sheet::{Axis3, Height, Plot, Sheet, Span, System, T, X, Y, Z};
+use std::collections::HashMap;
+
+use crate::sheet::{Axis3, Height, Mesh, Plot, Sheet, Span, System, T, X, Y, Z};
 
 pub const POLYGON: f64 = 0.0;
 pub const SEGMENT: f64 = 1.0;
@@ -29,6 +37,8 @@ pub const AXIS_NAME: f64 = 15.0;
 
 /// Grid cells per surface axis.
 const CELLS: usize = 64;
+/// Grid cells per axis of the cube for an implicit surface (see `implicit_mesh` and the timings in the lane notes).
+const IMPLICIT_CELLS: usize = 40;
 /// Light direction in camera space (right, up, toward the viewer), normalized at use.
 const LIGHT: [f64; 3] = [-0.35, 0.55, 1.0];
 
@@ -188,6 +198,109 @@ fn clip_segment(a: Vec3, b: Vec3, range: f64) -> Option<(Vec3, Vec3)> {
     Some((lerp(a, b, t0), lerp(a, b, t1)))
 }
 
+/// The corner pairs of the twelve edges of a grid cell; corner `c` sits at +1 along x, y, z for bits 0, 1, 2.
+const CELL_EDGES: [(usize, usize); 12] = [(0, 1), (2, 3), (4, 5), (6, 7), (0, 2), (1, 3), (4, 6), (5, 7), (0, 4), (1, 5), (2, 6), (3, 7)];
+
+/// The zero set of `field` inside the cube [-range, range]³ as quads in world coordinates with their normals.
+fn implicit_mesh(env: &mut [f64], functions: &[UserFn], field: &Expr, range: f64) -> Vec<(Vec<Vec3>, Option<Vec3>)> {
+    let step = 2.0 * range / IMPLICIT_CELLS as f64;
+    // One cell beyond the cube on every side, so the surface reaches the faces before it is clipped to them.
+    let cells = IMPLICIT_CELLS + 2;
+    let points = cells + 1;
+    let at = |i: usize| -range - step + step * i as f64;
+    let mut value = |p: Vec3| {
+        (env[X], env[Y], env[Z]) = (p[0], p[1], p[2]);
+        eval(field, env, functions)
+    };
+    let mut grid = Vec::with_capacity(points * points * points);
+    for k in 0..points {
+        for j in 0..points {
+            for i in 0..points {
+                grid.push(value([at(i), at(j), at(k)]));
+            }
+        }
+    }
+    let point = |i: usize, j: usize, k: usize| (k * points + j) * points + i;
+    let negative = |v: f64| v < 0.0;
+    // The vertex of each cell the surface passes through, by index into `vertices`.
+    let mut vertex_of = vec![u32::MAX; cells * cells * cells];
+    let mut vertices: Vec<Vec3> = Vec::new();
+    for k in 0..cells {
+        for j in 0..cells {
+            for i in 0..cells {
+                let corner = |c: usize| {
+                    let (a, b, d) = (i + (c & 1), j + ((c >> 1) & 1), k + ((c >> 2) & 1));
+                    ([at(a), at(b), at(d)], grid[point(a, b, d)])
+                };
+                let corners: [(Vec3, f64); 8] = std::array::from_fn(corner);
+                if corners.iter().any(|c| !c.1.is_finite()) {
+                    continue;
+                }
+                let below = corners.iter().filter(|c| negative(c.1)).count();
+                if below == 0 || below == 8 {
+                    continue;
+                }
+                let mut sum = [0.0; 3];
+                let mut count = 0.0;
+                for (a, b) in CELL_EDGES {
+                    let ((pa, va), (pb, vb)) = (corners[a], corners[b]);
+                    if negative(va) == negative(vb) {
+                        continue;
+                    }
+                    let crossing = lerp(pa, pb, va / (va - vb));
+                    // At a pole |F| grows towards the crossing instead of vanishing there.
+                    if value(crossing).abs() > va.abs() + vb.abs() {
+                        continue;
+                    }
+                    sum = [sum[0] + crossing[0], sum[1] + crossing[1], sum[2] + crossing[2]];
+                    count += 1.0;
+                }
+                if count > 0.0 {
+                    vertex_of[(k * cells + j) * cells + i] = vertices.len() as u32;
+                    vertices.push([sum[0] / count, sum[1] / count, sum[2] / count]);
+                }
+            }
+        }
+    }
+    let cell = |c: [usize; 3]| vertex_of[(c[2] * cells + c[1]) * cells + c[0]];
+    let mut polygons = Vec::new();
+    for axis in 0..3 {
+        let (b, c) = ((axis + 1) % 3, (axis + 2) % 3);
+        for k in 0..points {
+            for j in 0..points {
+                for i in 0..points {
+                    let p = [i, j, k];
+                    // The edge from p one step along `axis`, with a cell on each of its four sides.
+                    if p[axis] >= cells || p[b] == 0 || p[b] >= cells || p[c] == 0 || p[c] >= cells {
+                        continue;
+                    }
+                    let mut q = p;
+                    q[axis] += 1;
+                    let (va, vb) = (grid[point(p[0], p[1], p[2])], grid[point(q[0], q[1], q[2])]);
+                    if !va.is_finite() || !vb.is_finite() || negative(va) == negative(vb) {
+                        continue;
+                    }
+                    let around = [(1, 1), (0, 1), (0, 0), (1, 0)].map(|(db, dc)| {
+                        let mut n = p;
+                        n[b] -= db;
+                        n[c] -= dc;
+                        cell(n)
+                    });
+                    if around.contains(&u32::MAX) {
+                        continue;
+                    }
+                    let quad = around.map(|index| vertices[index as usize]);
+                    let clipped = clip_cube(&quad, &[0, 1, 2], range);
+                    if clipped.len() >= 3 {
+                        polygons.push((clipped, normalize(cross(sub(quad[2], quad[0]), sub(quad[3], quad[1])))));
+                    }
+                }
+            }
+        }
+    }
+    polygons
+}
+
 struct Scene<'a> {
     camera: Camera,
     projector: Projector,
@@ -195,6 +308,7 @@ struct Scene<'a> {
     functions: &'a [UserFn],
     cenv: &'a mut [C64],
     cfunctions: &'a [CUserFn],
+    meshes: &'a mut HashMap<usize, Mesh>,
     items: Vec<Item>,
 }
 
@@ -276,6 +390,26 @@ impl Scene<'_> {
         self.mesh(row, &grid, &[0, 1, 2], None);
     }
 
+    /// `F(x, y, z) = 0`: the row's mesh for this cube, extracted once and projected on every frame.
+    fn implicit(&mut self, row: usize, field: &Expr) {
+        let range = self.camera.range;
+        let mesh = match self.meshes.remove(&row) {
+            Some(mesh) if mesh.range == range => mesh,
+            _ => Mesh { range, polygons: implicit_mesh(self.env, self.functions, field, range) },
+        };
+        for (polygon, normal) in &mesh.polygons {
+            let shade = self.shade(*normal);
+            self.push(POLYGON, row as f64, shade, polygon);
+        }
+        self.meshes.insert(row, mesh);
+    }
+
+    /// The brightness of a face by its normal, lit from the upper left front; either side faces the light alike.
+    fn shade(&self, normal: Option<Vec3>) -> f64 {
+        let light = normalize(LIGHT).unwrap_or([0.0, 0.0, 1.0]);
+        normal.map_or(0.6, |n| 0.3 + 0.7 * dot(normalize(self.projector.view(n)).unwrap_or(n), light).abs())
+    }
+
     /// `w = f(z)` over the complex plane, one hue per cell from arg of `hue` at the cell's centre.
     fn complex_surface(&mut self, row: f64, expr: &CExpr, hue: &CExpr, height: Height) {
         let range = self.camera.range;
@@ -317,7 +451,6 @@ impl Scene<'_> {
     fn mesh(&mut self, row: f64, grid: &[Vec3], axes: &[usize], hues: Option<&[f64]>) {
         let range = self.camera.range;
         let stride = CELLS + 1;
-        let light = normalize(LIGHT).unwrap_or([0.0, 0.0, 1.0]);
         for j in 0..CELLS {
             for i in 0..CELLS {
                 let quad = [grid[j * stride + i], grid[j * stride + i + 1], grid[(j + 1) * stride + i + 1], grid[(j + 1) * stride + i]];
@@ -332,8 +465,7 @@ impl Scene<'_> {
                 if clipped.len() < 3 {
                     continue;
                 }
-                let normal = normalize(cross(sub(quad[2], quad[0]), sub(quad[3], quad[1])));
-                let shade = normal.map_or(0.6, |n| 0.3 + 0.7 * dot(normalize(self.projector.view(n)).unwrap_or(n), light).abs());
+                let shade = self.shade(normalize(cross(sub(quad[2], quad[0]), sub(quad[3], quad[1]))));
                 match hues {
                     Some(hues) => self.push(HUE_POLYGON, row, (shade * 32.0).round() + hues[j * CELLS + i], &clipped),
                     None => self.push(POLYGON, row, shade, &clipped),
@@ -431,7 +563,7 @@ pub fn render(sheet: &mut Sheet, camera: Camera) -> Vec<f64> {
     }
     let projector = Projector::new(&camera);
     frame(&mut out, &camera, &projector);
-    let Sheet { env, functions, cenv, cfunctions, rows } = sheet;
+    let Sheet { env, functions, cenv, cfunctions, rows, meshes } = sheet;
     let mut scene = Scene {
         camera,
         projector,
@@ -439,10 +571,15 @@ pub fn render(sheet: &mut Sheet, camera: Camera) -> Vec<f64> {
         functions: functions.as_slice(),
         cenv: cenv.as_mut_slice(),
         cfunctions: cfunctions.as_slice(),
+        meshes,
         items: Vec::new(),
     };
     for (index, row) in rows.iter().enumerate() {
         let Some(plot) = row.plot().filter(|_| !row.hidden) else { continue };
+        if let Plot::Implicit3(field) = plot {
+            scene.implicit(index, field);
+            continue;
+        }
         let index = index as f64;
         match plot {
             Plot::Surface { expr, axis } => scene.surface(index, expr, *axis),
@@ -656,6 +793,45 @@ mod tests {
                 assert!((x - cx).abs() <= half + 1e-6 && (y - cy).abs() <= half + 1e-6, "{x}, {y}");
             }
         }
+    }
+
+    #[test]
+    fn implicit_surfaces_are_extracted_shaded_and_kept_for_orbiting() {
+        let small = Camera { range: 4.0, ..CAMERA };
+        let texts = ["x^2 + y^2 + z^2 = 4", "x^2 + y^2 = z^2", "x^2/4 + y^2 + z^2/9 = 1", "x^2 + y^2 - z^2 = 1", "z^2 - x^2 - y^2 = 1", "z = x y / 4"];
+        let found = records(&texts, small);
+        for row in 0..5 {
+            let polygons: Vec<&Record> = found.iter().filter(|r| r.kind == POLYGON && r.row == row as f64).collect();
+            assert!(polygons.len() > 300, "row {row}: {}", polygons.len());
+            assert!(polygons.iter().all(|p| (0.3..=1.0).contains(&p.value) && p.points.len() >= 3));
+        }
+        // The explicit row keeps the grid path: one cell per grid square.
+        assert_eq!(found.iter().filter(|r| r.kind == POLYGON && r.row == 5.0).count(), CELLS * CELLS);
+        // Seen from above, the sphere of radius 2 fills the disc of radius 2, and the cone, cut by the cube, its square.
+        let top = Camera { pitch: std::f64::consts::FRAC_PI_2, yaw: 0.0, ..small };
+        let projector = Projector::new(&top);
+        let (cx, cy, _) = projector.screen([0.0, 0.0, 0.0]);
+        let mut farthest: f64 = 0.0;
+        for record in records(&["x^2 + y^2 + z^2 = 4"], top).iter().filter(|r| r.kind == POLYGON) {
+            for (x, y) in &record.points {
+                farthest = farthest.max(((x - cx).powi(2) + (y - cy).powi(2)).sqrt() / projector.scale);
+            }
+        }
+        assert!((farthest - 2.0).abs() < 0.05, "{farthest}");
+        let cone = records(&["x^2 + y^2 = z^2"], top);
+        let half = 4.0 * projector.scale;
+        assert!(cone.iter().filter(|r| r.kind == POLYGON).all(|r| r.points.iter().all(|(x, y)| (x - cx).abs() <= half + 1e-6 && (y - cy).abs() <= half + 1e-6)));
+        // The mesh is extracted once per cube: orbiting reuses it, zooming replaces it.
+        let inputs = [RowInput { text: "x^2 + y^2 + z^2 = 4".into(), ..RowInput::default() }];
+        let mut sheet = analyze(Mode::Space, &inputs);
+        let first = render(&mut sheet, small).len();
+        let quads = sheet.meshes[&0].polygons.len();
+        assert!(render(&mut sheet, Camera { yaw: 1.0, ..small }).len() == first && sheet.meshes[&0].polygons.len() == quads);
+        render(&mut sheet, Camera { range: 8.0, ..small });
+        assert_eq!(sheet.meshes[&0].range, 8.0);
+        assert!(sheet.meshes[&0].polygons.len() < quads);
+        // A pole is no surface: 1/x = 0 has no zero, though 1/x changes sign across x = 0.
+        assert!(records(&["1/x = 0"], small).iter().all(|r| r.kind != POLYGON));
     }
 
     #[test]

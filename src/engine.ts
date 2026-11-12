@@ -9,7 +9,7 @@ export { STRIDE }
 const MODULE_ID = 'plot'
 const RECORD = '\u001e'
 const FIELD = '\u001f'
-export type RowKind = 'empty' | 'error' | 'param' | 'value' | 'function' | 'definition' | 'polar' | 'curve' | 'point' | 'implicit' | 'surface' | 'curve3' | 'point3' | 'region' | 'cpoint' | 'csurface' | 'coords' | 'psurface'
+export type RowKind = 'empty' | 'error' | 'param' | 'value' | 'function' | 'definition' | 'polar' | 'curve' | 'point' | 'implicit' | 'surface' | 'curve3' | 'point3' | 'region' | 'cpoint' | 'csurface' | 'coords' | 'psurface' | 'implicit3'
 
 export interface RowError {
   key: string
@@ -123,7 +123,8 @@ export function decodeOutcomes(text: string, count: number): RowAnalysis[] {
       case 'polar':
       case 'curve': return { kind, from: Number(a), to: Number(b) }
       case 'point': return { kind, x: Number(a), y: Number(b) }
-      case 'implicit': return { kind }
+      case 'implicit':
+      case 'implicit3': return { kind }
       default: return { kind: 'empty' }
     }
   })

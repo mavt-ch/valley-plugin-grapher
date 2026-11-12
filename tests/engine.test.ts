@@ -158,6 +158,24 @@ describe('the plot kernel through api.wasm', () => {
     }
   })
 
+  it('reads other equations in x, y and z as implicit surfaces and keeps explicit ones on the grid', () => {
+    const rows = sheet('x^2 + y^2 + z^2 = 4', 'x^2 + y^2 = z^2', 'x^2/4 + y^2 + z^2/9 = 1', 'x^2 + y^2 - z^2 = 1', 'z^2 - x^2 - y^2 = 1', 'z = x y / 4', 'x^2 + y^2 + z^2 < 4', 'x^2 + y^2 = k')
+    const analyses = engine.analyze('space', rows)
+    expect(analyses.map((row) => row.kind)).toEqual(['implicit3', 'implicit3', 'implicit3', 'implicit3', 'implicit3', 'surface', 'error', 'error'])
+    expect(analyses[7].error).toMatchObject({ key: 'error.unknown', missing: ['k'] })
+    const camera = { yaw: -0.6, pitch: 0.45, range: 4 }
+    const records = engine.space('space', rows, 600, 400, camera)
+    for (const row of [0, 1, 2, 3, 4]) expect(records.filter((record) => record.kind === SPACE.polygon && record.row === row).length).toBeGreaterThan(300)
+    expect(records.filter((record) => record.kind === SPACE.polygon && record.row === 5).length).toBe(64 * 64)
+    for (const record of records) for (let i = 0; i < record.points.length; i += 2) {
+      expect(record.points[i]).toBeGreaterThanOrEqual(0)
+      expect(record.points[i]).toBeLessThanOrEqual(600)
+    }
+    // Orbiting projects the same surfaces again; depth order puts the far side first.
+    const orbited = engine.space('space', rows, 600, 400, { ...camera, yaw: 0.9 })
+    expect(orbited.filter((record) => record.kind === SPACE.polygon).length).toBe(records.filter((record) => record.kind === SPACE.polygon).length)
+  })
+
   it('reads cylindrical rows with two ranges and draws them inside the cube', () => {
     const rows = sheet('r = 2', 'z = r^2', { text: 'r = 1 + cos(phi)', from: '0', to: 'π', from2: '-1', to2: '2' }, 'z = φ / 2', 'rho = theta', '(1, 0, 2)', 'a = 3', 'x = 1', { text: 'r = 2', from2: 'q' })
     const analyses = engine.analyze('cylindrical', rows)

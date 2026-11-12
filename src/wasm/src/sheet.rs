@@ -212,6 +212,8 @@ pub enum Plot {
     Curve3 { x: Expr, y: Expr, z: Expr, from: f64, to: f64 },
     /// `(x(u, v), y(u, v), z(u, v))`: `u` and `v` are the parameter ranges, `slots` the env slots of u and v.
     ParamSurface { x: Expr, y: Expr, z: Expr, u: (f64, f64), v: (f64, f64), slots: [usize; 2] },
+    /// `F(x, y, z) = 0` on the 3D sheet, any equation in x, y and z that is not an explicit surface: `left - right`.
+    Implicit3(Expr),
     Point3 { x: f64, y: f64, z: f64 },
     /// `w = f(z)` over the complex plane: the height is |f(z)|, or the value itself when the row is real-valued
     /// (`Re(z^2) / 5`), and `hue` is the complex value whose argument colours the surface.
@@ -302,6 +304,16 @@ pub struct Sheet {
     pub cenv: Vec<C64>,
     pub cfunctions: Vec<CUserFn>,
     pub rows: Vec<Row>,
+    /// Implicit 3D surfaces already extracted, per row, for the cube they were extracted in (see `space`).
+    pub meshes: HashMap<usize, Mesh>,
+}
+
+/// The polygons of an implicit surface in world coordinates with their normals, extracted for the cube [-range, range]³;
+/// orbiting reuses them, zooming extracts them again.
+#[derive(Clone, Debug, Default)]
+pub struct Mesh {
+    pub range: f64,
+    pub polygons: Vec<(Vec<[f64; 3]>, Option<[f64; 3]>)>,
 }
 
 fn is_reserved(name: &str) -> bool {
@@ -863,6 +875,12 @@ impl Analysis<'_> {
                         return surface(self, left, axis);
                     }
                 }
+                // Any other equation in x, y and z is the zero set of left − right.
+                let space = ["x", "y", "z"];
+                if only(left, &space) && only(right, &space) && !(variables(left).is_empty() && variables(right).is_empty()) {
+                    let difference = Node::Bin(BinOp::Sub, Box::new(left.clone()), Box::new(right.clone()));
+                    return Ok(Outcome::Plotted(Plot::Implicit3(self.compile(&difference, &|name| space.contains(&name) || !is_reserved(name))?)));
+                }
                 Err(MathError::new("error.unsupported", ""))
             }
         }
@@ -1016,7 +1034,7 @@ pub fn analyze(mode: Mode, inputs: &[RowInput]) -> Sheet {
         };
         rows.push(Row { outcome, hidden: input.hidden });
     }
-    Sheet { env: analysis.env, functions: analysis.functions, cenv: analysis.cenv, cfunctions: analysis.cfunctions, rows }
+    Sheet { env: analysis.env, functions: analysis.functions, cenv: analysis.cenv, cfunctions: analysis.cfunctions, rows, meshes: HashMap::new() }
 }
 
 #[cfg(test)]
@@ -1146,8 +1164,34 @@ mod tests {
         assert!(matches!(sheet.rows[4].plot(), Some(Plot::Curve3 { .. })));
         assert!(matches!(sheet.rows[5].plot(), Some(Plot::Point3 { x, y, z }) if (*x, *y, *z) == (1.0, 2.0, 3.0)));
         assert_eq!(error(&sheet, 6).key, "error.triple");
-        assert_eq!(error(&sheet, 7).key, "error.unsupported");
+        assert!(matches!(sheet.rows[7].plot(), Some(Plot::Implicit3(_))));
         assert!(matches!(sheet.rows[8].outcome, Outcome::Value(value) if value == 7.0));
+    }
+
+    #[test]
+    fn other_equations_in_x_y_and_z_are_implicit_surfaces() {
+        let mut sheet = sheet(Mode::Space, &[
+            "x^2 + y^2 + z^2 = 4", "x^2 + y^2 = z^2", "x^2/4 + y^2 + z^2/9 = 1", "x^2 + y^2 - z^2 = 1", "z^2 - x^2 - y^2 = 1", "x^2 + y^2 = k", "k = 2",
+            "z = x y", "x = y^2 + z^2", "y = 3", "x y z = 1", "x^2 + y^2 + z^2 < 4", "x + t = 1", "1 = 2", "x^2 + y^2 + z^2",
+        ]);
+        for row in [0, 1, 2, 3, 4, 5, 10] {
+            assert!(matches!(sheet.rows[row].plot(), Some(Plot::Implicit3(_))), "row {row}: {:?}", sheet.rows[row].outcome);
+        }
+        // Explicit surfaces keep their faster path.
+        assert!(matches!(sheet.rows[7].plot(), Some(Plot::Surface { axis: Axis3::Z, .. })));
+        assert!(matches!(sheet.rows[8].plot(), Some(Plot::Surface { axis: Axis3::X, .. })));
+        assert!(matches!(sheet.rows[9].plot(), Some(Plot::Surface { axis: Axis3::Y, .. })));
+        for row in [11, 12, 13, 14] {
+            assert_eq!(error(&sheet, row).key, "error.unsupported", "row {row}");
+        }
+        let Some(Plot::Implicit3(field)) = sheet.rows[0].plot().cloned() else { unreachable!() };
+        (sheet.env[X], sheet.env[Y], sheet.env[Z]) = (2.0, 0.0, 0.0);
+        assert_eq!(eval(&field, &mut sheet.env, &sheet.functions), 0.0);
+        let Some(Plot::Implicit3(field)) = sheet.rows[5].plot().cloned() else { unreachable!() };
+        (sheet.env[X], sheet.env[Y]) = (1.0, 1.0);
+        assert_eq!(eval(&field, &mut sheet.env, &sheet.functions), 0.0);
+        // Equations in x, y, z stay unsupported on the other 3D sheets.
+        assert_eq!(error(&self::sheet(Mode::Cylindrical, &["x^2 + y^2 + z^2 = 4"]), 0).key, "error.unsupported");
     }
 
     #[test]

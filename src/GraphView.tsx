@@ -275,7 +275,7 @@ export const GraphTab = ({ instanceId }: { instanceId?: string }): ReactElement 
       </div>
       {engineProblem ? <p role="alert" className="grapher-alert">{uiText('problem.engine', { message: engineProblem.message })}</p> : null}
       <div className="grapher-stage">
-        {view.canvas === 'space' ? <SpaceCanvas view={view} rows={rows} engine={engine} graph={id} /> : <GraphCanvas key={view.id} view={view} units={unitsOf(graph, mode) ?? view.units} rows={rows} analyses={analyses} engine={engine} graph={id} />}
+        {view.canvas === 'space' ? <SpaceCanvas view={view} rows={rows} engine={engine} graph={id} units={unitsOf(graph, mode)} /> : <GraphCanvas key={view.id} view={view} units={unitsOf(graph, mode)} rows={rows} analyses={analyses} engine={engine} graph={id} />}
       </div>
     </div>
   )

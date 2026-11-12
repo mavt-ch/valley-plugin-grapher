@@ -64,7 +64,7 @@ describe('sheets', () => {
     expect(own.mode).toBe('polar')
     expect(unitsOf(own, 'cartesian')).toBe('decimal')
     expect(unitsOf(own, 'polar')).toBe('decimal')
-    expect(unitsOf(own, 'space')).toBeNull()
+    expect(unitsOf(own, 'space')).toBe('decimal')
     expect(own.sheets.cartesian.map((entry) => entry.text)).toEqual(['y = x', 'tan x', ''])
     expect(new Set(own.sheets.cartesian.map((entry) => entry.id)).size).toBe(3)
   })

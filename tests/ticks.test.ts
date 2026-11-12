@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { decimalAxis, decimalStep, formatComplex, formatImaginary, formatNumber, formatPi, formatPolar, piAxis } from '../src/ticks'
+import { decimalAxis, decimalStep, formatComplex, formatImaginary, formatNumber, formatPi, formatPolar, piAxis, piTicks } from '../src/ticks'
 
 describe('axis ticks', () => {
+  it('labels a 3D axis in multiples of π near the decimal spacing', () => {
+    expect(piTicks(10, 5).map((label) => label.text)).toEqual(['−3π', '−2π', '−π', 'π', '2π', '3π'])
+    expect(piTicks(1, 0.5).map((label) => label.text)).toEqual(['−π/6', 'π/6'])
+  })
+
   it('steps decimal axes by 1, 2 and 5', () => {
     expect(decimalStep(20)).toEqual({ major: 5, divisions: 5 })
     expect(decimalStep(35)).toEqual({ major: 2, divisions: 4 })

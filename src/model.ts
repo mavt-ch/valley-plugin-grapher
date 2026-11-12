@@ -104,10 +104,10 @@ export function withGraph(document: GrapherDocument, id: string, graph: Graph): 
   return id === MAIN_GRAPH ? { ...document, mode, sheets, units } : { ...document, graphs: { ...document.graphs, [id]: { mode, sheets, units } } }
 }
 
-/** The axis labels a plane view shows: the user's choice, else the view's default; 3D views have none. */
-export function unitsOf(graph: Graph, mode: Mode): AxisUnits | null {
+/** The axis labels a view shows: the user's choice, else the view's default (decimal for 3D views). */
+export function unitsOf(graph: Graph, mode: Mode): AxisUnits {
   const view = viewOf(mode)
-  return view.canvas === 'plane' ? graph.units[mode] ?? view.units : null
+  return graph.units[mode] ?? (view.canvas === 'plane' ? view.units : 'decimal')
 }
 
 /** Moves the row at `from` into the gap before row `to` (gaps 0…length); other rows keep their order. */

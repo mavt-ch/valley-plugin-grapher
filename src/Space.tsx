@@ -6,7 +6,8 @@ import { Fit, Minus, Plus } from './icons'
 import { uiText } from './localization'
 import type { Row } from './model'
 import { cameraKey, getStore } from './store'
-import { formatNumber } from './ticks'
+import { formatNumber, piTicks } from './ticks'
+import type { AxisUnits } from './model'
 import type { SpaceView } from './views'
 
 /** x towards the lower right, y towards the upper right, z up, the cube [-10, 10]³ in view. */
@@ -49,7 +50,7 @@ export function hueFill(value: number): string {
   return `hsl(${Math.round(hue * 360)}, 70%, ${Math.round(18 + shade * 46)}%)`
 }
 
-export function drawSpace(ctx: CanvasRenderingContext2D, records: readonly SpaceRecord[], colors: readonly string[], size: Size, theme: Theme, axisNames: readonly string[] = ['x', 'y', 'z']): void {
+export function drawSpace(ctx: CanvasRenderingContext2D, records: readonly SpaceRecord[], colors: readonly string[], size: Size, theme: Theme, axisNames: readonly string[] = ['x', 'y', 'z'], units: AxisUnits = 'decimal', range = HOME_CAMERA.range): void {
   ctx.fillStyle = theme.background
   ctx.fillRect(0, 0, size.width, size.height)
   ctx.lineJoin = 'round'
@@ -91,7 +92,30 @@ export function drawSpace(ctx: CanvasRenderingContext2D, records: readonly Space
     }
   }
   ctx.font = theme.font
+  const label = (text: string, x: number, y: number, name: boolean): void => {
+    ctx.font = name ? `600 13px ${theme.font.replace(/^\S+\s+/, '')}` : theme.font
+    ctx.textAlign = name ? 'center' : 'left'
+    ctx.textBaseline = name ? 'middle' : 'top'
+    ctx.lineWidth = 3
+    ctx.strokeStyle = theme.background
+    ctx.strokeText(text, x, y)
+    ctx.fillStyle = theme.label
+    ctx.fillText(text, x, y)
+  }
+  // The projection is orthographic, so a value's place on an axis is a straight interpolation between its ends.
+  const decimalSpacing = records.filter((record) => record.kind === SPACE.tick && record.value > 0).reduce((least, record) => Math.min(least, record.value), Infinity)
+  const pi = units === 'pi' ? piTicks(range, Number.isFinite(decimalSpacing) ? decimalSpacing : range / 2) : null
   for (const record of records) {
+    if (record.kind === SPACE.axis && pi && record.points.length >= 4) {
+      const [ax, ay, bx, by] = record.points
+      for (const tick of pi) {
+        const t = (tick.value + range) / (2 * range)
+        label(tick.text, ax + (bx - ax) * t + 4, ay + (by - ay) * t + 3, false)
+      }
+    }
+  }
+  for (const record of records) {
+    if (record.kind === SPACE.tick && pi) continue
     if (record.kind === SPACE.axis) {
       ctx.lineWidth = 1.5
       ctx.strokeStyle = theme.axis
@@ -100,16 +124,7 @@ export function drawSpace(ctx: CanvasRenderingContext2D, records: readonly Space
     } else if (record.kind === SPACE.tick || record.kind === SPACE.axisName) {
       const name = record.kind === SPACE.axisName
       const text = name ? axisNames[record.row] ?? '' : formatNumber(record.value, 6)
-      ctx.font = name ? `600 13px ${theme.font.replace(/^\S+\s+/, '')}` : theme.font
-      ctx.textAlign = name ? 'center' : 'left'
-      ctx.textBaseline = name ? 'middle' : 'top'
-      const x = record.points[0] + (name ? 0 : 4)
-      const y = record.points[1] + (name ? 0 : 3)
-      ctx.lineWidth = 3
-      ctx.strokeStyle = theme.background
-      ctx.strokeText(text, x, y)
-      ctx.fillStyle = theme.label
-      ctx.fillText(text, x, y)
+      label(text, record.points[0] + (name ? 0 : 4), record.points[1] + (name ? 0 : 3), name)
     }
   }
 }
@@ -119,10 +134,11 @@ interface SpaceProps {
   rows: readonly Row[]
   engine: PlotEngine | null
   graph: string
+  units: AxisUnits
 }
 
 /** The 3D graph: drag to orbit, scroll or pinch to zoom; the kernel projects and orders everything per frame. */
-export const SpaceCanvas = ({ view, rows, engine, graph }: SpaceProps): ReactElement => {
+export const SpaceCanvas = ({ view, rows, engine, graph, units }: SpaceProps): ReactElement => {
   const store = getStore()
   const slot = cameraKey(graph, view.id)
   const wrapRef = React.useRef<HTMLDivElement>(null)
@@ -131,8 +147,8 @@ export const SpaceCanvas = ({ view, rows, engine, graph }: SpaceProps): ReactEle
   const cameraRef = React.useRef<Camera>(store.cameras[slot] ?? HOME_CAMERA)
   const dragRef = React.useRef<{ id: number; x: number; y: number; camera: Camera } | null>(null)
   const frameRef = React.useRef<number | null>(null)
-  const inputs = React.useRef({ view, slot, rows, engine })
-  inputs.current = { view, slot, rows, engine }
+  const inputs = React.useRef({ view, slot, rows, engine, units })
+  inputs.current = { view, slot, rows, engine, units }
 
   const draw = React.useCallback((): void => {
     frameRef.current = null
@@ -140,7 +156,7 @@ export const SpaceCanvas = ({ view, rows, engine, graph }: SpaceProps): ReactEle
     const ctx = canvas?.getContext('2d')
     const size = sizeRef.current
     if (!canvas || !ctx || size.width <= 0 || size.height <= 0) return
-    const { view, rows, engine } = inputs.current
+    const { view, rows, engine, units } = inputs.current
     let records: SpaceRecord[] = []
     try {
       records = engine ? engine.space(view.id, rows, size.width, size.height, cameraRef.current) : []
@@ -149,7 +165,7 @@ export const SpaceCanvas = ({ view, rows, engine, graph }: SpaceProps): ReactEle
     }
     const dpr = canvas.ownerDocument.defaultView?.devicePixelRatio || 1
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
-    drawSpace(ctx, records, rows.map((row) => colorOf(row.color)), size, readTheme(canvas), view.axisNames)
+    drawSpace(ctx, records, rows.map((row) => colorOf(row.color)), size, readTheme(canvas), view.axisNames, units, cameraRef.current.range)
   }, [])
 
   const invalidate = React.useCallback((): void => {
@@ -170,7 +186,7 @@ export const SpaceCanvas = ({ view, rows, engine, graph }: SpaceProps): ReactEle
     invalidate()
   }, [slot, store, invalidate])
 
-  React.useEffect(() => { invalidate() }, [rows, engine, invalidate])
+  React.useEffect(() => { invalidate() }, [rows, engine, units, invalidate])
 
   React.useEffect(() => {
     const wrap = wrapRef.current

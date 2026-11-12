@@ -147,3 +147,18 @@ export function piAxis(lo: number, hi: number, scale: number): Axis {
   }
   return { lines: grid, labels, step }
 }
+
+/**
+ * Labels in multiples of π for an axis from −range to range, about as far apart as `spacing` (the decimal labels'
+ * step); the 3D view places them along its projected axes.
+ */
+export function piTicks(range: number, spacing: number): AxisLabel[] {
+  const choice = PI_STEPS.find(([n, d]) => (n / d) * Math.PI >= spacing * 0.6) ?? PI_STEPS[PI_STEPS.length - 1]
+  const [n, d] = choice
+  const step = (n / d) * Math.PI
+  const count = Math.floor(range / step + 1e-9)
+  if (count > 200) return []
+  const labels: AxisLabel[] = []
+  for (let k = -count; k <= count; k++) if (k !== 0) labels.push({ value: k * step, text: formatPi(k * n, d) })
+  return labels
+}

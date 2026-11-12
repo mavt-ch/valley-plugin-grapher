@@ -91,7 +91,7 @@ const ViewList = ({ graph, mode, close }: { graph: string; mode: Mode; close: ()
   )
 }
 
-/** Beside the open-graph button on flat views: label the axes in real numbers or in multiples of π; only the labels change. */
+/** Beside the open-graph button on every view: label the axes in real numbers or in multiples of π; only the labels change. */
 const UnitsSwitch = ({ graph, mode, units }: { graph: string; mode: Mode; units: AxisUnits }): ReactElement => {
   const store = getStore()
   return (
@@ -432,7 +432,7 @@ export const Sidebar = (): ReactElement => {
       <div className="panel-header grapher-header">
         <ViewButton mode={mode} open={choosing} toggle={() => setChoosing((open) => !open)} />
         <span className="grapher-header-spacer" />
-        {units && !choosing ? <UnitsSwitch graph={active} mode={mode} units={units} /> : null}
+        {!choosing ? <UnitsSwitch graph={active} mode={mode} units={units} /> : null}
         <button
           type="button"
           className="plugin-open-page"

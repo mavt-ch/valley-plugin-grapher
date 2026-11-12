@@ -59,7 +59,10 @@ describe('the sidebar', () => {
     expect(screen.getByRole('radio', { name: /^Axes in multiples of π/ }).getAttribute('aria-checked')).toBe('true')
     await pick('3D')
     expect(await screen.findByDisplayValue('z = (x^2 + y^2) / 5 - 6')).toBeTruthy()
-    expect(screen.queryByRole('radiogroup', { name: 'Axis labels' })).toBeNull()
+    const spaceReal = screen.getByRole('radio', { name: 'Axes in real numbers' })
+    expect(spaceReal.getAttribute('aria-checked')).toBe('true')
+    fireEvent.click(screen.getByRole('radio', { name: /^Axes in multiples of π/ }))
+    await waitFor(async () => expect(await mock.api.data.files.readText('graphs.json')).toContain('"space": "pi"'), { timeout: 2000 })
   })
 
   it('offers sliders for undefined names and saves the sheet', async () => {

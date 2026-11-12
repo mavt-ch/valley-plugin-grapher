@@ -182,9 +182,13 @@ export function decodePaths(data: Float64Array): SamplePath[] {
   return paths
 }
 
+/** Marker records `x, y, kind, other`; a zero's y is 0 (the kernel reports f there, which carries rounding such as 4e-16). */
 export function decodeMarkers(data: Float64Array): Marker[] {
   const markers: Marker[] = []
-  for (let at = 0; at + 4 <= data.length; at += 4) markers.push({ x: data[at], y: data[at + 1], kind: data[at + 2], other: data[at + 3] < 0 ? null : data[at + 3] })
+  for (let at = 0; at + 4 <= data.length; at += 4) {
+    const kind = data[at + 2]
+    markers.push({ x: data[at], y: kind & MARKER.zero ? 0 : data[at + 1], kind, other: data[at + 3] < 0 ? null : data[at + 3] })
+  }
   return markers
 }
 

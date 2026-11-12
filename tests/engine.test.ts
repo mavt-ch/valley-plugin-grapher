@@ -423,10 +423,10 @@ describe('the plot kernel through api.wasm', () => {
     // Panning brings other zeros into view; a touching root is one marker, a zero and a minimum.
     const sine = engine.markers('cartesian', sheet('sin x'), 0, 400, 300, { cx: 100, cy: 0, scale: 20 })
     expect(sine.filter((marker) => marker.kind & MARKER.zero).every((marker) => Math.abs(Math.round(marker.x / Math.PI) * Math.PI - marker.x) < 1e-9 && marker.x > 89)).toBe(true)
-    expect(engine.markers('cartesian', sheet('(x - 1)^2'), 0, 400, 300, view)).toEqual([{ x: expect.closeTo(1, 9), y: expect.closeTo(0, 12), kind: MARKER.zero | MARKER.minimum, other: null }])
+    expect(engine.markers('cartesian', sheet('(x - 1)^2'), 0, 400, 300, view)).toEqual([{ x: expect.closeTo(1, 9), y: 0, kind: MARKER.zero | MARKER.minimum, other: null }])
     expect(markerKind(MARKER.zero | MARKER.minimum)).toBe('Zero · Minimum')
     expect(markerKind(MARKER.intersection)).toBe('Intersection')
-    expect(decodeMarkers(new Float64Array([1, 2, 8, 3, 4, 5, 1, -1]))).toEqual([{ x: 1, y: 2, kind: 8, other: 3 }, { x: 4, y: 5, kind: 1, other: null }])
+    expect(decodeMarkers(new Float64Array([1, 2, 8, 3, 4, 5, 2, -1, 6, 4e-16, 1, -1]))).toEqual([{ x: 1, y: 2, kind: 8, other: 3 }, { x: 4, y: 5, kind: 2, other: null }, { x: 6, y: 0, kind: 1, other: null }])
   })
 
   it('shades inequalities on Cartesian sheets', () => {

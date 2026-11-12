@@ -205,7 +205,9 @@ export const GraphCanvas = ({ view: plane, units, rows, analyses, engine, graph 
         ? [{ x: analysis.x, y: analysis.y, color: colors[index] ?? theme.axis }] : [])
       drawArrows(ctx, arrows, view, size, theme)
     }
-    const pointer = pointerRef.current && !dragRef.current ? pointerRef.current : null
+    // While the button is down, markers and the readout stay until the pointer moves: a click must not make them blink.
+    const drag = dragRef.current
+    const pointer = pointerRef.current && !(drag && Math.hypot(pointerRef.current.x - drag.x, pointerRef.current.y - drag.y) >= 4) ? pointerRef.current : null
     const placed = placeMarkers(pointer ? findHit(pathsRef.current, pointer.x, pointer.y)?.row ?? null : null)
     drawMarkers(ctx, placed, theme)
     for (const entry of placed) if (entry.pinned) drawLabel(ctx, entry.sx, entry.sy, [markerKind(entry.marker.kind), formatPoint(entry.marker.x, entry.marker.y)], size, theme)
@@ -312,7 +314,8 @@ export const GraphCanvas = ({ view: plane, units, rows, analyses, engine, graph 
    * anywhere else it clears the selection. */
   const clickAt = (x: number, y: number): void => {
     const { rows } = inputs.current
-    const target = placedRef.current.find((entry) => Math.hypot(entry.sx - x, entry.sy - y) <= MARKER_REACH)
+    // Placed again for the point clicked: the frame drawn while the button was down shows no hover markers.
+    const target = placeMarkers(findHit(pathsRef.current, x, y)?.row ?? null).find((entry) => Math.hypot(entry.sx - x, entry.sy - y) <= MARKER_REACH)
     if (target) {
       const id = rows[target.row]?.id
       if (!id) return

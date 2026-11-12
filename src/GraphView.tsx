@@ -4,8 +4,8 @@ import { colorOf, drawArrows, drawHover, drawPaths, findHit, readTheme, toScreen
 import type { PlotEngine, RowAnalysis, SamplePath, Viewport } from './engine'
 import { Fit, Minus, Plus } from './icons'
 import { uiText } from './localization'
-import { unitsOf, type AxisUnits, type Row } from './model'
-import { getStore, useGrapher } from './store'
+import { MAIN_GRAPH, graphOf, unitsOf, type AxisUnits, type Row } from './model'
+import { cameraKey, getStore, useGrapher } from './store'
 import { SpaceCanvas } from './Space'
 import { viewOf, type PlaneView } from './views'
 
@@ -30,25 +30,28 @@ interface CanvasProps {
   rows: readonly Row[]
   analyses: readonly RowAnalysis[]
   engine: PlotEngine | null
+  /** The graph (tab) this canvas draws; each keeps its own view per sheet. */
+  graph: string
 }
 
 /**
  * The graph: drag to pan, scroll or pinch to zoom about the pointer, hover a graph to trace it. Sampling runs
  * in the Rust kernel whenever the view or the rows change; drawing reads colours from the theme each frame.
  */
-export const GraphCanvas = ({ view: plane, units, rows, analyses, engine }: CanvasProps): ReactElement => {
+export const GraphCanvas = ({ view: plane, units, rows, analyses, engine, graph }: CanvasProps): ReactElement => {
   const mode = plane.id
+  const slot = cameraKey(graph, mode)
   const store = getStore()
   const wrapRef = React.useRef<HTMLDivElement>(null)
   const canvasRef = React.useRef<HTMLCanvasElement>(null)
   const sizeRef = React.useRef<Size>({ width: 0, height: 0 })
-  const viewRef = React.useRef<Viewport | null>(store.viewports[mode] ?? null)
+  const viewRef = React.useRef<Viewport | null>(store.viewports[slot] ?? null)
   const pathsRef = React.useRef<SamplePath[]>([])
   const pointerRef = React.useRef<{ x: number; y: number } | null>(null)
   const dragRef = React.useRef<{ id: number; x: number; y: number; view: Viewport } | null>(null)
   const frameRef = React.useRef<{ id: number | null; resample: boolean }>({ id: null, resample: true })
-  const inputs = React.useRef({ plane, units, mode, rows, analyses, engine })
-  inputs.current = { plane, units, mode, rows, analyses, engine }
+  const inputs = React.useRef({ plane, units, mode, slot, rows, analyses, engine })
+  inputs.current = { plane, units, mode, slot, rows, analyses, engine }
 
   const hoverAt = React.useCallback((x: number, y: number): Hover | null => {
     const { mode, rows, analyses, engine } = inputs.current
@@ -113,15 +116,15 @@ export const GraphCanvas = ({ view: plane, units, rows, analyses, engine }: Canv
 
   const setView = React.useCallback((next: Viewport): void => {
     viewRef.current = next
-    store.viewports[inputs.current.mode] = next
+    store.viewports[inputs.current.slot] = next
     invalidate(true)
   }, [invalidate, store])
 
   // A new sheet brings its own camera.
   React.useEffect(() => {
-    viewRef.current = store.viewports[mode] ?? null
+    viewRef.current = store.viewports[slot] ?? null
     invalidate(true)
-  }, [mode, store, invalidate])
+  }, [slot, store, invalidate])
 
   React.useEffect(() => { invalidate(true) }, [rows, engine, invalidate])
   React.useEffect(() => { invalidate(false) }, [units, invalidate])
@@ -206,7 +209,7 @@ export const GraphCanvas = ({ view: plane, units, rows, analyses, engine }: Canv
   }
 
   const reset = (): void => {
-    delete store.viewports[inputs.current.mode]
+    delete store.viewports[inputs.current.slot]
     setView(homeView(inputs.current.plane, sizeRef.current))
   }
 
@@ -254,12 +257,15 @@ export const GraphCanvas = ({ view: plane, units, rows, analyses, engine }: Canv
   )
 }
 
-/** The main-workspace tab: the active sheet's name over its graph. */
-export const GraphTab = (): ReactElement => {
-  const { document, engine, problems } = useGrapher()
-  const mode = document.mode
+/** A main-workspace tab: its own graph (the main one without an instance id), edited in the sidebar while focused. */
+export const GraphTab = ({ instanceId }: { instanceId?: string }): ReactElement => {
+  const id = instanceId || MAIN_GRAPH
+  const { loaded, document, engine, problems } = useGrapher()
+  React.useEffect(() => { if (loaded) getStore().ensureGraph(id) }, [loaded, id])
+  const graph = graphOf(document, id)
+  const mode = graph.mode
   const view = viewOf(mode)
-  const rows = document.sheets[mode]
+  const rows = graph.sheets[mode]
   const analyses = React.useMemo(() => (engine ? engine.analyze(mode, rows) : []), [engine, mode, rows])
   const engineProblem = problems.find((problem) => problem.key === 'problem.engine')
   return (
@@ -269,7 +275,7 @@ export const GraphTab = (): ReactElement => {
       </div>
       {engineProblem ? <p role="alert" className="grapher-alert">{uiText('problem.engine', { message: engineProblem.message })}</p> : null}
       <div className="grapher-stage">
-        {view.canvas === 'space' ? <SpaceCanvas view={view} rows={rows} engine={engine} /> : <GraphCanvas key={view.id} view={view} units={unitsOf(document, mode) ?? view.units} rows={rows} analyses={analyses} engine={engine} />}
+        {view.canvas === 'space' ? <SpaceCanvas view={view} rows={rows} engine={engine} graph={id} /> : <GraphCanvas key={view.id} view={view} units={unitsOf(graph, mode) ?? view.units} rows={rows} analyses={analyses} engine={engine} graph={id} />}
       </div>
     </div>
   )

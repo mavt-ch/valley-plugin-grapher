@@ -3,7 +3,7 @@
 const CSS = `
 .grapher-panel, .grapher-tab { display:flex; flex-direction:column; height:100%; min-height:0; }
 
-/* The sidebar header: the shared 38px panel-header with the view picker and, on flat views, the ℝ | π switch. */
+/* The sidebar header: the shared 38px panel-header with the view button, then on flat views the ℝ | π switch beside the open button. */
 .grapher-header { gap:var(--space-2); }
 .grapher-header-spacer { flex:1 1 auto; }
 .grapher-view-picker { display:inline-flex; align-items:center; gap:6px; min-width:0; height:26px; padding:0 6px 0 7px;
@@ -24,6 +24,21 @@ const CSS = `
 .grapher-unit:hover { color:var(--text-color); }
 .grapher-unit.active { background:var(--surface-color-alt); color:var(--text-color); box-shadow:0 0 0 1px var(--border-light); }
 .grapher-unit:focus-visible { outline:2px solid var(--accent-color); outline-offset:-2px; }
+
+/* The views, in place of the expressions while the view button is open. */
+.grapher-views { flex:1 1 auto; min-height:0; overflow-y:auto; display:flex; flex-direction:column; gap:1px; padding:6px; }
+.grapher-view-option { display:grid; grid-template-columns:20px minmax(0, 1fr) 16px; align-items:center; gap:10px; width:100%;
+  padding:8px 8px 8px 10px; border:none; border-radius:var(--radius-sm); background:transparent; color:var(--text-color);
+  font:inherit; text-align:left; cursor:pointer; transition:background-color var(--duration-fast) var(--ease-out); }
+.grapher-view-option:hover { background:var(--hover-bg); }
+.grapher-view-option.active { background:var(--container-color-light); }
+.grapher-view-option:focus-visible { outline:2px solid var(--accent-color); outline-offset:-2px; }
+.grapher-view-option-icon { width:18px; height:18px; color:var(--text-secondary); }
+.grapher-view-option.active .grapher-view-option-icon { color:var(--accent-tint-text); }
+.grapher-view-option-text { display:flex; flex-direction:column; gap:2px; min-width:0; }
+.grapher-view-option-name { font-size:var(--smaller-font-size); font-weight:500; }
+.grapher-view-option-hint { font-size:0.75rem; color:var(--text-tertiary); line-height:1.35; overflow-wrap:anywhere; }
+.grapher-view-option-check { width:14px; height:14px; color:var(--accent-tint-text); }
 
 .grapher-alert { flex:0 0 auto; margin:0; padding:var(--space-2) var(--space-3); border-bottom:1px solid var(--border-light);
   background:var(--danger-tint-bg); color:var(--danger-tint-text); font-size:var(--smaller-font-size); overflow-wrap:anywhere; }
@@ -158,7 +173,7 @@ button.grapher-handle:hover { color:var(--text-color); }
 .grapher-zoom-button:focus-visible { outline:2px solid var(--accent-color); outline-offset:2px; }
 
 @media (prefers-reduced-motion: reduce) {
-  .grapher-view-picker, .grapher-unit, .grapher-swatch, .grapher-delete, .grapher-grip-icon, .grapher-handle .grapher-index, .grapher-zoom-button { transition:none; }
+  .grapher-view-picker, .grapher-view-option, .grapher-unit, .grapher-swatch, .grapher-delete, .grapher-grip-icon, .grapher-handle .grapher-index, .grapher-zoom-button { transition:none; }
 }
 `
 

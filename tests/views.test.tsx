@@ -1,5 +1,5 @@
 import React from 'react'
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeAll, describe, expect, it } from 'vitest'
 import { createMockValleyApi, loadPackageWasm, type PackageWasmModule } from '@valley/plugin-testkit'
 import { pluginDataDirectoryPath } from '@valley/plugin-sdk/paths'
@@ -23,11 +23,10 @@ afterEach(async () => {
 
 type Mock = ReturnType<typeof createMockValleyApi>
 
-/** Opens the header's view picker and picks a view by name, as the host's menu would. */
-async function pick(mock: Mock, name: string): Promise<void> {
+/** Opens the view list from the header's view button and picks a view by name. */
+async function pick(name: string): Promise<void> {
   fireEvent.click(await screen.findByRole('button', { name: /^View:/ }))
-  const items = mock.menus[mock.menus.length - 1] as { label?: string; onSelect?: () => void }[]
-  act(() => { items.find((item) => item.label === name)?.onSelect?.() })
+  fireEvent.click(within(screen.getByRole('radiogroup', { name: 'Coordinate system' })).getByRole('radio', { name: new RegExp(`^${name}`) }))
 }
 
 function mount(files: Record<string, string> = {}) {
@@ -37,25 +36,28 @@ function mount(files: Record<string, string> = {}) {
 }
 
 describe('the sidebar', () => {
-  it('picks the view from a dropdown and switches the axis labels beside it', async () => {
+  it('picks the view from a list in place of the expressions and switches the axis labels', async () => {
     const mock = mount()
     render(<Sidebar />)
     expect(await screen.findByRole('button', { name: 'View: Cartesian' })).toBeTruthy()
     expect(screen.getByDisplayValue('y = x^2 - 2')).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: 'View: Cartesian' }))
-    const items = mock.menus[0] as { label?: string; checked?: boolean }[]
-    expect(items.map((item) => item.label)).toEqual(['Cartesian', 'Polar', 'Parametric', '3D', 'Complex', 'Complex 3D'])
-    expect(items[0].checked).toBe(true)
+    const options = within(screen.getByRole('radiogroup', { name: 'Coordinate system' })).getAllByRole('radio')
+    expect(options.map((option) => option.querySelector('.grapher-view-option-name')?.textContent)).toEqual(['Cartesian', 'Polar', 'Parametric', '3D', 'Complex', 'Complex 3D'])
+    expect(options[0].getAttribute('aria-checked')).toBe('true')
+    expect(screen.queryByDisplayValue('y = x^2 - 2')).toBeNull()
+    fireEvent.keyDown(options[0], { key: 'Escape' })
+    expect(await screen.findByDisplayValue('y = x^2 - 2')).toBeTruthy()
     const real = screen.getByRole('radio', { name: 'Axes in real numbers' })
     const pi = screen.getByRole('radio', { name: /^Axes in multiples of π/ })
     expect(real.getAttribute('aria-checked')).toBe('true')
     fireEvent.click(pi)
     expect(pi.getAttribute('aria-checked')).toBe('true')
     await waitFor(async () => expect(await mock.api.data.files.readText('graphs.json')).toContain('"cartesian": "pi"'), { timeout: 2000 })
-    await pick(mock, 'Polar')
+    await pick('Polar')
     expect(await screen.findByDisplayValue('r = 1 + cos(θ)')).toBeTruthy()
     expect(screen.getByRole('radio', { name: /^Axes in multiples of π/ }).getAttribute('aria-checked')).toBe('true')
-    await pick(mock, '3D')
+    await pick('3D')
     expect(await screen.findByDisplayValue('z = (x^2 + y^2) / 5 - 6')).toBeTruthy()
     expect(screen.queryByRole('radiogroup', { name: 'Axis labels' })).toBeNull()
   })
@@ -119,7 +121,7 @@ describe('the graph tab', () => {
   it('switches to the 3D sheet and its orbit canvas', async () => {
     const mock = mount()
     render(<><Sidebar /><GraphTab /></>)
-    await pick(mock, '3D')
+    await pick('3D')
     expect(await screen.findByDisplayValue('z = (x^2 + y^2) / 5 - 6')).toBeTruthy()
     expect(await screen.findByLabelText(/^3D graph/)).toBeTruthy()
     expect(screen.getByDisplayValue('6π')).toBeTruthy()
@@ -128,9 +130,43 @@ describe('the graph tab', () => {
   it('draws w = f(z) over the complex plane in the complex 3D view', async () => {
     const mock = mount()
     render(<><Sidebar /><GraphTab /></>)
-    await pick(mock, 'Complex 3D')
+    await pick('Complex 3D')
     expect(await screen.findByDisplayValue('w = (z^2 - 4) / 4')).toBeTruthy()
     expect(await screen.findByLabelText(/^Complex 3D graph/)).toBeTruthy()
+  })
+
+  it('keeps each tab on its own graph and edits the focused one in the sidebar', async () => {
+    const mock = mount()
+    render(<><Sidebar /><GraphTab /><GraphTab instanceId="second" /></>)
+    await screen.findByDisplayValue('y = x^2 - 2')
+    await waitFor(() => expect(screen.getAllByText('Cartesian').length).toBeGreaterThanOrEqual(2))
+    act(() => { mock.emitState({ activePluginTab: { pluginId: mock.api.pluginId, instanceId: 'second' } }) })
+    await pick('Polar')
+    expect(await screen.findByDisplayValue('r = 1 + cos(θ)')).toBeTruthy()
+    expect(await screen.findByLabelText(/^Polar graph/)).toBeTruthy()
+    expect(screen.getByLabelText(/^Cartesian graph/)).toBeTruthy()
+    act(() => { mock.emitState({ activePluginTab: { pluginId: mock.api.pluginId } }) })
+    expect(await screen.findByDisplayValue('y = x^2 - 2')).toBeTruthy()
+    await waitFor(async () => {
+      const saved = JSON.parse(await mock.api.data.files.readText('graphs.json') ?? '{}') as { mode: string; graphs: Record<string, { mode: string }> }
+      expect(saved.mode).toBe('cartesian')
+      expect(saved.graphs.second.mode).toBe('polar')
+    }, { timeout: 2000 })
+  })
+
+  it('opens a fresh graph from the tab strip and from the open button with the modifier', async () => {
+    const mock = mount()
+    render(<Sidebar />)
+    await screen.findByDisplayValue('y = x^2 - 2')
+    act(() => { void mock.newTabHandlers[0]({ paneId: 'pane-1' }) })
+    const open = mock.api.workspace.openMainTab as unknown as { mock: { calls: [{ instanceId?: string; newTab?: boolean; paneId?: string }][] } }
+    const first = open.mock.calls[0][0]
+    expect(first).toMatchObject({ newTab: true, paneId: 'pane-1' })
+    expect(first.instanceId).toMatch(/^g-/)
+    fireEvent.click(screen.getByRole('button', { name: 'Open graph' }), { metaKey: true, ctrlKey: true })
+    const second = open.mock.calls[1][0]
+    expect(second.newTab).toBe(true)
+    expect(second.instanceId).not.toBe(first.instanceId)
   })
 
   it('names the active coordinate system and offers zoom controls', async () => {

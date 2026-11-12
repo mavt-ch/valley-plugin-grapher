@@ -2,11 +2,13 @@ import type { ValleyPluginApi } from '@valley/plugin-sdk'
 import type { FileBaseline } from '@valley/plugin-sdk/types'
 import { React, api } from './runtime'
 import { loadPlotEngine, type Camera, type PlotEngine, type Viewport } from './engine'
-import { defaultDocument, normalizeDocument, withTrailingRow, type AxisUnits, type GrapherDocument, type Mode, type Row } from './model'
+import { MAIN_GRAPH, MODES, defaultDocument, defaultGraph, graphOf, normalizeDocument, rowId, withGraph, withTrailingRow, type AxisUnits, type Graph, type GrapherDocument, type Mode, type Row } from './model'
 
 /** The sheets live in `.valley/plugins/data/grapher/graphs.json`. */
 export const GRAPHS_FILE = 'graphs.json'
 const SAVE_DELAY = 400
+/** Graphs of closed tabs are kept (reopening a tab brings its graph back) until there are more than this many. */
+const KEPT_GRAPHS = 40
 /** Waits before retrying the engine: the frame's module list arrives with the host's first snapshot. */
 const ENGINE_RETRIES = [250, 1000, 3000]
 
@@ -18,6 +20,8 @@ export interface GrapherProblem {
 export interface GrapherSnapshot {
   loaded: boolean
   document: GrapherDocument
+  /** The graph the sidebar edits: the focused Grapher tab's, else the one focused last. */
+  active: string
   engine: PlotEngine | null
   problems: GrapherProblem[]
 }
@@ -30,7 +34,7 @@ const messageOf = (error: unknown): string => (error instanceof Error ? error.me
  * document is left untouched until the user repairs or removes it.
  */
 export class GrapherStore {
-  private snapshot: GrapherSnapshot = { loaded: false, document: defaultDocument(), engine: null, problems: [] }
+  private snapshot: GrapherSnapshot = { loaded: false, document: defaultDocument(), active: MAIN_GRAPH, engine: null, problems: [] }
   private readonly listeners = new Set<() => void>()
   private baseline: FileBaseline | null = null
   private written: string | null = null
@@ -40,10 +44,10 @@ export class GrapherStore {
   private disposed = false
   private engineRequested = false
   private readonly offs: (() => void)[] = []
-  /** Session-only view of each sheet, so switching modes or reopening the tab keeps the camera. */
-  readonly viewports: Partial<Record<Mode, Viewport>> = {}
-  /** Session-only camera of each 3D sheet. */
-  readonly cameras: Partial<Record<Mode, Camera>> = {}
+  /** Session-only view of each graph's sheets (`graph:mode`), so switching modes or reopening the tab keeps the camera. */
+  readonly viewports: Record<string, Viewport> = {}
+  /** Session-only camera of each graph's 3D sheets (`graph:mode`). */
+  readonly cameras: Record<string, Camera> = {}
 
   constructor(private readonly api: ValleyPluginApi) {}
 
@@ -91,6 +95,9 @@ export class GrapherStore {
   start(): void {
     this.offs.push(this.api.data.files.onChanged((path) => { if (path === GRAPHS_FILE) void this.reload() }))
     this.offs.push(this.api.runtime.onBeforeUnload(() => this.flush()))
+    this.offs.push(this.api.subscribeState(['activePluginTab'], ({ state: { activePluginTab } }) => {
+      if (activePluginTab?.pluginId === this.api.pluginId) this.focus(activePluginTab.instanceId ?? MAIN_GRAPH)
+    }))
     void this.read()
   }
 
@@ -104,6 +111,7 @@ export class GrapherStore {
       this.writable = true
       this.update({ loaded: true, document })
       this.problem('problem.load', null)
+      this.ensureGraph(this.snapshot.active)
     } catch (error) {
       if (this.disposed) return
       this.writable = false
@@ -130,20 +138,54 @@ export class GrapherStore {
     }
   }
 
-  setMode(mode: Mode): void {
-    if (mode === this.snapshot.document.mode) return
-    this.change({ ...this.snapshot.document, mode })
+  /** The sidebar follows the focused Grapher tab. */
+  focus(id: string): void {
+    if (id !== this.snapshot.active) this.update({ active: id })
+    this.ensureGraph(id)
   }
 
-  setUnits(mode: Mode, units: AxisUnits): void {
-    const document = this.snapshot.document
-    if (document.units[mode] === units) return
-    this.change({ ...document, units: { ...document.units, [mode]: units } })
+  graph(id: string): Graph {
+    return graphOf(this.snapshot.document, id)
   }
 
-  updateRows(mode: Mode, edit: (rows: Row[]) => Row[]): void {
+  /**
+   * A tab whose graph is not stored yet (an older tab, or one restored after its graph was dropped) starts as a
+   * copy of the main graph, on the view its id names when it is one.
+   */
+  ensureGraph(id: string): void {
     const document = this.snapshot.document
-    this.change({ ...document, sheets: { ...document.sheets, [mode]: withTrailingRow(edit([...document.sheets[mode]])) } })
+    if (!this.snapshot.loaded || id === MAIN_GRAPH || document.graphs[id]) return
+    const main = graphOf(document, MAIN_GRAPH)
+    const mode = MODES.includes(id as Mode) ? (id as Mode) : main.mode
+    this.change(withGraph(document, id, { mode, sheets: main.sheets, units: main.units }))
+  }
+
+  /** A fresh graph with the example sheets, for a new tab; returns its id. */
+  createGraph(mode: Mode): string {
+    const id = `g-${rowId()}`
+    const open = new Set(this.api.workspace.getOpenMainTabs())
+    const graphs = { ...this.snapshot.document.graphs }
+    const closed = Object.keys(graphs).filter((key) => !open.has(key) && key !== this.snapshot.active)
+    while (Object.keys(graphs).length >= KEPT_GRAPHS && closed.length) delete graphs[closed.shift()!]
+    this.change(withGraph({ ...this.snapshot.document, graphs }, id, defaultGraph(mode)))
+    return id
+  }
+
+  private editGraph(id: string, edit: (graph: Graph) => Graph | null): void {
+    const next = edit(this.graph(id))
+    if (next) this.change(withGraph(this.snapshot.document, id, next))
+  }
+
+  setMode(id: string, mode: Mode): void {
+    this.editGraph(id, (graph) => (graph.mode === mode ? null : { ...graph, mode }))
+  }
+
+  setUnits(id: string, mode: Mode, units: AxisUnits): void {
+    this.editGraph(id, (graph) => (graph.units[mode] === units ? null : { ...graph, units: { ...graph.units, [mode]: units } }))
+  }
+
+  updateRows(id: string, mode: Mode, edit: (rows: Row[]) => Row[]): void {
+    this.editGraph(id, (graph) => ({ ...graph, sheets: { ...graph.sheets, [mode]: withTrailingRow(edit([...graph.sheets[mode]])) } }))
   }
 
   private change(document: GrapherDocument): void {
@@ -201,3 +243,6 @@ export function useGrapher(): GrapherSnapshot {
   const store = getStore()
   return React.useSyncExternalStore(store.subscribe, store.getSnapshot)
 }
+
+/** The key of one graph's sheet in the session-only camera maps. */
+export const cameraKey = (graph: string, mode: Mode): string => `${graph}:${mode}`

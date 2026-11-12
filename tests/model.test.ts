@@ -20,6 +20,11 @@ describe('sheets', () => {
   })
 
   it('repairs stored rows and refuses foreign files', () => {
+    const tabs = normalizeDocument({ version: 1, mode: 'space', graphs: { second: { mode: 'polar', sheets: { polar: [{ id: 'p', text: 'r = 3' }] } }, main: { mode: 'complex' }, bad: 7 } })
+    expect(tabs.mode).toBe('space')
+    expect(Object.keys(tabs.graphs)).toEqual(['second'])
+    expect(tabs.graphs.second.sheets.polar.map((row) => row.text)).toEqual(['r = 3', ''])
+    expect(tabs.graphs.second.sheets.cartesian.length).toBeGreaterThan(1)
     expect(() => normalizeDocument({ version: 2 })).toThrow()
     expect(() => normalizeDocument('nope')).toThrow()
     const document = normalizeDocument({ version: 1, mode: 'polar', sheets: { polar: [{ id: 'a', text: 'r = 2', color: 'palette:blue', slider: { min: 5, max: 1 } }, { id: 'a', text: 7 }, null] } })

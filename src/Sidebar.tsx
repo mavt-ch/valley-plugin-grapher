@@ -3,10 +3,10 @@ import type { ChangeEvent, KeyboardEvent, MouseEvent, PointerEvent, ReactElement
 import { paletteCssValue, paletteRef } from '@valley/plugin-sdk/palette'
 import type { UiMenuItem } from '@valley/plugin-sdk'
 import type { RowAnalysis } from './engine'
-import { ChevronDown, Eye, EyeOff, Grip, Slider, Trash, Warning, X } from './icons'
+import { Check, ChevronDown, Eye, EyeOff, Grip, Slider, Trash, Warning, X } from './icons'
 import { uiText } from './localization'
 import { MathText } from './MathText'
-import { COLORS, MODES, createRow, moveRow, rangeVariable, unitsOf, type AxisUnits, type Mode, type Row } from './model'
+import { COLORS, MAIN_GRAPH, MODES, createRow, graphOf, moveRow, rangeVariable, unitsOf, type AxisUnits, type Mode, type Row } from './model'
 import { getStore, useGrapher } from './store'
 import { formatComplex, formatNumber, formatPolar } from './ticks'
 import { viewOf } from './views'
@@ -25,27 +25,17 @@ export function sliderText(name: string, value: number, step: number): string {
   return `${name} = ${Number(value.toFixed(stepDigits(step)))}`
 }
 
-/** The header's view picker: the active view's icon and name, opening a menu of every view. */
-const ViewPicker = ({ mode }: { mode: Mode }): ReactElement => {
-  const store = getStore()
+/** Opens a new tab with a fresh graph of its own on the given view. */
+export function openNewGraph(mode: Mode, paneId?: string): void {
+  const id = getStore().createGraph(mode)
+  api.workspace.openMainTab({ instanceId: id, title: uiText('graph.title'), newTab: true, paneId })
+}
+
+/** The header's view button: the focused graph's view; it swaps the expression list for the list of views. */
+const ViewButton = ({ mode, open, toggle }: { mode: Mode; open: boolean; toggle: () => void }): ReactElement => {
   const Icon = viewOf(mode).icon
-  const open = (event: MouseEvent<HTMLButtonElement>): void => {
-    const items = MODES.map((candidate): UiMenuItem => {
-      const CandidateIcon = viewOf(candidate).icon
-      return {
-        id: `view:${candidate}`,
-        type: 'radio',
-        checked: candidate === mode,
-        label: uiText(`mode.${candidate}`),
-        description: uiText(`mode.${candidate}.hint`),
-        icon: <CandidateIcon />,
-        onSelect: () => store.setMode(candidate)
-      }
-    })
-    void api.ui.openMenu(items, { anchor: event.currentTarget, align: 'start', gap: 4 })
-  }
   return (
-    <button type="button" className="grapher-view-picker" aria-haspopup="menu" aria-label={uiText('view.choose', { mode: uiText(`mode.${mode}`) })} onClick={open}>
+    <button type="button" className="grapher-view-picker" aria-expanded={open} aria-label={uiText('view.choose', { mode: uiText(`mode.${mode}`) })} onClick={toggle}>
       <Icon className="grapher-view-icon" />
       <span className="grapher-view-name">{uiText(`mode.${mode}`)}</span>
       <ChevronDown className="grapher-view-chevron" />
@@ -53,8 +43,56 @@ const ViewPicker = ({ mode }: { mode: Mode }): ReactElement => {
   )
 }
 
-/** Beside the picker on flat views: label the axes in real numbers or in multiples of π; only the labels change. */
-const UnitsSwitch = ({ mode, units }: { mode: Mode; units: AxisUnits }): ReactElement => {
+/** Every view as a full-width choice in place of the expressions; ⌘-click opens the view as a new graph in its own tab. */
+const ViewList = ({ graph, mode, close }: { graph: string; mode: Mode; close: () => void }): ReactElement => {
+  const store = getStore()
+  const listRef = React.useRef<HTMLDivElement>(null)
+  React.useEffect(() => { listRef.current?.querySelector<HTMLButtonElement>('[aria-checked="true"]')?.focus() }, [])
+  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
+    if (event.key === 'Escape') {
+      event.preventDefault()
+      close()
+      return
+    }
+    if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return
+    event.preventDefault()
+    const buttons = Array.from(listRef.current?.querySelectorAll<HTMLButtonElement>('[role="radio"]') ?? [])
+    const at = buttons.indexOf(event.target as HTMLButtonElement)
+    buttons[(at + (event.key === 'ArrowDown' ? 1 : buttons.length - 1)) % buttons.length]?.focus()
+  }
+  return (
+    <div ref={listRef} className="grapher-views" role="radiogroup" aria-label={uiText('mode.label')} onKeyDown={onKeyDown}>
+      {MODES.map((candidate) => {
+        const Icon = viewOf(candidate).icon
+        const checked = candidate === mode
+        return (
+          <button
+            key={candidate}
+            type="button"
+            role="radio"
+            aria-checked={checked}
+            className={checked ? 'grapher-view-option active' : 'grapher-view-option'}
+            onClick={(event) => {
+              if (api.ui.hasModKey(event)) openNewGraph(candidate)
+              else store.setMode(graph, candidate)
+              close()
+            }}
+          >
+            <Icon className="grapher-view-option-icon" />
+            <span className="grapher-view-option-text">
+              <span className="grapher-view-option-name">{uiText(`mode.${candidate}`)}</span>
+              <span className="grapher-view-option-hint">{uiText(`mode.${candidate}.hint`)}</span>
+            </span>
+            {checked ? <Check className="grapher-view-option-check" /> : <span className="grapher-view-option-check" />}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+/** Beside the open-graph button on flat views: label the axes in real numbers or in multiples of π; only the labels change. */
+const UnitsSwitch = ({ graph, mode, units }: { graph: string; mode: Mode; units: AxisUnits }): ReactElement => {
   const store = getStore()
   return (
     <div className="grapher-units" role="radiogroup" aria-label={uiText('units.label')}>
@@ -67,7 +105,7 @@ const UnitsSwitch = ({ mode, units }: { mode: Mode; units: AxisUnits }): ReactEl
           className={units === candidate ? 'grapher-unit active' : 'grapher-unit'}
           aria-label={uiText(`units.${candidate}`)}
           {...api.ui.tooltip(uiText(`units.${candidate}`))}
-          onClick={() => store.setUnits(mode, candidate)}
+          onClick={() => store.setUnits(graph, mode, candidate)}
         >
           {candidate === 'pi' ? 'π' : 'ℝ'}
         </button>
@@ -310,26 +348,29 @@ const ExpressionRow = (props: RowProps): ReactElement => {
   )
 }
 
-/** Left sidebar: the coordinate-system switch in the 38px header, then the active sheet's expressions. */
+/** Left sidebar: the focused graph's view button, axis labels and open button in the 38px header, then its expressions. */
 export const Sidebar = (): ReactElement => {
   const store = getStore()
-  const { loaded, document, engine, problems } = useGrapher()
-  const mode = document.mode
-  const rows = document.sheets[mode]
-  const units = unitsOf(document, mode)
+  const { loaded, document, active, engine, problems } = useGrapher()
+  const graph = graphOf(document, active)
+  const mode = graph.mode
+  const rows = graph.sheets[mode]
+  const units = unitsOf(graph, mode)
+  const [choosing, setChoosing] = React.useState(false)
+  React.useEffect(() => setChoosing(false), [active])
   const analyses = React.useMemo(() => (engine ? engine.analyze(mode, rows) : []), [engine, mode, rows])
   const editRow = (id: string) => (change: (row: Row) => Row): void => {
-    store.updateRows(mode, (current) => current.map((row) => (row.id === id ? change(row) : row)))
+    store.updateRows(active, mode, (current) => current.map((row) => (row.id === id ? change(row) : row)))
   }
   const insertAfter = (index: number) => (): void => {
-    store.updateRows(mode, (current) => {
+    store.updateRows(active, mode, (current) => {
       const row = createRow(current)
       pendingFocus = row.id
       return [...current.slice(0, index + 1), row, ...current.slice(index + 1)]
     })
   }
   const remove = (index: number) => (focus: 'previous' | 'next'): void => {
-    store.updateRows(mode, (current) => {
+    store.updateRows(active, mode, (current) => {
       const target = focus === 'previous' ? current[index - 1] : current[index + 1]
       pendingFocus = target?.id ?? null
       return current.filter((_, at) => at !== index)
@@ -377,11 +418,11 @@ export const Sidebar = (): ReactElement => {
     if (!current || current.pointer !== event.pointerId) return
     dragRef.current = null
     setDrag(null)
-    if (commit && current.to !== current.from && current.to !== current.from + 1) store.updateRows(mode, (all) => moveRow(all, current.from, Math.min(current.to, all.length - 1)))
+    if (commit && current.to !== current.from && current.to !== current.from + 1) store.updateRows(active, mode, (all) => moveRow(all, current.from, Math.min(current.to, all.length - 1)))
   }
   const showMarker = drag !== null && drag.to !== drag.from && drag.to !== drag.from + 1
   const addSlider = (name: string): void => {
-    store.updateRows(mode, (current) => {
+    store.updateRows(active, mode, (current) => {
       const filled = current.filter((row) => row.text.trim())
       return [...filled, { ...createRow(filled), text: `${name} = 1` }]
     })
@@ -389,13 +430,16 @@ export const Sidebar = (): ReactElement => {
   return (
     <div className="grapher-panel">
       <div className="panel-header grapher-header">
-        <ViewPicker mode={mode} />
-        {units ? <UnitsSwitch mode={mode} units={units} /> : null}
+        <ViewButton mode={mode} open={choosing} toggle={() => setChoosing((open) => !open)} />
         <span className="grapher-header-spacer" />
+        {units && !choosing ? <UnitsSwitch graph={active} mode={mode} units={units} /> : null}
         <button
           type="button"
           className="plugin-open-page"
-          onClick={(event) => api.workspace.openMainTab({ title: uiText('graph.title'), newTab: api.ui.hasModKey(event) })}
+          onClick={(event) => {
+            if (api.ui.hasModKey(event)) openNewGraph(mode)
+            else api.workspace.openMainTab({ instanceId: active === MAIN_GRAPH ? undefined : active, title: uiText('graph.title') })
+          }}
           aria-label={uiText('graph.open')}
           title={uiText('graph.open')}
         />
@@ -403,7 +447,9 @@ export const Sidebar = (): ReactElement => {
       {problems.filter((problem) => problem.key !== 'problem.engine').map((problem) => (
         <p key={problem.key} role="alert" className="grapher-alert">{uiText(problem.key, { message: problem.message })}</p>
       ))}
-      {loaded ? (
+      {loaded && choosing ? (
+        <ViewList graph={active} mode={mode} close={() => setChoosing(false)} />
+      ) : loaded ? (
         <div
           ref={listRef}
           className="grapher-list"

@@ -5,7 +5,7 @@ import { SPACE, type Camera, type PlotEngine, type SpaceRecord } from './engine'
 import { Fit, Minus, Plus } from './icons'
 import { uiText } from './localization'
 import type { Row } from './model'
-import { getStore } from './store'
+import { cameraKey, getStore } from './store'
 import { formatNumber } from './ticks'
 import type { SpaceView } from './views'
 
@@ -118,19 +118,21 @@ interface SpaceProps {
   view: SpaceView
   rows: readonly Row[]
   engine: PlotEngine | null
+  graph: string
 }
 
 /** The 3D graph: drag to orbit, scroll or pinch to zoom; the kernel projects and orders everything per frame. */
-export const SpaceCanvas = ({ view, rows, engine }: SpaceProps): ReactElement => {
+export const SpaceCanvas = ({ view, rows, engine, graph }: SpaceProps): ReactElement => {
   const store = getStore()
+  const slot = cameraKey(graph, view.id)
   const wrapRef = React.useRef<HTMLDivElement>(null)
   const canvasRef = React.useRef<HTMLCanvasElement>(null)
   const sizeRef = React.useRef<Size>({ width: 0, height: 0 })
-  const cameraRef = React.useRef<Camera>(store.cameras[view.id] ?? HOME_CAMERA)
+  const cameraRef = React.useRef<Camera>(store.cameras[slot] ?? HOME_CAMERA)
   const dragRef = React.useRef<{ id: number; x: number; y: number; camera: Camera } | null>(null)
   const frameRef = React.useRef<number | null>(null)
-  const inputs = React.useRef({ view, rows, engine })
-  inputs.current = { view, rows, engine }
+  const inputs = React.useRef({ view, slot, rows, engine })
+  inputs.current = { view, slot, rows, engine }
 
   const draw = React.useCallback((): void => {
     frameRef.current = null
@@ -158,15 +160,15 @@ export const SpaceCanvas = ({ view, rows, engine }: SpaceProps): ReactElement =>
   const setCamera = React.useCallback((next: Camera): void => {
     const camera = { yaw: next.yaw, pitch: Math.max(-MAX_PITCH, Math.min(MAX_PITCH, next.pitch)), range: Math.max(MIN_RANGE, Math.min(MAX_RANGE, next.range)) }
     cameraRef.current = camera
-    store.cameras[inputs.current.view.id] = camera
+    store.cameras[inputs.current.slot] = camera
     invalidate()
   }, [invalidate, store])
 
   // Each 3D sheet keeps its own camera.
   React.useEffect(() => {
-    cameraRef.current = store.cameras[view.id] ?? HOME_CAMERA
+    cameraRef.current = store.cameras[slot] ?? HOME_CAMERA
     invalidate()
-  }, [view, store, invalidate])
+  }, [slot, store, invalidate])
 
   React.useEffect(() => { invalidate() }, [rows, engine, invalidate])
 

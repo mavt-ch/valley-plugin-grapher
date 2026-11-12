@@ -54,6 +54,8 @@ const ROW_BUDGET: usize = 150_000;
 const DETAIL: f64 = 0.35;
 /// Longest chord, in pixels, drawn without splitting.
 const STRETCH: f64 = 8.0;
+/// The rise in px across a fully refined step that counts as a jump.
+const JUMP: f64 = 1.5;
 /// Off-screen margin beyond which detail is not needed.
 const MARGIN: f64 = 64.0;
 
@@ -194,7 +196,10 @@ impl Graph<'_> {
                 self.out.end();
                 return;
             }
-            if finite_a && (self.value_px(along_x, b.1) - self.value_px(along_x, a.1)).abs() > STRETCH {
+            // At full depth the step is 1/4096 px, so even a small rise is a jump (a piecewise break, `floor`): the
+            // path ends there instead of drawing a vertical connector. A row out of budget keeps the looser test.
+            let limit = if depth >= FUNCTION_DEPTH { JUMP } else { STRETCH };
+            if finite_a && (self.value_px(along_x, b.1) - self.value_px(along_x, a.1)).abs() > limit {
                 self.out.end();
             }
             self.function_point(along_x, b.0, b.1);
@@ -748,6 +753,27 @@ mod tests {
         assert_eq!(paths(Mode::Trig, &["tan x"], VIEW).len(), 7);
         assert_eq!(paths(Mode::Cartesian, &["sign(x)"], VIEW).len(), 2);
         assert_eq!(paths(Mode::Cartesian, &["1/x"], VIEW).len(), 2);
+    }
+
+    #[test]
+    fn piecewise_functions_break_cleanly_at_jumps() {
+        // Continuous at 0: one path. A jump of 3 (60 px) and one of 0.1 (2 px): two paths each, both ends at the break.
+        assert_eq!(paths(Mode::Cartesian, &["{x < 0: -x, x ≥ 0: x^2}"], VIEW).len(), 1);
+        for text in ["{x < 1: x, x ≥ 1: x + 3}", "y = {x < 1: x, x + 0.1}"] {
+            let found = paths(Mode::Cartesian, &[text], VIEW);
+            assert_eq!(found.len(), 2, "{text}");
+            let left_end = found[0].points.last().unwrap();
+            let right_start = found[1].points[0];
+            assert!(left_end[2] < 1.0 && 1.0 - left_end[2] < 1e-3, "{text}: left ends at {}", left_end[2]);
+            assert!(right_start[2] >= 1.0 && right_start[2] - 1.0 < 1e-3, "{text}: right starts at {}", right_start[2]);
+            assert!((left_end[3] - left_end[2]).abs() < 1e-3);
+        }
+        // No true branch is a gap; a chained condition bounds the piece on both sides.
+        let piece = paths(Mode::Cartesian, &["{0 ≤ x < 2: x^2}"], VIEW);
+        assert_eq!(piece.len(), 1);
+        let (first, last) = (piece[0].points[0], *piece[0].points.last().unwrap());
+        assert!(first[2] >= 0.0 && first[2] < 1e-3 && last[2] < 2.0 && last[2] > 2.0 - 1e-3, "{first:?} {last:?}");
+        assert_eq!(paths(Mode::Cartesian, &["floor(x)"], VIEW).len(), 22);
     }
 
     #[test]

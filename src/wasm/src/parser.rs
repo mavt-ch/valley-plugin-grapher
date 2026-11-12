@@ -49,6 +49,60 @@ pub enum Node {
     Call(Callee, Vec<Node>),
     Fact(Box<Node>),
     Tuple(Vec<Node>),
+    /// `{x < 0: −x, x ≥ 0: x^2}`: branches in order, each with its condition or none (the otherwise branch).
+    Piecewise(Vec<(Option<Cond>, Node)>),
+}
+
+/// A comparison inside a condition of a piecewise function.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Cmp {
+    Lt,
+    Le,
+    Gt,
+    Ge,
+    Eq,
+    Ne,
+}
+
+impl Cmp {
+    pub fn holds(self, a: f64, b: f64) -> bool {
+        match self {
+            Self::Lt => a < b,
+            Self::Le => a <= b,
+            Self::Gt => a > b,
+            Self::Ge => a >= b,
+            Self::Eq => a == b,
+            Self::Ne => a != b && !a.is_nan() && !b.is_nan(),
+        }
+    }
+}
+
+/// The condition of a branch: a chain of comparisons (`0 ≤ x < 1`), joined by `and` and `or` (`and` binds tighter).
+#[derive(Clone, Debug, PartialEq)]
+pub enum Cond {
+    Chain(Vec<Node>, Vec<Cmp>),
+    And(Box<Cond>, Box<Cond>),
+    Or(Box<Cond>, Box<Cond>),
+}
+
+impl Cond {
+    pub fn nodes(&self) -> Vec<&Node> {
+        match self {
+            Self::Chain(operands, _) => operands.iter().collect(),
+            Self::And(a, b) | Self::Or(a, b) => a.nodes().into_iter().chain(b.nodes()).collect(),
+        }
+    }
+
+    pub fn nodes_mut(&mut self) -> Vec<&mut Node> {
+        match self {
+            Self::Chain(operands, _) => operands.iter_mut().collect(),
+            Self::And(a, b) | Self::Or(a, b) => {
+                let mut nodes = a.nodes_mut();
+                nodes.extend(b.nodes_mut());
+                nodes
+            }
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -135,8 +189,8 @@ impl Parser<'_> {
     /// Whether the tokens before `end` close more parentheses than they open.
     fn unbalanced(&self, end: usize) -> bool {
         self.tokens[..end].iter().fold(0_i32, |depth, token| match token {
-            Tok::Op('(') => depth + 1,
-            Tok::Op(')') => depth - 1,
+            Tok::Op('(' | '{') => depth + 1,
+            Tok::Op(')' | '}') => depth - 1,
             _ => depth,
         }) < 0
     }
@@ -147,7 +201,7 @@ impl Parser<'_> {
 
     fn statement(&mut self) -> Result<Statement, MathError> {
         let mut end = self.tokens.len();
-        while end > 0 && self.tokens[end - 1] == Tok::Op(')') && self.unbalanced(end) {
+        while end > 0 && matches!(self.tokens[end - 1], Tok::Op(')' | '}')) && self.unbalanced(end) {
             end -= 1;
         }
         let tokens = self.tokens;
@@ -197,7 +251,7 @@ impl Parser<'_> {
 
     fn starts_factor(&self) -> bool {
         match self.peek() {
-            Some(Tok::Num(_) | Tok::Ident(_) | Tok::Op('(' | '√')) => true,
+            Some(Tok::Num(_) | Tok::Ident(_) | Tok::Op('(' | '{' | '√')) => true,
             Some(Tok::Op('|')) => self.bars == 0,
             _ => false,
         }
@@ -275,6 +329,7 @@ impl Parser<'_> {
                 let mut items = self.group()?;
                 Ok(if items.len() == 1 { items.remove(0) } else { Node::Tuple(items) })
             }
+            Tok::Op('{') => self.piecewise(),
             Tok::Op('|') => {
                 self.bars += 1;
                 let inner = self.expr()?;
@@ -343,6 +398,91 @@ impl Parser<'_> {
             return Err(MathError::new("error.index", ""));
         }
         Ok(Node::Call(callee, args))
+    }
+
+    /// After the opening brace of a piecewise function: `condition: value` branches and at most one bare value, the
+    /// otherwise branch, up to the closing brace (or the end of the row, which closes it).
+    fn piecewise(&mut self) -> Result<Node, MathError> {
+        let bars = std::mem::replace(&mut self.bars, 0);
+        let mut branches = Vec::new();
+        while self.peek().is_some() && !self.is_op('}') {
+            let first = self.expr()?;
+            match self.comparison() {
+                Some(cmp) => {
+                    let condition = self.disjunction(first, cmp)?;
+                    if !self.eat(':') {
+                        return Err(self.unexpected());
+                    }
+                    branches.push((Some(condition), self.expr()?));
+                }
+                None if self.is_op(':') => return Err(MathError::new("error.condition", "")),
+                None => branches.push((None, first)),
+            }
+            if !self.eat(',') {
+                break;
+            }
+        }
+        self.close('}')?;
+        self.bars = bars;
+        if branches.is_empty() {
+            return Err(MathError::new("error.incomplete", ""));
+        }
+        Ok(Node::Piecewise(branches))
+    }
+
+    fn comparison(&mut self) -> Option<Cmp> {
+        let cmp = match self.peek()? {
+            Tok::Op('<') => Cmp::Lt,
+            Tok::Op('≤') => Cmp::Le,
+            Tok::Op('>') => Cmp::Gt,
+            Tok::Op('≥') => Cmp::Ge,
+            Tok::Op('=') => Cmp::Eq,
+            Tok::Op('≠') => Cmp::Ne,
+            _ => return None,
+        };
+        self.pos += 1;
+        Some(cmp)
+    }
+
+    /// `first cmp …`: a chain of comparisons such as `0 ≤ x < 1`.
+    fn chain(&mut self, first: Node, cmp: Cmp) -> Result<Cond, MathError> {
+        let mut operands = vec![first, self.expr()?];
+        let mut cmps = vec![cmp];
+        while let Some(cmp) = self.comparison() {
+            cmps.push(cmp);
+            operands.push(self.expr()?);
+        }
+        Ok(Cond::Chain(operands, cmps))
+    }
+
+    /// The next chain after `and` or `or`.
+    fn next_chain(&mut self) -> Result<Cond, MathError> {
+        let first = self.expr()?;
+        match self.comparison() {
+            Some(cmp) => self.chain(first, cmp),
+            None => Err(MathError::new("error.condition", "")),
+        }
+    }
+
+    fn conjunction(&mut self, first: Node, cmp: Cmp) -> Result<Cond, MathError> {
+        let mut condition = self.chain(first, cmp)?;
+        while self.eat('∧') {
+            condition = Cond::And(Box::new(condition), Box::new(self.next_chain()?));
+        }
+        Ok(condition)
+    }
+
+    fn disjunction(&mut self, first: Node, cmp: Cmp) -> Result<Cond, MathError> {
+        let mut condition = self.conjunction(first, cmp)?;
+        while self.eat('∨') {
+            let next = self.next_chain()?;
+            let mut joined = next;
+            while self.eat('∧') {
+                joined = Cond::And(Box::new(joined), Box::new(self.next_chain()?));
+            }
+            condition = Cond::Or(Box::new(condition), Box::new(joined));
+        }
+        Ok(condition)
     }
 
     /// After an opening parenthesis: comma-separated expressions up to the closing one.
@@ -418,7 +558,7 @@ impl Parser<'_> {
         let mut node = self.power()?;
         loop {
             let more = match self.peek() {
-                Some(Tok::Num(_) | Tok::Op('(')) => true,
+                Some(Tok::Num(_) | Tok::Op('(' | '{')) => true,
                 Some(Tok::Ident(name)) => !self.is_function(name),
                 _ => false,
             };
@@ -513,6 +653,32 @@ mod tests {
         assert_eq!(fail("int(f, 1)").key, "error.arity");
         assert_eq!(fail("tangent(f)").key, "error.arity");
         assert_eq!(fail("int x").key, "error.arity");
+    }
+
+    #[test]
+    fn piecewise_functions_read_branches_in_order() {
+        let num = Node::Num;
+        let chain = |operands: Vec<Node>, cmps: Vec<Cmp>| Cond::Chain(operands, cmps);
+        let abs_square = Node::Piecewise(vec![
+            (Some(chain(vec![var("x"), num(0.0)], vec![Cmp::Lt])), Node::Neg(Box::new(var("x")))),
+            (Some(chain(vec![var("x"), num(0.0)], vec![Cmp::Ge])), bin(BinOp::Pow, var("x"), num(2.0))),
+        ]);
+        assert_eq!(read("{x < 0: −x, x ≥ 0: x^2}").right, abs_square);
+        assert_eq!(read("y = {x < 0: −x, x >= 0: x^2").right, abs_square);
+        let otherwise = read("{0 ≤ x < 1: x, x^2}").right;
+        assert_eq!(otherwise, Node::Piecewise(vec![(Some(chain(vec![num(0.0), var("x"), num(1.0)], vec![Cmp::Le, Cmp::Lt])), var("x")), (None, bin(BinOp::Pow, var("x"), num(2.0)))]));
+        let joined = read("{x < -1 or x > 1 and x != 2: 1, 0}").right;
+        let Node::Piecewise(branches) = joined else { panic!() };
+        assert!(matches!(&branches[0].0, Some(Cond::Or(_, right)) if matches!(**right, Cond::And(..))));
+        assert_eq!(read("2{x < 0: 1, 2}").right, bin(BinOp::Mul, num(2.0), Node::Piecewise(vec![(Some(chain(vec![var("x"), num(0.0)], vec![Cmp::Lt])), num(1.0)), (None, num(2.0))])));
+        // Braces without a colon keep their old meaning.
+        assert_eq!(read("{x + 1}^2").right, bin(BinOp::Pow, bin(BinOp::Add, var("x"), num(1.0)), num(2.0)));
+        assert_eq!(read("{1, 2}").right, Node::Tuple(vec![num(1.0), num(2.0)]));
+        let fail = |source: &str| parse(&tokenize(source).unwrap(), &HashSet::new()).unwrap_err().key;
+        assert_eq!(fail("{x: 1}"), "error.condition");
+        assert_eq!(fail("{x < 0: 1 or 2}"), "error.unexpected");
+        assert_eq!(fail("{x < 0:"), "error.incomplete");
+        assert_eq!(fail("{x < 0 and 1: 2}"), "error.condition");
     }
 
     #[test]

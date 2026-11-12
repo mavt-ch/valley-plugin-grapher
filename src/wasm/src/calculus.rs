@@ -15,7 +15,7 @@
 //! makes the integral NaN.
 
 use crate::builtins::Builtin;
-use crate::eval::{Expr, UserFn, eval, factorial, index_range, real_pow};
+use crate::eval::{Condition, Expr, UserFn, branch, eval, factorial, index_range, real_pow};
 use crate::parser::BinOp;
 
 /// The highest derivative a jet carries.
@@ -393,6 +393,16 @@ impl Tape<'_> {
                 let local: Vec<usize> = slots.iter().copied().filter(|bound| bound != slot).collect();
                 self.reads(from, slots, depth) || self.reads(to, slots, depth) || self.reads(term, &local, depth)
             }
+            Expr::Piecewise(branches) => branches.iter().any(|(condition, value)| {
+                condition.as_ref().is_some_and(|condition| self.reads_condition(condition, slots, depth)) || self.reads(value, slots, depth)
+            }),
+        }
+    }
+
+    fn reads_condition(&self, condition: &Condition, slots: &[usize], depth: usize) -> bool {
+        match condition {
+            Condition::Chain(operands, _) => operands.iter().any(|operand| self.reads(operand, slots, depth)),
+            Condition::And(a, b) | Condition::Or(a, b) => self.reads_condition(a, slots, depth) || self.reads_condition(b, slots, depth),
         }
     }
 
@@ -485,6 +495,11 @@ impl Tape<'_> {
                 }
                 total
             }
+            // The series of the branch that applies at the point: one-sided at a break, as the plain value is.
+            Expr::Piecewise(branches) => match self.plain(|env, functions| branch(branches, env, functions)) {
+                Some(index) => self.jet(&branches[index].1),
+                None => Jet::value_only(f64::NAN, n),
+            },
         }
     }
 

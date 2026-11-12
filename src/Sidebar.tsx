@@ -420,7 +420,7 @@ const ExpressionRow = (props: RowProps): ReactElement => {
       </div>
       <div className="grapher-row-main">
         <div className="grapher-field" data-typeset={typeset || undefined}>
-        {typeset ? <div className="grapher-typeset"><MathText text={row.text} /></div> : null}
+        {typeset ? <div className="grapher-typeset"><MathText text={row.text} otherwise={uiText('math.otherwise')} /></div> : null}
         <input
           ref={inputRef}
           data-row-input=""

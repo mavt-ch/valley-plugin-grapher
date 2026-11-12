@@ -8,7 +8,7 @@ use std::f64::consts::{E, PI, TAU};
 use crate::builtins::Builtin;
 use crate::calculus;
 use crate::error::MathError;
-use crate::parser::{BinOp, Callee, Node};
+use crate::parser::{BinOp, Callee, Cmp, Cond, Node};
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Expr {
@@ -25,6 +25,45 @@ pub enum Expr {
     Integral { body: Box<Expr>, slot: usize, from: Box<Expr>, to: Box<Expr> },
     /// `sum(n, a, b, g)` or `prod(n, a, b, g)`: Σ or ∏ of `body` with the index in `slot` running over the integers from a to b.
     Series { product: bool, slot: usize, from: Box<Expr>, to: Box<Expr>, body: Box<Expr> },
+    /// `{c₁: v₁, c₂: v₂, v}`: the value of the first branch whose condition holds (no condition always holds), else NaN.
+    Piecewise(Vec<(Option<Condition>, Expr)>),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum Condition {
+    Chain(Vec<Expr>, Vec<Cmp>),
+    And(Box<Condition>, Box<Condition>),
+    Or(Box<Condition>, Box<Condition>),
+}
+
+fn compile_condition(condition: &Cond, scope: &Scope) -> Result<Condition, MathError> {
+    Ok(match condition {
+        Cond::Chain(operands, cmps) => Condition::Chain(operands.iter().map(|operand| compile(operand, scope)).collect::<Result<_, _>>()?, cmps.clone()),
+        Cond::And(a, b) => Condition::And(Box::new(compile_condition(a, scope)?), Box::new(compile_condition(b, scope)?)),
+        Cond::Or(a, b) => Condition::Or(Box::new(compile_condition(a, scope)?), Box::new(compile_condition(b, scope)?)),
+    })
+}
+
+/// Whether a condition holds; a comparison with an undefined side does not. A chain stops at its first false link.
+pub fn holds(condition: &Condition, env: &mut [f64], functions: &[UserFn]) -> bool {
+    match condition {
+        Condition::Chain(operands, cmps) => {
+            let mut left = eval(&operands[0], env, functions);
+            cmps.iter().zip(&operands[1..]).all(|(cmp, operand)| {
+                let right = eval(operand, env, functions);
+                let result = cmp.holds(left, right);
+                left = right;
+                result
+            })
+        }
+        Condition::And(a, b) => holds(a, env, functions) && holds(b, env, functions),
+        Condition::Or(a, b) => holds(a, env, functions) || holds(b, env, functions),
+    }
+}
+
+/// The branch of a piecewise function that applies with the current environment.
+pub fn branch(branches: &[(Option<Condition>, Expr)], env: &mut [f64], functions: &[UserFn]) -> Option<usize> {
+    branches.iter().position(|(condition, _)| condition.as_ref().is_none_or(|condition| holds(condition, env, functions)))
 }
 
 /// The most terms one sum or product adds up: a slider pushed to 10⁶ gives an error (constant bounds) or no value
@@ -130,6 +169,12 @@ pub fn compile(node: &Node, scope: &Scope) -> Result<Expr, MathError> {
         },
         Node::Fact(arg) => Expr::Fact(Box::new(compile(arg, scope)?)),
         Node::Tuple(_) => return Err(MathError::new("error.tuple", "")),
+        Node::Piecewise(branches) => Expr::Piecewise(
+            branches
+                .iter()
+                .map(|(condition, value)| Ok((condition.as_ref().map(|condition| compile_condition(condition, scope)).transpose()?, compile(value, scope)?)))
+                .collect::<Result<_, MathError>>()?,
+        ),
     })
 }
 
@@ -199,6 +244,10 @@ pub fn eval(expr: &Expr, env: &mut [f64], functions: &[UserFn]) -> f64 {
             env[*slot] = saved;
             total
         }
+        Expr::Piecewise(branches) => match branch(branches, env, functions) {
+            Some(index) => eval(&branches[index].1, env, functions),
+            None => f64::NAN,
+        },
     }
 }
 

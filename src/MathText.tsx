@@ -27,6 +27,7 @@ type MNode =
   | { k: 'post'; base: MNode; text: string }
   | { k: 'integral'; body: MNode; from: MNode; to: MNode }
   | { k: 'series'; sign: 'Σ' | '∏'; index: MNode; from: MNode; to: MNode; body: MNode }
+  | { k: 'cases'; branches: { condition?: MNode; value: MNode }[]; closed: boolean }
 
 const FUNCTIONS = [
   'sin', 'cos', 'tan', 'cot', 'sec', 'csc', 'arcsin', 'asin', 'arccos', 'acos', 'arctan', 'atan', 'arccot', 'acot',
@@ -49,8 +50,20 @@ const DISPLAY_FN: Record<string, string> = { real: 'Re', imag: 'Im', sgn: 'sign'
 /** Primes as typed (`'`, the typographic apostrophe, ′, ″, ‴), counted. */
 const PRIMES: Record<string, number> = { "'": 1, '’': 1, '′': 1, '″': 2, '‴': 3 }
 const primeText = (count: number): string => (count === 2 ? '″' : count === 3 ? '‴' : '′'.repeat(count))
-const RELATIONS = new Set(['=', '<', '>', '≤', '≥', '≔'])
+const RELATIONS = new Set(['=', '<', '>', '≤', '≥', '≠', '≔'])
 const OPERATORS: Record<string, string> = { '-': '−', '−': '−', '+': '+', '*': '·', '×': '·', '·': '·', '⋅': '·', '∗': '·', '<=': '≤', '>=': '≥', '⩽': '≤', '⩾': '≥', ':=': '≔' }
+
+/** Whether the brace at `open` starts a piecewise function: a `:` (not `:=`) directly inside it, as the kernel reads it. */
+function piecewiseAt(source: string, open: number): boolean {
+  let depth = 0
+  for (let at = open; at < source.length; at++) {
+    const c = source[at]
+    if ('([{'.includes(c)) depth++
+    else if (')]}'.includes(c)) { if (--depth === 0) return false }
+    else if (c === ':' && depth === 1 && source[at + 1] !== '=') return true
+  }
+  return false
+}
 
 const isLetter = (c: string): boolean => c !== 'Σ' && /[A-Za-zΑ-ω]/.test(c)
 
@@ -75,6 +88,7 @@ function splitWord(letters: string, tokens: Tok[]): void {
 export function tokenizeMath(source: string): Tok[] {
   const tokens: Tok[] = []
   let depth = 0
+  const brackets: boolean[] = []
   let i = 0
   while (i < source.length) {
     const c = source[i]
@@ -94,7 +108,9 @@ export function tokenizeMath(source: string): Tok[] {
       let j = i
       while (j < source.length && isLetter(source[j])) j++
       const run = source.slice(i, j)
-      if (run === 'Re') tokens.push({ t: 'fn', v: 'real' })
+      const word = run.toLowerCase()
+      if (brackets.includes(true) && (word === 'and' || word === 'or')) tokens.push({ t: 'op', v: word === 'and' ? '∧' : '∨' })
+      else if (run === 'Re') tokens.push({ t: 'fn', v: 'real' })
       else if (run === 'Im') tokens.push({ t: 'fn', v: 'imag' })
       else splitWord(run, tokens)
       i = j
@@ -135,8 +151,27 @@ export function tokenizeMath(source: string): Tok[] {
       i += 2
       continue
     }
-    if (c === '(' || c === '[') depth++
-    if (c === ')' || c === ']') depth = Math.max(0, depth - 1)
+    if ((pair === '!=' && brackets.includes(true)) || pair === '&&') {
+      tokens.push({ t: 'op', v: pair === '!=' ? '≠' : '∧' })
+      i += 2
+      continue
+    }
+    if (c === '{' && piecewiseAt(source, i)) {
+      depth++
+      brackets.push(true)
+      tokens.push({ t: 'op', v: '{:' })
+      i++
+      continue
+    }
+    if (c === '}' && brackets[brackets.length - 1] === true) {
+      depth = Math.max(0, depth - 1)
+      brackets.pop()
+      tokens.push({ t: 'op', v: ':}' })
+      i++
+      continue
+    }
+    if (c === '(' || c === '[' || c === '{') { depth++; brackets.push(false) }
+    if (c === ')' || c === ']' || c === '}') { depth = Math.max(0, depth - 1); brackets.pop() }
     tokens.push({ t: 'op', v: c === '∞' ? '∞' : c })
     i++
   }
@@ -219,7 +254,7 @@ class Parser {
     const token = this.peek()
     if (!token) return false
     if (token.t === 'num' || token.t === 'id' || token.t === 'fn') return true
-    return token.t === 'op' && (['(', '[', '√', '∛', '∞'].includes(token.v) || (token.v === '|' && this.bars === 0))
+    return token.t === 'op' && (['(', '[', '{:', '√', '∛', '∞'].includes(token.v) || (token.v === '|' && this.bars === 0))
   }
 
   private unary(): MNode {
@@ -292,6 +327,7 @@ class Parser {
       case 'op':
         if (token.v === '(') return this.group('(', ')')
         if (token.v === '[') return this.group('[', ']')
+        if (token.v === '{:') return this.cases()
         if (token.v === '|') {
           this.bars++
           const body = this.isOp('|') ? seq([]) : this.sum()
@@ -305,6 +341,29 @@ class Parser {
         if (token.v === '∞') return { k: 'sym', text: '∞' }
         return { k: 'sym', text: OPERATORS[token.v] ?? token.v }
     }
+  }
+
+  /** `{x < 0: −x, x^2}`: each branch's condition (relations joined by and/or) and value, up to the closing brace. */
+  private cases(): MNode {
+    const branches: { condition?: MNode; value: MNode }[] = []
+    while (this.at < this.tokens.length && !this.isOp(':}')) {
+      const first = [this.relation()]
+      while (this.isOp('∧') || this.isOp('∨')) {
+        const join = (this.tokens[this.at++] as { v: string }).v === '∧' ? 'and' : 'or'
+        first.push({ k: 'op', text: join, relation: true }, this.relation())
+      }
+      if (this.isOp(':')) {
+        this.at++
+        branches.push({ condition: seq(first), value: this.isOp(',') || this.isOp(':}') ? seq([]) : this.relation() })
+      } else {
+        branches.push({ value: seq(first) })
+      }
+      if (!this.isOp(',')) break
+      this.at++
+    }
+    const closed = this.isOp(':}')
+    if (closed) this.at++
+    return { k: 'cases', branches, closed }
   }
 
   private call(token: Extract<Tok, { t: 'fn' }>): MNode {
@@ -364,9 +423,13 @@ const tall = (node: MNode): boolean => {
     case 'fn': return node.arg ? tall(node.arg) : false
     case 'integral': return true
     case 'series': return true
+    case 'cases': return true
     default: return false
   }
 }
+
+/** The label of a piecewise function's branch without a condition, set by MathText for the render it runs. */
+let otherwiseLabel = 'otherwise'
 
 function render(node: MNode, key: string | number = 0): ReactNode {
   switch (node.k) {
@@ -427,6 +490,20 @@ function render(node: MNode, key: string | number = 0): ReactNode {
           <span className="gm-series-body">{render(node.body)}</span>
         </span>
       )
+    case 'cases':
+      return (
+        <span key={key} className="gm-cases">
+          <span className="gm-cases-brace" style={{ transform: `scaleY(${Math.max(1, node.branches.length) * 1.05})` }}>{'{'}</span>
+          <span className="gm-cases-rows">
+            {node.branches.map((branch, index) => (
+              <span key={index} className="gm-cases-row">
+                <span className="gm-cases-value">{render(branch.value)}</span>
+                <span className="gm-cases-condition">{branch.condition ? render(branch.condition) : <span className="gm-cases-otherwise">{otherwiseLabel}</span>}</span>
+              </span>
+            ))}
+          </span>
+        </span>
+      )
     case 'fn':
       return (
         <span key={key} className="gm-call">
@@ -456,7 +533,8 @@ export function parseMath(source: string): MNode {
   return markVectorField(new Parser(tokenizeMath(source)).parse())
 }
 
-export const MathText = ({ text }: { text: string }): ReactElement => {
+/** `otherwise` labels the branch of a piecewise function without a condition, in the sheet's language. */
+export const MathText = ({ text, otherwise }: { text: string; otherwise?: string }): ReactElement => {
   const node = React.useMemo(() => {
     try {
       return parseMath(text)
@@ -464,5 +542,6 @@ export const MathText = ({ text }: { text: string }): ReactElement => {
       return { k: 'sym', text } as MNode
     }
   }, [text])
+  otherwiseLabel = otherwise ?? 'otherwise'
   return <span className="gm-math" aria-hidden>{render(node)}</span>
 }

@@ -272,6 +272,8 @@ pub fn compile(node: &Node, scope: &Scope) -> Result<CExpr, MathError> {
             [index, ..] => return Err(MathError::new("error.index", if let Node::Var(name) = index { name.clone() } else { String::new() })),
             [] => return Err(MathError::new("error.arity", "sum")),
         },
+        // Piecewise functions compare real numbers.
+        Node::Piecewise(_) => return Err(MathError::new("error.unsupported", "")),
         // Derivatives, integrals and tangents are real.
         Node::Call(Callee::Derivative(..) | Callee::Integral | Callee::Tangent, _) => return Err(MathError::new("error.unsupported", "")),
     })

@@ -128,6 +128,12 @@ button.grapher-handle:hover { color:var(--text-color); }
 .gm-series-to, .gm-series-from { display:inline-flex; align-items:center; font-size:0.6em; white-space:nowrap; }
 .gm-series-from .gm-rel { padding:0 0.12em; }
 .gm-series-body { display:inline-flex; align-items:center; }
+.gm-cases { display:inline-flex; align-items:center; padding:0.1em 0; }
+.gm-cases-brace { display:inline-block; margin-right:0.18em; line-height:1; }
+.gm-cases-rows { display:inline-grid; grid-template-columns:auto auto; column-gap:0.9em; row-gap:0.08em; font-size:0.86em; }
+.gm-cases-row { display:contents; }
+.gm-cases-value, .gm-cases-condition { display:inline-flex; align-items:center; }
+.gm-cases-otherwise { font-style:normal; }
 .grapher-delete, .grapher-row-spacer { width:28px; height:36px; }
 .grapher-delete { display:inline-flex; align-items:center; justify-content:center; padding:0; border:none; background:none;
   color:var(--text-tertiary); cursor:pointer; opacity:0; transition:opacity var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out); }

@@ -368,6 +368,26 @@ describe('the plot kernel through api.wasm', () => {
     expect(paths.length).toBeGreaterThan(0)
   })
 
+  it('draws piecewise functions branch by branch with clean breaks at jumps', () => {
+    const rows = sheet('{x < 0: −x, x ≥ 0: x^2}', 'y = {x < 1: x, x + 3}', 'f(x) = {0 ≤ x < 2: x, 2 ≤ x <= 4: 4 - x}', "f'(x)", 'int(f, 0, 4)', '{x: 1}')
+    const analyses = engine.analyze('cartesian', rows)
+    expect(analyses.map((row) => row.kind)).toEqual(['function', 'function', 'function', 'function', 'integral', 'error'])
+    expect(analyses[4].value).toBeCloseTo(4, 9)
+    expect(analyses[5].error?.key).toBe('error.condition')
+    expect(engine.evaluate('cartesian', rows, 0, -3)).toBe(3)
+    expect(engine.evaluate('cartesian', rows, 1, 2)).toBe(5)
+    expect(engine.evaluate('cartesian', rows, 3, 3)).toBe(-1)
+    expect(engine.evaluate('cartesian', rows, 2, 5)).toBeNaN()
+    const paths = engine.sample('cartesian', rows, 400, 300, { cx: 0, cy: 0, scale: 20 })
+    expect(paths.filter((path) => path.row === 0)).toHaveLength(1)
+    const jump = paths.filter((path) => path.row === 1)
+    expect(jump).toHaveLength(2)
+    const left = jump[0].points
+    expect(left[left.length - STRIDE + 2]).toBeCloseTo(1, 3)
+    expect(jump[1].points[2]).toBeCloseTo(1, 3)
+    for (const path of jump) for (let i = STRIDE; i < path.points.length; i += STRIDE) expect(Math.abs(path.points[i + 1] - path.points[i + 1 - STRIDE])).toBeLessThan(8)
+  })
+
   it('shades inequalities on Cartesian sheets', () => {
     const rows = sheet('y > x^2', 'x^2 + y^2 ≤ 4')
     expect(engine.analyze('cartesian', rows)).toMatchObject([{ kind: 'region', strict: true }, { kind: 'region', strict: false }])

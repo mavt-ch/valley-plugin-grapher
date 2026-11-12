@@ -91,10 +91,32 @@ fn superscript(c: char) -> Option<char> {
     digits.iter().position(|digit| *digit == c).and_then(|value| char::from_digit(value as u32, 10))
 }
 
+/// Whether the brace at `open` starts a piecewise function: a `:` (not `:=`) directly inside it, before its closing
+/// brace or the end of the row. Braces without one stay parentheses, as they always were.
+fn piecewise_at(chars: &[char], open: usize) -> bool {
+    let mut depth = 0_i32;
+    for (at, c) in chars.iter().enumerate().skip(open) {
+        match c {
+            '(' | '[' | '{' => depth += 1,
+            ')' | ']' | '}' => {
+                depth -= 1;
+                if depth == 0 {
+                    return false;
+                }
+            }
+            ':' if depth == 1 && chars.get(at + 1) != Some(&'=') => return true,
+            _ => {}
+        }
+    }
+    false
+}
+
 pub fn tokenize(source: &str) -> Result<Vec<Tok>, MathError> {
     let chars: Vec<char> = source.chars().collect();
     let mut tokens = Vec::new();
     let mut depth = 0_i32;
+    // One entry per open bracket: whether it is the brace of a piecewise function, closed by `}` rather than `)`.
+    let mut brackets: Vec<bool> = Vec::new();
     let mut i = 0;
     while i < chars.len() {
         let c = chars[i];
@@ -134,9 +156,13 @@ pub fn tokenize(source: &str) -> Result<Vec<Tok>, MathError> {
                 i += 1;
             }
             // `Re z` and `Im z`, capitalized as in print; lower-case `re`/`im` stay products such as r·e.
+            let word: String = chars[start..i].iter().collect::<String>().to_ascii_lowercase();
             match chars[start..i] {
                 ['R', 'e'] => tokens.push(Tok::Ident("real".into())),
                 ['I', 'm'] => tokens.push(Tok::Ident("imag".into())),
+                // Inside a piecewise function `and` and `or` join conditions; elsewhere they stay letters.
+                _ if brackets.contains(&true) && word == "and" => tokens.push(Tok::Op('∧')),
+                _ if brackets.contains(&true) && word == "or" => tokens.push(Tok::Op('∨')),
                 _ => split_word(&chars[start..i], &mut tokens),
             }
             if chars.get(i) == Some(&'_') {
@@ -197,17 +223,30 @@ pub fn tokenize(source: &str) -> Result<Vec<Tok>, MathError> {
                 i += 1;
                 if c == '<' { '≤' } else { '≥' }
             }
-            '<' | '>' | '≤' | '≥' => c,
+            '<' | '>' | '≤' | '≥' | '≠' | '∧' | '∨' => c,
+            '!' if chars.get(i) == Some(&'=') && brackets.contains(&true) => {
+                i += 1;
+                '≠'
+            }
+            '&' => {
+                if chars.get(i) == Some(&'&') {
+                    i += 1;
+                }
+                '∧'
+            }
+            ':' => ':',
             '⩽' => '≤',
             '⩾' => '≥',
             '+' | '/' | '^' | ',' | '=' | '|' | '!' | '√' | '∛' | '°' | '*' => c,
             '(' | '[' | '{' => {
                 depth += 1;
-                '('
+                let piecewise = c == '{' && piecewise_at(&chars, i - 1);
+                brackets.push(piecewise);
+                if piecewise { '{' } else { '(' }
             }
             ')' | ']' | '}' => {
                 depth -= 1;
-                ')'
+                if brackets.pop() == Some(true) { '}' } else { ')' }
             }
             '-' | '−' | '–' => '-',
             '×' | '·' | '⋅' | '∗' => '*',
@@ -311,6 +350,17 @@ mod tests {
         assert_eq!(idents("∫(sin x, 0, π) + integral(f, 1, 2) - int(x, a, b)"), ["int", "(", "sin", "x", ",", "0", ",", "π", ")", "+", "integral", "(", "f", ",", "1", ",", "2", ")", "-", "int", "(", "x", ",", "a", ",", "b", ")"]);
         assert_eq!(idents("tangent(f, a) tan x"), ["tangent", "(", "f", ",", "a", ")", "tan", "x"]);
         assert_eq!(idents("Tangent sint"), ["tangent", "sin", "t"]);
+    }
+
+    #[test]
+    fn piecewise_braces_conditions_and_plain_braces() {
+        assert_eq!(idents("{x < 0: -x, x >= 0: x^2}"), ["{", "x", "<", "0", ":", "-", "x", ",", "x", "≥", "0", ":", "x", "^", "2", "}"]);
+        assert_eq!(idents("{x != 1 and x ≠ 2 or x&&y: 1, 0}"), ["{", "x", "≠", "1", "∧", "x", "≠", "2", "∨", "x", "∧", "y", ":", "1", ",", "0", "}"]);
+        assert_eq!(idents("{0 ≤ x < 1: (x), {x<2: 1, 2}}"), ["{", "0", "≤", "x", "<", "1", ":", "(", "x", ")", ",", "{", "x", "<", "2", ":", "1", ",", "2", "}", "}"]);
+        assert_eq!(idents("{x+1}{2} and or"), ["(", "x", "+", "1", ")", "(", "2", ")", "a", "n", "d", "o", "r"]);
+        assert_eq!(idents("x!=3 f(x) := x"), ["x", "!", "=", "3", "f", "(", "x", ")", "=", "x"]);
+        assert_eq!(idents("{x < 0: 1"), ["{", "x", "<", "0", ":", "1"]);
+        assert_eq!(idents("b_{12}"), ["b_12"]);
     }
 
     #[test]

@@ -13,7 +13,7 @@ use crate::complex::{self, C64, CExpr, CUserFn};
 use crate::error::MathError;
 use crate::eval::{Expr, Scope, UserFn, compile, constant, eval, index_range};
 use crate::lexer::{Tok, tokenize};
-use crate::parser::{BinOp, Callee, Node, Relation, Statement, parse};
+use crate::parser::{BinOp, Callee, Cond, Node, Relation, Statement, parse};
 
 pub const X: usize = 0;
 pub const Y: usize = 1;
@@ -411,6 +411,12 @@ fn collect(node: &Node, names: &mut BTreeSet<String>, calls: &mut BTreeSet<Strin
             }
         }
         Node::Tuple(items) => items.iter().for_each(|item| collect(item, names, calls)),
+        Node::Piecewise(branches) => {
+            for (condition, value) in branches {
+                condition.iter().flat_map(Cond::nodes).for_each(|node| collect(node, names, calls));
+                collect(value, names, calls);
+            }
+        }
     }
 }
 
@@ -430,6 +436,12 @@ fn indices(node: &Node, out: &mut Vec<String>) {
             args.iter().for_each(|arg| indices(arg, out));
         }
         Node::Tuple(items) => items.iter().for_each(|item| indices(item, out)),
+        Node::Piecewise(branches) => {
+            for (condition, value) in branches {
+                condition.iter().flat_map(Cond::nodes).for_each(|node| indices(node, out));
+                indices(value, out);
+            }
+        }
     }
 }
 
@@ -479,6 +491,12 @@ fn rename(node: &mut Node, from: &str, to: &str) {
             rename(right, from, to);
         }
         Node::Call(_, args) | Node::Tuple(args) => args.iter_mut().for_each(|arg| rename(arg, from, to)),
+        Node::Piecewise(branches) => {
+            for (condition, value) in branches {
+                condition.iter_mut().flat_map(Cond::nodes_mut).for_each(|node| rename(node, from, to));
+                rename(value, from, to);
+            }
+        }
     }
 }
 
@@ -493,6 +511,7 @@ fn real_valued(node: &Node) -> bool {
         Node::Bin(_, left, right) => real_valued(left) && real_valued(right),
         Node::Call(Callee::Builtin(builtin), args) => TO_REAL.contains(builtin) || args.iter().all(real_valued),
         Node::Call(Callee::Sum | Callee::Product, args) => args.iter().all(real_valued),
+        Node::Piecewise(branches) => branches.iter().all(|(condition, value)| condition.iter().flat_map(Cond::nodes).all(real_valued) && real_valued(value)),
         Node::Call(Callee::User(_) | Callee::Derivative(..) | Callee::Integral | Callee::Tangent, _) | Node::Tuple(_) => false,
     }
 }
@@ -504,6 +523,7 @@ fn complex_part(node: &Node) -> Option<&Node> {
         Node::Neg(arg) | Node::Fact(arg) => complex_part(arg),
         Node::Bin(_, left, right) => complex_part(left).or_else(|| complex_part(right)),
         Node::Call(_, args) | Node::Tuple(args) => args.iter().find_map(complex_part),
+        Node::Piecewise(branches) => branches.iter().find_map(|(condition, value)| condition.iter().flat_map(Cond::nodes).find_map(complex_part).or_else(|| complex_part(value))),
         _ => None,
     }
 }
@@ -653,6 +673,10 @@ impl Analysis<'_> {
                 result
             }
             Node::Call(_, args) | Node::Tuple(args) => args.iter().try_for_each(|arg| self.count_terms(arg, bound)),
+            Node::Piecewise(branches) => branches.iter().try_for_each(|(condition, value)| {
+                condition.iter().flat_map(Cond::nodes).try_for_each(|node| self.count_terms(node, bound))?;
+                self.count_terms(value, bound)
+            }),
         }
     }
 
@@ -1604,6 +1628,37 @@ mod tests {
         let complex = self::sheet(Mode::Complex, &["prod(k, 1, 2, i)", "sum(n, 0, 3, i^n)"]);
         assert!(matches!(complex.rows[0].outcome, Outcome::Plotted(Plot::ComplexPoint { re, im, .. }) if (re + 1.0).abs() < 1e-12 && im == 0.0), "{:?}", complex.rows[0].outcome);
         assert!(matches!(complex.rows[1].outcome, Outcome::Plotted(Plot::ComplexPoint { re, im, .. }) if re.abs() < 1e-12 && im.abs() < 1e-12));
+    }
+
+    #[test]
+    fn piecewise_functions_take_the_first_true_branch() {
+        let mut sheet = sheet(Mode::Cartesian, &[
+            "{x < 0: −x, x ≥ 0: x^2}", "y = {x < 0: −x, x^2}", "f(x) = {0 ≤ x < 1: x, 1 ≤ x <= 2: 2 - x}", "f(x) + 1", "{x < -1 or x > 1: 1, x = 0: 5, x != 0.5 and x > 0: 2}",
+            "f'(x)", "int(f, 0, 2)", "{x < 0: 1, x < 1: 2, 3}", "z = {x < 0: 1, 0}", "g(x) = {x < 0: sum(k, 1, 3, k), N}", "{x: 1}", "{x + 1}^2", "y = 2 {x < 0: -1, 1}",
+        ]);
+        for (row, x, expected) in [(0, -2.0, 2.0), (0, 3.0, 9.0), (1, -0.5, 0.5), (1, 0.5, 0.25), (2, 0.25, 0.25), (2, 1.5, 0.5), (3, 1.5, 1.5), (4, 2.0, 1.0), (4, 0.0, 5.0), (4, 0.7, 2.0), (5, 0.5, 1.0), (5, 1.5, -1.0), (7, -1.0, 1.0), (7, 0.5, 2.0), (7, 9.0, 3.0), (11, 2.0, 9.0), (12, -3.0, -2.0)] {
+            let got = at(&mut sheet, row, X, x);
+            assert!((got - expected).abs() < 1e-12, "row {row} at {x}: {got} != {expected}");
+        }
+        // No true branch: undefined, a gap in the curve.
+        for (row, x) in [(2, -0.5), (2, 2.5), (4, 0.5), (4, -0.5)] {
+            assert!(at(&mut sheet, row, X, x).is_nan(), "row {row} at {x}");
+        }
+        match sheet.rows[6].plot() {
+            Some(Plot::Integral { value, .. }) => assert!((value - 1.0).abs() < 1e-9, "{value}"),
+            other => panic!("{other:?}"),
+        }
+        assert_eq!(error(&sheet, 8).key, "error.unsupported");
+        assert_eq!(error(&sheet, 9).missing, ["N"]);
+        assert_eq!(error(&sheet, 10).key, "error.condition");
+        let mut space = self::sheet(Mode::Space, &["z = {x^2 + y^2 < 4: 4 - x^2 - y^2, 0}"]);
+        let Some(Plot::Surface { expr, .. }) = space.rows[0].plot().cloned() else { panic!("{:?}", space.rows[0].outcome) };
+        space.env[X] = 1.0;
+        space.env[Y] = 1.0;
+        assert_eq!(eval(&expr, &mut space.env, &space.functions), 2.0);
+        space.env[X] = 3.0;
+        assert_eq!(eval(&expr, &mut space.env, &space.functions), 0.0);
+        assert_eq!(error(&self::sheet(Mode::Complex, &["{1 < 2: 1, 2}"]), 0).key, "error.unsupported");
     }
 
     #[test]

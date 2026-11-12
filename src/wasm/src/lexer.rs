@@ -30,14 +30,16 @@ const GREEK: [(&str, char); 14] = [
     ("pi", 'π'),
 ];
 
-/// Words for the calculus rows, read like function names: `int(f, a, b)` (also `integral`, `∫`) and `tangent(f, a)`.
-pub const SPECIAL: [&str; 3] = ["integral", "int", "tangent"];
+/// Words for the calculus rows, read like function names: `int(f, a, b)` (also `integral`, `∫`), `tangent(f, a)`, and
+/// sums and products `sum(n, a, b, …)` (also `Σ`) and `prod(k, a, b, …)` (also `product`, `∏`).
+pub const SPECIAL: [&str; 6] = ["integral", "int", "tangent", "sum", "product", "prod"];
 
 /// The plot variables a trailing digit squares or cubes: `x2` is `x²`.
 const POWERED: [&str; 4] = ["x", "y", "t", "θ"];
 
+/// Σ is the sum sign, not a letter of a name.
 fn is_letter(c: char) -> bool {
-    c.is_ascii_alphabetic() || ('\u{391}'..='\u{3c9}').contains(&c)
+    c != 'Σ' && (c.is_ascii_alphabetic() || ('\u{391}'..='\u{3c9}').contains(&c))
 }
 
 /// Words match regardless of case, so `Sin x`, `PI` and `Theta` work; single letters keep their case.
@@ -119,6 +121,11 @@ pub fn tokenize(source: &str) -> Result<Vec<Tok>, MathError> {
             }
             let value = text.parse::<f64>().map_err(|_| MathError::new("error.unexpected", text))?;
             tokens.push(Tok::Num(value));
+            continue;
+        }
+        if c == 'Σ' {
+            tokens.push(Tok::Ident("sum".into()));
+            i += 1;
             continue;
         }
         if is_letter(c) {
@@ -213,6 +220,10 @@ pub fn tokenize(source: &str) -> Result<Vec<Tok>, MathError> {
                 tokens.push(Tok::Ident("int".into()));
                 continue;
             }
+            '∏' => {
+                tokens.push(Tok::Ident("prod".into()));
+                continue;
+            }
             // Primes of a derivative: `f'`, `f′`, `f″`, `f‴`, and the typographic apostrophe a keyboard may substitute.
             '\'' | '′' | '’' | '″' | '‴' => {
                 let count = match c {
@@ -300,5 +311,14 @@ mod tests {
         assert_eq!(idents("∫(sin x, 0, π) + integral(f, 1, 2) - int(x, a, b)"), ["int", "(", "sin", "x", ",", "0", ",", "π", ")", "+", "integral", "(", "f", ",", "1", ",", "2", ")", "-", "int", "(", "x", ",", "a", ",", "b", ")"]);
         assert_eq!(idents("tangent(f, a) tan x"), ["tangent", "(", "f", ",", "a", ")", "tan", "x"]);
         assert_eq!(idents("Tangent sint"), ["tangent", "sin", "t"]);
+    }
+
+    #[test]
+    fn sums_and_products() {
+        assert_eq!(idents("sum(n, 0, N, x^n)"), ["sum", "(", "n", ",", "0", ",", "N", ",", "x", "^", "n", ")"]);
+        assert_eq!(idents("Σ(k, 1, 3, k) ∏(k, 1, 3, k)"), ["sum", "(", "k", ",", "1", ",", "3", ",", "k", ")", "prod", "(", "k", ",", "1", ",", "3", ",", "k", ")"]);
+        assert_eq!(idents("SUM Sum Product PROD prod"), ["sum", "sum", "product", "prod", "prod"]);
+        assert_eq!(idents("sigma σ Σx xΣ"), ["σ", "σ", "sum", "x", "x", "sum"]);
+        assert_eq!(idents("su m"), ["s", "u", "m"]);
     }
 }

@@ -348,6 +348,26 @@ describe('the plot kernel through api.wasm', () => {
     expect(encodeRows(rows).split('\u001e')[3].split('\u001f')[9]).toBe('0')
   })
 
+  it('adds and multiplies over an index range with a slider for the last index', () => {
+    const rows = (n: string) => sheet(`N = ${n}`, 'sum(n, 0, N, (-1)^n x^(2n+1) / (2n+1)!)', 'Σ(n, 0, N, x^n / n!)', '4/π · sum(k, 0, N, sin((2k+1)x) / (2k+1))', 'prod(k, 1, 5, k)', '∏(k, 1, N, k)', 'sum(k, 1, 10^6, k)', 'f(x) = sum(n, 0, N, x^n / n!)', "f'(x)", 'int(f, 0, 1)')
+    const analyses = engine.analyze('cartesian', rows('12'))
+    expect(analyses.map((row) => row.kind)).toEqual(['param', 'function', 'function', 'function', 'value', 'value', 'error', 'function', 'function', 'integral'])
+    expect(analyses[4].value).toBe(120)
+    expect(analyses[5].value).toBe(479001600)
+    expect(analyses[6].error).toMatchObject({ key: 'error.terms', param: '1000000' })
+    expect(analyses[9].value).toBeCloseTo(Math.E - 1, 9)
+    expect(engine.evaluate('cartesian', rows('12'), 1, 2)).toBeCloseTo(Math.sin(2), 9)
+    expect(engine.evaluate('cartesian', rows('12'), 2, 1.5)).toBeCloseTo(Math.exp(1.5), 6)
+    expect(engine.evaluate('cartesian', rows('12'), 8, 1.5)).toBeCloseTo(Math.exp(1.5), 6)
+    // Bounds are rounded: a slider at 2.4 sums three terms of e^x.
+    expect(engine.evaluate('cartesian', rows('2.4'), 2, 1)).toBeCloseTo(2.5, 12)
+    expect(engine.evaluate('cartesian', rows('200'), 3, 1)).toBeCloseTo(1, 2)
+    const undefinedN = engine.analyze('cartesian', sheet('sum(n, 0, N, x^n / n!)'))
+    expect(undefinedN[0].error).toEqual({ key: 'error.unknown', param: 'N', missing: ['N'] })
+    const paths = engine.sample('cartesian', rows('5'), 400, 300, { cx: 0, cy: 0, scale: 40 }).filter((path) => path.row === 2)
+    expect(paths.length).toBeGreaterThan(0)
+  })
+
   it('shades inequalities on Cartesian sheets', () => {
     const rows = sheet('y > x^2', 'x^2 + y^2 ≤ 4')
     expect(engine.analyze('cartesian', rows)).toMatchObject([{ kind: 'region', strict: true }, { kind: 'region', strict: false }])

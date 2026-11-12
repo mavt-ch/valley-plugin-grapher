@@ -31,6 +31,10 @@ pub enum Callee {
     Integral,
     /// `tangent(g, a)`: the tangent line at x = a; `tangent(g, a, b)` the tangent plane at (a, b) in 3D.
     Tangent,
+    /// `sum(n, a, b, g)`: Σ of `g` for the index n from a to b; its first argument is the index, a plain name.
+    Sum,
+    /// `prod(n, a, b, g)`: ∏ of `g` for the index n from a to b.
+    Product,
 }
 
 /// The most primes a derivative takes: `f‴(x)`.
@@ -241,6 +245,8 @@ impl Parser<'_> {
                 match name.as_str() {
                     "int" | "integral" => return self.special(Callee::Integral, &name, 3, 3),
                     "tangent" => return self.special(Callee::Tangent, &name, 2, 3),
+                    "sum" => return self.series(Callee::Sum, &name),
+                    "prod" | "product" => return self.series(Callee::Product, &name),
                     _ => {}
                 }
                 let primes = self.primes();
@@ -324,6 +330,21 @@ impl Parser<'_> {
         Ok(Node::Call(callee, args))
     }
 
+    /// `sum(n, a, b, g)` or `prod(n, a, b, g)`: index, first and last value of the index, then the term.
+    fn series(&mut self, callee: Callee, name: &str) -> Result<Node, MathError> {
+        if !self.eat('(') {
+            return Err(MathError::new("error.arity", name));
+        }
+        let args = self.group()?;
+        if args.len() != 4 {
+            return Err(MathError::new("error.arity", name));
+        }
+        if !matches!(args[0], Node::Var(_)) {
+            return Err(MathError::new("error.index", ""));
+        }
+        Ok(Node::Call(callee, args))
+    }
+
     /// After an opening parenthesis: comma-separated expressions up to the closing one.
     fn group(&mut self) -> Result<Vec<Node>, MathError> {
         let bars = std::mem::replace(&mut self.bars, 0);
@@ -342,7 +363,7 @@ impl Parser<'_> {
         let (min, max) = match &callee {
             Callee::Builtin(builtin) => builtin.arity(),
             Callee::User(_) | Callee::Derivative(..) => (1, 3),
-            Callee::Integral | Callee::Tangent => (0, 0),
+            Callee::Integral | Callee::Tangent | Callee::Sum | Callee::Product => (0, 0),
         };
         if args.len() < min || args.len() > max {
             return Err(MathError::new("error.arity", name));
@@ -492,5 +513,19 @@ mod tests {
         assert_eq!(fail("int(f, 1)").key, "error.arity");
         assert_eq!(fail("tangent(f)").key, "error.arity");
         assert_eq!(fail("int x").key, "error.arity");
+    }
+
+    #[test]
+    fn sums_and_products_take_index_bounds_and_term() {
+        let series = |callee: Callee, args: Vec<Node>| Node::Call(callee, args);
+        let term = bin(BinOp::Div, bin(BinOp::Pow, var("x"), var("n")), Node::Fact(Box::new(var("n"))));
+        assert_eq!(read("sum(n, 0, N, x^n / n!)").right, series(Callee::Sum, vec![var("n"), Node::Num(0.0), var("N"), term.clone()]));
+        assert_eq!(read("Σ(n, 0, N, x^n / n!").right, series(Callee::Sum, vec![var("n"), Node::Num(0.0), var("N"), term]));
+        assert_eq!(read("2prod(k, 1, 3, k)").right, bin(BinOp::Mul, Node::Num(2.0), series(Callee::Product, vec![var("k"), Node::Num(1.0), Node::Num(3.0), var("k")])));
+        assert_eq!(read("∏(k, 1, m + 1, k)").right, series(Callee::Product, vec![var("k"), Node::Num(1.0), bin(BinOp::Add, var("m"), Node::Num(1.0)), var("k")]));
+        let fail = |source: &str| parse(&tokenize(source).unwrap(), &HashSet::new()).unwrap_err().key;
+        assert_eq!(fail("sum(n, 0, 3)"), "error.arity");
+        assert_eq!(fail("sum n"), "error.arity");
+        assert_eq!(fail("sum(2n, 0, 3, n)"), "error.index");
     }
 }

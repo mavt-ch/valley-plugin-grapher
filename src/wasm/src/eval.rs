@@ -23,6 +23,27 @@ pub enum Expr {
     Derivative { index: usize, order: usize, arg: Box<Expr> },
     /// `int(g, a, b)`: ∫ₐᵇ `body` over the variable in `slot`.
     Integral { body: Box<Expr>, slot: usize, from: Box<Expr>, to: Box<Expr> },
+    /// `sum(n, a, b, g)` or `prod(n, a, b, g)`: Σ or ∏ of `body` with the index in `slot` running over the integers from a to b.
+    Series { product: bool, slot: usize, from: Box<Expr>, to: Box<Expr>, body: Box<Expr> },
+}
+
+/// The most terms one sum or product adds up: a slider pushed to 10⁶ gives an error (constant bounds) or no value
+/// (bounds that change along the curve) instead of a frozen graph.
+pub const MAX_TERMS: usize = 1000;
+
+/// The integers a sum's index runs over: both bounds rounded to the nearest integer (halves away from zero), then
+/// the first index and the number of terms; none when a bound is not finite or there are more than `MAX_TERMS`.
+/// A last index below the first is an empty range: 0 terms.
+pub fn index_range(from: f64, to: f64) -> Option<(f64, usize)> {
+    let (first, last) = (from.round(), to.round());
+    if !first.is_finite() || !last.is_finite() {
+        return None;
+    }
+    if last < first {
+        return Some((first, 0));
+    }
+    let count = last - first + 1.0;
+    (count <= MAX_TERMS as f64).then_some((first, count as usize))
 }
 
 #[derive(Clone, Debug)]
@@ -89,6 +110,24 @@ pub fn compile(node: &Node, scope: &Scope) -> Result<Expr, MathError> {
             _ => return Err(MathError::new("error.arity", "int")),
         },
         Node::Call(Callee::Tangent, _) => return Err(MathError::new("error.tangentRow", "")),
+        Node::Call(callee @ (Callee::Sum | Callee::Product), args) => match args.as_slice() {
+            [Node::Var(index), from, to, body] => {
+                let slot = match (constant(index), scope.slots.get(index)) {
+                    (None, Some(slot)) => *slot,
+                    _ => return Err(MathError::new("error.index", index.clone())),
+                };
+                // The index is the term's own variable, whatever the row around it may read.
+                let inner = Scope { slots: scope.slots, functions: scope.functions, allow: &|name| name == index || (scope.allow)(name) };
+                Expr::Series {
+                    product: *callee == Callee::Product,
+                    slot,
+                    from: Box::new(compile(from, scope)?),
+                    to: Box::new(compile(to, scope)?),
+                    body: Box::new(compile(body, &inner)?),
+                }
+            }
+            _ => return Err(MathError::new("error.arity", if *callee == Callee::Sum { "sum" } else { "prod" })),
+        },
         Node::Fact(arg) => Expr::Fact(Box::new(compile(arg, scope)?)),
         Node::Tuple(_) => return Err(MathError::new("error.tuple", "")),
     })
@@ -147,6 +186,18 @@ pub fn eval(expr: &Expr, env: &mut [f64], functions: &[UserFn]) -> f64 {
         Expr::Integral { body, slot, from, to } => {
             let (a, b) = (eval(from, env, functions), eval(to, env, functions));
             calculus::integrate(body, *slot, a, b, env, functions)
+        }
+        Expr::Series { product, slot, from, to, body } => {
+            let Some((first, count)) = index_range(eval(from, env, functions), eval(to, env, functions)) else { return f64::NAN };
+            let saved = env[*slot];
+            let mut total = if *product { 1.0 } else { 0.0 };
+            for k in 0..count {
+                env[*slot] = first + k as f64;
+                let term = eval(body, env, functions);
+                total = if *product { total * term } else { total + term };
+            }
+            env[*slot] = saved;
+            total
         }
     }
 }

@@ -11,7 +11,7 @@ use crate::builtins::Builtin;
 use crate::calculus;
 use crate::complex::{self, C64, CExpr, CUserFn};
 use crate::error::MathError;
-use crate::eval::{Expr, Scope, UserFn, compile, constant, eval};
+use crate::eval::{Expr, Scope, UserFn, compile, constant, eval, index_range};
 use crate::lexer::{Tok, tokenize};
 use crate::parser::{BinOp, Callee, Node, Relation, Statement, parse};
 
@@ -399,10 +399,37 @@ fn collect(node: &Node, names: &mut BTreeSet<String>, calls: &mut BTreeSet<Strin
                     names.extend(inner.into_iter().filter(|name| !BOUND.contains(&name.as_str())));
                     rest.iter().for_each(|arg| collect(arg, names, calls));
                 }
+                // The term of a sum or product reads its index as its own variable; the bounds read the row's names.
+                (Callee::Sum | Callee::Product, Some((Node::Var(index), rest))) => {
+                    let (bounds, term) = rest.split_at(rest.len().saturating_sub(1));
+                    bounds.iter().for_each(|arg| collect(arg, names, calls));
+                    let mut inner = BTreeSet::new();
+                    term.iter().for_each(|arg| collect(arg, &mut inner, calls));
+                    names.extend(inner.into_iter().filter(|name| name != index));
+                }
                 _ => args.iter().for_each(|arg| collect(arg, names, calls)),
             }
         }
         Node::Tuple(items) => items.iter().for_each(|item| collect(item, names, calls)),
+    }
+}
+
+/// The index names of the sums and products inside `node`, outermost first.
+fn indices(node: &Node, out: &mut Vec<String>) {
+    match node {
+        Node::Num(_) | Node::Var(_) => {}
+        Node::Neg(arg) | Node::Fact(arg) => indices(arg, out),
+        Node::Bin(_, left, right) => {
+            indices(left, out);
+            indices(right, out);
+        }
+        Node::Call(callee, args) => {
+            if let (Callee::Sum | Callee::Product, Some(Node::Var(index))) = (callee, args.first()) {
+                out.push(index.clone());
+            }
+            args.iter().for_each(|arg| indices(arg, out));
+        }
+        Node::Tuple(items) => items.iter().for_each(|item| indices(item, out)),
     }
 }
 
@@ -465,6 +492,7 @@ fn real_valued(node: &Node) -> bool {
         Node::Neg(arg) | Node::Fact(arg) => real_valued(arg),
         Node::Bin(_, left, right) => real_valued(left) && real_valued(right),
         Node::Call(Callee::Builtin(builtin), args) => TO_REAL.contains(builtin) || args.iter().all(real_valued),
+        Node::Call(Callee::Sum | Callee::Product, args) => args.iter().all(real_valued),
         Node::Call(Callee::User(_) | Callee::Derivative(..) | Callee::Integral | Callee::Tangent, _) | Node::Tuple(_) => false,
     }
 }
@@ -584,7 +612,48 @@ impl Analysis<'_> {
             error.missing = missing;
             return Err(error);
         }
+        let mut bound: Vec<String> = own.iter().map(|name| (*name).to_string()).collect();
+        for node in nodes {
+            self.count_terms(node, &mut bound)?;
+        }
         Ok(())
+    }
+
+    /// Refuses a sum or product whose constant bounds span more than `MAX_TERMS` terms, so a slider at 10⁶ shows an
+    /// error rather than freezing the graph. Bounds that read a plot variable, a function's parameter or an outer index
+    /// (`bound`) vary along the curve and are left to evaluation, which gives no value above the cap.
+    fn count_terms(&mut self, node: &Node, bound: &mut Vec<String>) -> Result<(), MathError> {
+        match node {
+            Node::Num(_) | Node::Var(_) => Ok(()),
+            Node::Neg(arg) | Node::Fact(arg) => self.count_terms(arg, bound),
+            Node::Bin(_, left, right) => {
+                self.count_terms(left, bound)?;
+                self.count_terms(right, bound)
+            }
+            Node::Call(Callee::Sum | Callee::Product, args) if args.len() == 4 => {
+                let Node::Var(index) = &args[0] else { return Err(MathError::new("error.index", "")) };
+                if is_reserved(index) || constant(index).is_some() {
+                    return Err(MathError::new("error.index", index.clone()));
+                }
+                let (from, to) = (&args[1], &args[2]);
+                self.count_terms(from, bound)?;
+                self.count_terms(to, bound)?;
+                let fixed = |node: &Node| names(node).iter().all(|name| !is_reserved(name) && !bound.contains(name));
+                if fixed(from) && fixed(to) {
+                    let (a, b) = (self.constant(from)?, self.constant(to)?);
+                    if index_range(a, b).is_none() {
+                        let count = b.round() - a.round() + 1.0;
+                        let shown = if count.is_finite() { format!("{count}") } else { "∞".to_string() };
+                        return Err(MathError::new("error.terms", shown));
+                    }
+                }
+                bound.push(index.clone());
+                let result = self.count_terms(&args[3], bound);
+                bound.pop();
+                result
+            }
+            Node::Call(_, args) | Node::Tuple(args) => args.iter().try_for_each(|arg| self.count_terms(arg, bound)),
+        }
     }
 
     fn resolve(&mut self, name: &str) -> Result<(), MathError> {
@@ -1193,6 +1262,24 @@ pub fn analyze(mode: Mode, inputs: &[RowInput]) -> Sheet {
         }
     }
 
+    // Every sum's or product's index gets a slot of its own unless its name already has one.
+    let mut series_indices = Vec::new();
+    for statement in statements.iter().flatten().flatten() {
+        indices(&statement.right, &mut series_indices);
+        if let Some(left) = &statement.left {
+            indices(left, &mut series_indices);
+        }
+    }
+    for index in series_indices {
+        if constant(&index).is_none()
+            && let Entry::Vacant(entry) = slots.entry(index)
+        {
+            entry.insert(env.len());
+            env.push(f64::NAN);
+            cenv.push(C64::NAN);
+        }
+    }
+
     let mut analysis = Analysis {
         statements: &statements,
         definitions,
@@ -1267,6 +1354,7 @@ mod tests {
     use std::f64::consts::PI;
 
     use super::*;
+    use crate::eval::factorial;
 
     fn sheet(mode: Mode, texts: &[&str]) -> Sheet {
         let inputs: Vec<RowInput> = texts.iter().map(|text| RowInput { text: text.to_string(), ..RowInput::default() }).collect();
@@ -1444,6 +1532,78 @@ mod tests {
         assert_eq!(error(&sheet, 13).key, "error.prime");
         // Derivatives are real: the complex sheets refuse them.
         assert_eq!(error(&self::sheet(Mode::Complex, &["f(z) = z^2", "f'(1)"]), 1).key, "error.unsupported");
+    }
+
+    #[test]
+    fn sums_and_products_over_an_index_range() {
+        let value = |sheet: &Sheet, row: usize| match sheet.rows[row].outcome {
+            Outcome::Value(value) => value,
+            ref other => panic!("row {row} is no value: {other:?}"),
+        };
+        // Taylor series of sin and e^x with a slider N; the index n offers no chip, N does.
+        for n in [3.0, 7.0, 12.0] {
+            let n_row = format!("N = {n}");
+            let mut sheet = sheet(Mode::Cartesian, &[&n_row, "y = sum(n, 0, N, (-1)^n x^(2n+1) / (2n+1)!)", "Σ(n, 0, N, x^n / n!)"]);
+            let terms = |x: f64, odd: bool| (0..=n as i32).map(|k| if odd { (-1.0_f64).powi(k) * x.powi(2 * k + 1) / factorial(f64::from(2 * k + 1)) } else { x.powi(k) / factorial(f64::from(k)) }).sum::<f64>();
+            for x in [-2.0, 0.3, 1.7] {
+                assert!((at(&mut sheet, 1, X, x) - terms(x, true)).abs() < 1e-12);
+                assert!((at(&mut sheet, 2, X, x) - terms(x, false)).abs() < 1e-12);
+            }
+        }
+        let close = sheet(Mode::Cartesian, &["N = 12", "sum(n, 0, N, (-1)^n x^(2n+1) / (2n+1)!)"]);
+        let mut close = close;
+        assert!((at(&mut close, 1, X, 2.0) - 2.0_f64.sin()).abs() < 1e-9);
+        let missing = sheet(Mode::Cartesian, &["sum(n, 0, N, x^n / n!)", "prod(k, 1, m, k)"]);
+        assert_eq!(error(&missing, 0).missing, ["N"]);
+        assert_eq!(error(&missing, 1).missing, ["m"]);
+        // Fourier square wave: ±1 away from the jumps.
+        let mut wave = sheet(Mode::Cartesian, &["N = 400", "4/π · sum(k, 0, N, sin((2k+1)x) / (2k+1))"]);
+        assert!((at(&mut wave, 1, X, 1.0) - 1.0).abs() < 0.01);
+        assert!((at(&mut wave, 1, X, -2.0) + 1.0).abs() < 0.01);
+        // Finite products, rounding, empty ranges, the cap.
+        let sheet = sheet(Mode::Cartesian, &[
+            "prod(k, 1, 5, k)", "product(k, 1, 4, 1 - 1/(k+1)^2)", "sum(k, 1, 3.6, k)", "sum(k, 0.5, 2.4, k)", "sum(k, 5, 1, k)", "prod(k, 5, 1, k)",
+            "sum(k, 1, 10^6, k)", "sum(k, 1, inf, 1/k^2)", "sum(k, 1, 1000, 1) + sum(k, 0, 1000, 1)", "sum(x, 0, 3, x)", "sum(π, 0, 3, 1)", "sum(i, 1, 3, sum(j, 1, i, j))", "a = 2", "∏(k, a, a + 2, k)",
+        ]);
+        assert_eq!(value(&sheet, 0), 120.0);
+        assert!((value(&sheet, 1) - 0.6).abs() < 1e-12);
+        assert_eq!(value(&sheet, 2), 10.0);
+        assert_eq!(value(&sheet, 3), 3.0);
+        assert_eq!(value(&sheet, 4), 0.0);
+        assert_eq!(value(&sheet, 5), 1.0);
+        assert_eq!((error(&sheet, 6).key, error(&sheet, 6).param.as_str()), ("error.terms", "1000000"));
+        assert_eq!((error(&sheet, 7).key, error(&sheet, 7).param.as_str()), ("error.terms", "∞"));
+        assert_eq!((error(&sheet, 8).key, error(&sheet, 8).param.as_str()), ("error.terms", "1001"));
+        assert_eq!(error(&sheet, 9).key, "error.index");
+        assert_eq!(error(&sheet, 10).key, "error.index");
+        assert_eq!(value(&sheet, 11), 10.0);
+        assert_eq!(value(&sheet, 13), 24.0);
+    }
+
+    #[test]
+    fn sums_inside_functions_integrals_derivatives_and_surfaces() {
+        let mut sheet = sheet(Mode::Cartesian, &["N = 10", "f(x) = sum(n, 0, N, x^n / n!)", "f'(x)", "int(f, 0, 1)", "g(m) = sum(k, 1, m, k)", "g(4)", "h(x) = sum(k, 0, x, 1)", "int(sum(k, 1, 3, k x^(k-1)), 0, 1)"]);
+        assert!((at(&mut sheet, 2, X, 0.5) - (0..10).map(|n| 0.5_f64.powi(n) / factorial(f64::from(n))).sum::<f64>()).abs() < 1e-12);
+        match sheet.rows[3].plot() {
+            Some(Plot::Integral { value, .. }) => assert!((value - (1..=11).map(|n| 1.0 / factorial(f64::from(n))).sum::<f64>()).abs() < 1e-12),
+            other => panic!("{other:?}"),
+        }
+        assert!(matches!(sheet.rows[5].outcome, Outcome::Value(value) if value == 10.0));
+        // Bounds that read x vary along the curve: evaluation caps them instead of the row.
+        assert_eq!(at(&mut sheet, 6, X, 2.2), 3.0);
+        assert!(at(&mut sheet, 6, X, 1e7).is_nan());
+        match sheet.rows[7].plot() {
+            Some(Plot::Integral { value, .. }) => assert!((value - 3.0).abs() < 1e-12),
+            other => panic!("{other:?}"),
+        }
+        let mut space = self::sheet(Mode::Space, &["z = sum(k, 1, 3, x^k y)"]);
+        let Some(Plot::Surface { expr, .. }) = space.rows[0].plot().cloned() else { panic!("{:?}", space.rows[0].outcome) };
+        space.env[X] = 2.0;
+        space.env[Y] = 0.5;
+        assert_eq!(eval(&expr, &mut space.env, &space.functions), 7.0);
+        let complex = self::sheet(Mode::Complex, &["prod(k, 1, 2, i)", "sum(n, 0, 3, i^n)"]);
+        assert!(matches!(complex.rows[0].outcome, Outcome::Plotted(Plot::ComplexPoint { re, im, .. }) if (re + 1.0).abs() < 1e-12 && im == 0.0), "{:?}", complex.rows[0].outcome);
+        assert!(matches!(complex.rows[1].outcome, Outcome::Plotted(Plot::ComplexPoint { re, im, .. }) if re.abs() < 1e-12 && im.abs() < 1e-12));
     }
 
     #[test]

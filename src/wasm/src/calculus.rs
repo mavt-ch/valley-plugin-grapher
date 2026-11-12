@@ -15,7 +15,7 @@
 //! makes the integral NaN.
 
 use crate::builtins::Builtin;
-use crate::eval::{Expr, UserFn, eval, factorial, real_pow};
+use crate::eval::{Expr, UserFn, eval, factorial, index_range, real_pow};
 use crate::parser::BinOp;
 
 /// The highest derivative a jet carries.
@@ -389,6 +389,10 @@ impl Tape<'_> {
                 let local: Vec<usize> = slots.iter().copied().filter(|bound| bound != slot).collect();
                 self.reads(from, slots, depth) || self.reads(to, slots, depth) || self.reads(integrand, &local, depth)
             }
+            Expr::Series { slot, from, to, body: term, .. } => {
+                let local: Vec<usize> = slots.iter().copied().filter(|bound| bound != slot).collect();
+                self.reads(from, slots, depth) || self.reads(to, slots, depth) || self.reads(term, &local, depth)
+            }
         }
     }
 
@@ -467,6 +471,19 @@ impl Tape<'_> {
                 let (upper, lower) = (at(b), at(a));
                 let slope = upper.mul(&b.derive()).sub(&lower.mul(&a.derive()));
                 Jet::integrate(value, &slope, order)
+            }
+            // Linear: the series of the terms, each with the index bound to a constant; rounded bounds do not vary.
+            Expr::Series { product, slot, from, to, body } => {
+                let (a, b) = (self.jet(from), self.jet(to));
+                let Some((first, count)) = index_range(a.c[0], b.c[0]) else { return Jet::value_only(f64::NAN, n) };
+                let mut total = Jet::constant(if *product { 1.0 } else { 0.0 }, n);
+                for k in 0..count {
+                    self.bound.push((*slot, Jet::constant(first + k as f64, n)));
+                    let term = self.jet(body);
+                    self.bound.pop();
+                    total = if *product { total.mul(&term) } else { total.add(&term) };
+                }
+                total
             }
         }
     }

@@ -122,6 +122,12 @@ button.grapher-handle:hover { color:var(--text-color); }
 .gm-int-from { margin-left:-0.32em; }
 .gm-int-body { display:inline-flex; align-items:center; }
 .gm-dx { display:inline-flex; align-items:center; margin-left:0.3em; }
+.gm-series { display:inline-flex; align-items:center; padding:0.1em 0; }
+.gm-series-op { display:inline-flex; flex-direction:column; align-items:center; line-height:1; margin:0 0.2em 0 0.04em; }
+.gm-series-sign { font-size:1.4em; line-height:1; }
+.gm-series-to, .gm-series-from { display:inline-flex; align-items:center; font-size:0.6em; white-space:nowrap; }
+.gm-series-from .gm-rel { padding:0 0.12em; }
+.gm-series-body { display:inline-flex; align-items:center; }
 .grapher-delete, .grapher-row-spacer { width:28px; height:36px; }
 .grapher-delete { display:inline-flex; align-items:center; justify-content:center; padding:0; border:none; background:none;
   color:var(--text-tertiary); cursor:pointer; opacity:0; transition:opacity var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out); }

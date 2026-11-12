@@ -26,12 +26,13 @@ type MNode =
   | { k: 'root'; body: MNode; index?: MNode }
   | { k: 'post'; base: MNode; text: string }
   | { k: 'integral'; body: MNode; from: MNode; to: MNode }
+  | { k: 'series'; sign: 'Σ' | '∏'; index: MNode; from: MNode; to: MNode; body: MNode }
 
 const FUNCTIONS = [
   'sin', 'cos', 'tan', 'cot', 'sec', 'csc', 'arcsin', 'asin', 'arccos', 'acos', 'arctan', 'atan', 'arccot', 'acot',
   'sinh', 'cosh', 'tanh', 'coth', 'arsinh', 'arcsinh', 'asinh', 'arcosh', 'arccosh', 'acosh', 'artanh', 'arctanh', 'atanh',
   'sqrt', 'cbrt', 'abs', 'sign', 'sgn', 'ln', 'log', 'lg', 'exp', 'floor', 'ceil', 'round', 'min', 'max', 'mod', 'root',
-  'nthroot', 'real', 'imag', 'conj', 'arg', 'integral', 'int', 'tangent'
+  'nthroot', 'real', 'imag', 'conj', 'arg', 'integral', 'int', 'tangent', 'sum', 'prod', 'product'
 ]
 const GREEK: Record<string, string> = {
   epsilon: 'ε', lambda: 'λ', alpha: 'α', gamma: 'γ', delta: 'δ', omega: 'ω', sigma: 'σ', theta: 'θ', beta: 'β', phi: 'φ', rho: 'ρ', tau: 'τ', mu: 'μ', pi: 'π'
@@ -51,7 +52,7 @@ const primeText = (count: number): string => (count === 2 ? '″' : count === 3 
 const RELATIONS = new Set(['=', '<', '>', '≤', '≥', '≔'])
 const OPERATORS: Record<string, string> = { '-': '−', '−': '−', '+': '+', '*': '·', '×': '·', '·': '·', '⋅': '·', '∗': '·', '<=': '≤', '>=': '≥', '⩽': '≤', '⩾': '≥', ':=': '≔' }
 
-const isLetter = (c: string): boolean => /[A-Za-zΑ-ω]/.test(c)
+const isLetter = (c: string): boolean => c !== 'Σ' && /[A-Za-zΑ-ω]/.test(c)
 
 function splitWord(letters: string, tokens: Tok[]): void {
   let at = 0
@@ -110,8 +111,8 @@ export function tokenizeMath(source: string): Tok[] {
       }
       continue
     }
-    if (c === '∫') {
-      tokens.push({ t: 'fn', v: 'int' })
+    if (c === '∫' || c === 'Σ' || c === '∏') {
+      tokens.push({ t: 'fn', v: c === '∫' ? 'int' : c === 'Σ' ? 'sum' : 'prod' })
       i++
       continue
     }
@@ -320,6 +321,11 @@ class Parser {
       case 'abs': if (inner) return { k: 'group', open: '|', close: '|', closed: inner.closed, body: inner.body }; break
       case 'int':
       case 'integral': if (args.length === 3) return { k: 'integral', body: bracketSum(args[0]), from: args[1], to: args[2] }; break
+      case 'sum':
+      case 'prod':
+      case 'product':
+        if (args.length === 4) return { k: 'series', sign: token.v === 'sum' ? 'Σ' : '∏', index: args[0], from: args[1], to: args[2], body: bracketSum(args[3]) }
+        break
     }
     return { k: 'fn', text: DISPLAY_FN[token.v] ?? token.v, sub: token.sub, exp, arg }
   }
@@ -357,6 +363,7 @@ const tall = (node: MNode): boolean => {
     case 'post': return tall(node.base)
     case 'fn': return node.arg ? tall(node.arg) : false
     case 'integral': return true
+    case 'series': return true
     default: return false
   }
 }
@@ -407,6 +414,17 @@ function render(node: MNode, key: string | number = 0): ReactNode {
           </span>
           <span className="gm-int-body">{render(node.body)}</span>
           <span className="gm-dx"><span className="gm-fn">d</span><span className="gm-var">x</span></span>
+        </span>
+      )
+    case 'series':
+      return (
+        <span key={key} className="gm-series">
+          <span className="gm-series-op">
+            <span className="gm-series-to">{render(node.to)}</span>
+            <span className="gm-series-sign">{node.sign}</span>
+            <span className="gm-series-from">{render(node.index)}<span className="gm-op gm-rel">=</span>{render(node.from)}</span>
+          </span>
+          <span className="gm-series-body">{render(node.body)}</span>
         </span>
       )
     case 'fn':

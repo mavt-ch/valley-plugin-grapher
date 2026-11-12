@@ -7,7 +7,7 @@ use std::ops::{Add, Div, Mul, Neg, Sub};
 
 use crate::builtins::Builtin;
 use crate::error::MathError;
-use crate::eval::{Scope, constant, factorial};
+use crate::eval::{Scope, constant, factorial, index_range};
 use crate::parser::{BinOp, Callee, Node};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -223,6 +223,8 @@ pub enum CExpr {
     Builtin(Builtin, Vec<CExpr>),
     User(usize, Vec<CExpr>),
     Fact(Box<CExpr>),
+    /// `sum(n, a, b, g)` or `prod(n, a, b, g)` with real bounds, as on the real sheets.
+    Series { product: bool, slot: usize, from: Box<CExpr>, to: Box<CExpr>, body: Box<CExpr> },
 }
 
 #[derive(Clone, Debug)]
@@ -252,6 +254,24 @@ pub fn compile(node: &Node, scope: &Scope) -> Result<CExpr, MathError> {
         },
         Node::Fact(arg) => CExpr::Fact(Box::new(compile(arg, scope)?)),
         Node::Tuple(_) => return Err(MathError::new("error.tuple", "")),
+        Node::Call(callee @ (Callee::Sum | Callee::Product), args) => match args.as_slice() {
+            [Node::Var(index), from, to, body] if index != "i" => {
+                let slot = match (constant(index), scope.slots.get(index)) {
+                    (None, Some(slot)) => *slot,
+                    _ => return Err(MathError::new("error.index", index.clone())),
+                };
+                let inner = Scope { slots: scope.slots, functions: scope.functions, allow: &|name| name == index || (scope.allow)(name) };
+                CExpr::Series {
+                    product: *callee == Callee::Product,
+                    slot,
+                    from: Box::new(compile(from, scope)?),
+                    to: Box::new(compile(to, scope)?),
+                    body: Box::new(compile(body, &inner)?),
+                }
+            }
+            [index, ..] => return Err(MathError::new("error.index", if let Node::Var(name) = index { name.clone() } else { String::new() })),
+            [] => return Err(MathError::new("error.arity", "sum")),
+        },
         // Derivatives, integrals and tangents are real.
         Node::Call(Callee::Derivative(..) | Callee::Integral | Callee::Tangent, _) => return Err(MathError::new("error.unsupported", "")),
     })
@@ -293,6 +313,20 @@ pub fn eval(expr: &CExpr, env: &mut [C64], functions: &[CUserFn]) -> C64 {
         CExpr::Fact(arg) => {
             let value = eval(arg, env, functions);
             if value.im == 0.0 { C64::real(factorial(value.re)) } else { C64::NAN }
+        }
+        CExpr::Series { product, slot, from, to, body } => {
+            let (a, b) = (eval(from, env, functions), eval(to, env, functions));
+            let range = if a.im == 0.0 && b.im == 0.0 { index_range(a.re, b.re) } else { None };
+            let Some((first, count)) = range else { return C64::NAN };
+            let saved = env[*slot];
+            let mut total = C64::real(if *product { 1.0 } else { 0.0 });
+            for k in 0..count {
+                env[*slot] = C64::real(first + k as f64);
+                let term = eval(body, env, functions);
+                total = if *product { total * term } else { total + term };
+            }
+            env[*slot] = saved;
+            total
         }
     }
 }

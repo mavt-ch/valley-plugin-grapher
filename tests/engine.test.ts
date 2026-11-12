@@ -388,6 +388,23 @@ describe('the plot kernel through api.wasm', () => {
     for (const path of jump) for (let i = STRIDE; i < path.points.length; i += STRIDE) expect(Math.abs(path.points[i + 1] - path.points[i + 1 - STRIDE])).toBeLessThan(8)
   })
 
+  it('draws tables of points with an optional line and reports cells that are not numbers', () => {
+    const table = { head: ['x', 'y'] as [string, string], cells: [['0', '1'], ['1,5', 'a'], ['', ''], ['3', 'q'], ['4', '6']] as [string, string][] }
+    const rows = sheet('a = 2', { table, connect: true }, '[(1, 2), (3, 4)]', { table: { head: ['x', 'y'], cells: [] } })
+    const encoded = encodeRows(rows).split('\u001e')[1].split('\u001f')
+    expect(encoded.slice(10)).toEqual(['1', '0\u001d1\u001d1.5\u001da\u001d\u001d\u001d3\u001dq\u001d4\u001d6', '1'])
+    const analyses = engine.analyze('cartesian', rows)
+    expect(analyses[1]).toMatchObject({ kind: 'table', count: 3, bad: [7], missing: ['q'] })
+    expect(analyses[2]).toMatchObject({ kind: 'table', count: 2, bad: [], missing: [] })
+    expect(analyses[3]).toMatchObject({ kind: 'table', count: 0 })
+    const paths = engine.sample('cartesian', rows, 400, 300, { cx: 0, cy: 0, scale: 20 }).filter((path) => path.row === 1)
+    expect(paths.map((path) => path.kind)).toEqual(['line', 'point', 'point', 'point'])
+    expect(Array.from(paths[0].points.filter((_, index) => index % STRIDE === 2))).toEqual([0, 1.5])
+    expect(paths.slice(1).map((path) => [path.points[2], path.points[3], path.points[4]])).toEqual([[0, 1, 1], [1.5, 2, 2], [4, 6, 5]])
+    expect(engine.analyze('space', rows)[1].error?.key).toBe('error.table')
+    expect(engine.analyze('polar', rows)[1].kind).toBe('table')
+  })
+
   it('shades inequalities on Cartesian sheets', () => {
     const rows = sheet('y > x^2', 'x^2 + y^2 ≤ 4')
     expect(engine.analyze('cartesian', rows)).toMatchObject([{ kind: 'region', strict: true }, { kind: 'region', strict: false }])

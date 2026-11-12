@@ -61,3 +61,8 @@ export const ChevronDown = (p: IconProps): ReactElement => (
 export const Check = (p: IconProps): ReactElement => (
   <Svg {...p}><path d="M5 12.5l4.5 4.5L19 7.5" /></Svg>
 )
+
+/** A small grid: a table of points. */
+export const TableIcon = (p: IconProps): ReactElement => (
+  <Svg {...p}><rect x="4" y="5" width="16" height="14" rx="1.5" /><path d="M4 10h16M12 5v14" /></Svg>
+)

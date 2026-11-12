@@ -1,20 +1,67 @@
 import { React, api } from './runtime'
-import type { ChangeEvent, KeyboardEvent, MouseEvent, PointerEvent, ReactElement } from 'react'
+import type { ChangeEvent, ClipboardEvent, KeyboardEvent, MouseEvent, PointerEvent, ReactElement } from 'react'
 import { paletteCssValue, paletteRef } from '@valley/plugin-sdk/palette'
 import type { UiMenuItem } from '@valley/plugin-sdk'
 import type { RowAnalysis } from './engine'
-import { Check, ChevronDown, Eye, EyeOff, Grip, Slider, Trash, Warning, X } from './icons'
+import { Check, ChevronDown, Eye, EyeOff, Grip, Slider, TableIcon, Trash, Warning, X } from './icons'
 import { uiText } from './localization'
 import { MathText } from './MathText'
-import { COLORS, DEFAULT_LEVELS, MAIN_GRAPH, MAX_LEVELS, MODES, createRow, graphOf, moveRow, rangeVariable, unitsOf, type AxisUnits, type Mode, type Row } from './model'
+import { COLORS, DEFAULT_LEVELS, MAIN_GRAPH, MAX_LEVELS, MODES, createRow, createTable, filled, graphOf, moveRow, rangeVariable, unitsOf, type AxisUnits, type Mode, type Row, type Table } from './model'
 import { getStore, useGrapher } from './store'
+import { MAX_TABLE_ROWS, looksTabular, parseTable, type Cells, type PastedTable } from './table'
 import { formatComplex, formatLinear, formatNumber, formatPolar } from './ticks'
 import { viewOf } from './views'
 
-const DRAWN = new Set(['function', 'polar', 'curve', 'point', 'implicit', 'surface', 'curve3', 'point3', 'region', 'cpoint', 'csurface', 'coords', 'psurface', 'implicit3', 'field', 'field3', 'contour', 'integral', 'tangent', 'tplane'])
+const DRAWN = new Set(['function', 'polar', 'curve', 'point', 'implicit', 'surface', 'curve3', 'point3', 'region', 'cpoint', 'csurface', 'coords', 'psurface', 'implicit3', 'field', 'field3', 'contour', 'integral', 'tangent', 'tplane', 'table'])
 
 /** The row whose input takes focus on its next render (after Enter adds a row or Backspace removes one). */
 let pendingFocus: string | null = null
+/** A note for a table row's next render, such as a paste cut to the row cap. */
+const pendingNotice = new Map<string, string>()
+
+/** Sheets whose points are x and y in the plane take tables of points; 3D and complex sheets do not. */
+export const takesTables = (mode: Mode): boolean => {
+  const view = viewOf(mode)
+  return view.canvas === 'plane' && !view.complex
+}
+
+/** What a paste kept, in words: rows cut at the cap, columns left out, one column read as y values. */
+function pasteNotice(pasted: PastedTable, limit: number): string | null {
+  const notes: string[] = []
+  if (pasted.total > limit) notes.push(uiText('table.capped', { kept: Math.min(pasted.total, limit), total: pasted.total, max: MAX_TABLE_ROWS }))
+  if (pasted.extra) notes.push(uiText('table.extra'))
+  if (pasted.single) notes.push(uiText('table.single'))
+  return notes.length ? notes.join(' ') : null
+}
+
+/** A row turned into a table from pasted text: the header names the columns. */
+export function pastedTable(text: string): { table: Table; notice: string | null } {
+  const pasted = parseTable(text)
+  return { table: { head: pasted.head ?? ['x', 'y'], cells: pasted.cells }, notice: pasteNotice(pasted, MAX_TABLE_ROWS) }
+}
+
+/** Writes a pasted block into the cells from (`at`, `column`) on: two columns fill both, one column only the one pasted into.
+ * A header names the columns when the block starts in the first row and is skipped otherwise. */
+export function pasteInto(table: Table, text: string, at: number, column: 0 | 1): { table: Table; notice: string | null } {
+  const limit = Math.max(0, MAX_TABLE_ROWS - at)
+  const pasted = parseTable(text, limit)
+  const cells: Cells = table.cells.map(([x, y]) => [x, y])
+  pasted.cells.forEach(([x, y], offset) => {
+    const index = at + offset
+    while (cells.length <= index) cells.push(['', ''])
+    if (pasted.single) cells[index][column] = y
+    else cells[index] = [x, y]
+  })
+  const head: [string, string] = pasted.head && at === 0 ? (pasted.single ? (column === 0 ? [pasted.head[1], table.head[1]] : [table.head[0], pasted.head[1]]) : pasted.head) : table.head
+  return { table: { head, cells: trimCells(cells) }, notice: pasteNotice({ ...pasted, single: false }, limit) }
+}
+
+/** Blank rows at the end are dropped: the grid always shows one empty row to type into. */
+export function trimCells(cells: Cells): Cells {
+  let end = cells.length
+  while (end > 0 && !cells[end - 1][0].trim() && !cells[end - 1][1].trim()) end--
+  return cells.slice(0, end)
+}
 
 function stepDigits(step: number): number {
   return Math.max(0, Math.min(10, Math.ceil(-Math.log10(step) - 1e-9)))
@@ -323,6 +370,13 @@ const Details = (props: RowProps): ReactElement | null => {
           {row.floor ? <LevelsControl row={row} edit={props.edit} /> : null}
         </>
       )
+    case 'table':
+      return (
+        <div className="grapher-options">
+          <OptionToggle label={uiText('table.connect')} checked={row.connect === true} onChange={(checked) => props.edit((current) => ({ ...current, connect: checked }))} />
+          <span className="grapher-value">{uiText('table.points', { count: analysis.count ?? 0 })}</span>
+        </div>
+      )
     case 'field':
     case 'field3':
       return (
@@ -333,6 +387,130 @@ const Details = (props: RowProps): ReactElement | null => {
     default:
       return null
   }
+}
+
+/** Height of one table row in pixels (`.grapher-cell`), and how many rows the grid renders around the scrolled position. */
+const CELL_HEIGHT = 22
+const CELL_WINDOW = 48
+
+/** A table of points: the column names, the cells (plus an empty row to type into), Connect points and what was drawn.
+ * Only the rows near the scrolled position are rendered, so a table of 1000 rows stays light. */
+const TableGrid = ({ row, index: rowIndex, analysis, edit, addSlider }: Pick<RowProps, 'row' | 'index' | 'analysis' | 'edit' | 'addSlider'>): ReactElement | null => {
+  const gridRef = React.useRef<HTMLDivElement>(null)
+  const [scrolled, setScrolled] = React.useState(0)
+  const [notice, setNotice] = React.useState<string | null>(() => {
+    const note = pendingNotice.get(row.id) ?? null
+    pendingNotice.delete(row.id)
+    return note
+  })
+  React.useEffect(() => {
+    if (pendingFocus !== row.id) return
+    pendingFocus = null
+    gridRef.current?.querySelector<HTMLInputElement>('input[data-cell="0:0"]')?.focus()
+  })
+  const table = row.table
+  if (!table) return null
+  const shown: Cells = table.cells.length < MAX_TABLE_ROWS ? [...table.cells, ['', '']] : table.cells
+  const bad = new Set(analysis?.kind === 'table' ? analysis.bad ?? [] : [])
+  const setTable = (change: (table: Table) => Table): void => edit((current) => (current.table ? { ...current, table: change(current.table) } : current))
+  const focusCell = (at: number, column: number): void => {
+    requestAnimationFrame(() => gridRef.current?.querySelector<HTMLInputElement>(`input[data-cell="${at}:${column}"]`)?.focus())
+  }
+  const setCell = (at: number, column: 0 | 1, value: string): void => setTable((current) => {
+    const cells: Cells = current.cells.map(([x, y]) => [x, y])
+    while (cells.length <= at) cells.push(['', ''])
+    cells[at][column] = value
+    return { ...current, cells: trimCells(cells) }
+  })
+  const onPaste = (at: number, column: 0 | 1) => (event: ClipboardEvent<HTMLInputElement>): void => {
+    const text = event.clipboardData.getData('text/plain')
+    if (!/[\t\n\r;]/.test(text.trim())) return
+    event.preventDefault()
+    const result = pasteInto(table, text, at, column)
+    setTable(() => result.table)
+    setNotice(result.notice)
+  }
+  const onKeyDown = (at: number, column: 0 | 1) => (event: KeyboardEvent<HTMLInputElement>): void => {
+    if (event.key === 'Enter' || event.key === 'ArrowDown') {
+      event.preventDefault()
+      focusCell(Math.min(at + 1, MAX_TABLE_ROWS - 1), column)
+    } else if (event.key === 'ArrowUp' && at > 0) {
+      event.preventDefault()
+      focusCell(at - 1, column)
+    } else if (event.key === 'Backspace' && at < table.cells.length && !table.cells[at][0] && !table.cells[at][1]) {
+      event.preventDefault()
+      setTable((current) => ({ ...current, cells: trimCells(current.cells.filter((_, index) => index !== at)) }))
+      focusCell(Math.max(0, at - 1), column)
+    }
+  }
+  const head = (column: 0 | 1): ReactElement => (
+    <input
+      className="grapher-cell grapher-cell-head"
+      value={table.head[column]}
+      placeholder={column === 0 ? 'x' : 'y'}
+      spellCheck={false}
+      autoComplete="off"
+      aria-label={uiText('table.head', { name: column === 0 ? 'x' : 'y' })}
+      onChange={(event) => {
+        const value = event.target.value
+        setTable((current) => ({ ...current, head: column === 0 ? [value, current.head[1]] : [current.head[0], value] }))
+      }}
+    />
+  )
+  const first = Math.max(0, Math.floor(scrolled / CELL_HEIGHT) - CELL_WINDOW / 4)
+  const last = Math.min(shown.length, first + CELL_WINDOW)
+  const spacer = (rows: number): ReactElement | null => (rows > 0 ? <div className="grapher-table-spacer" style={{ height: rows * CELL_HEIGHT }} aria-hidden /> : null)
+  const points = analysis?.kind === 'table' ? analysis.count ?? 0 : 0
+  const missing = analysis?.kind === 'table' ? analysis.missing ?? [] : []
+  return (
+    <>
+      <div ref={gridRef} className="grapher-table" role="group" aria-label={uiText('table.label', { index: rowIndex + 1 })} onScroll={(event) => setScrolled(event.currentTarget.scrollTop)}>
+        {head(0)}
+        {head(1)}
+        {spacer(first)}
+        {shown.slice(first, last).map(([x, y], offset) => ([x, y] as const).map((value, column) => {
+          const at = first + offset
+          return (
+          <input
+            key={`${at}:${column}`}
+            data-cell={`${at}:${column}`}
+            className="grapher-cell"
+            value={value}
+            spellCheck={false}
+            autoComplete="off"
+            inputMode="decimal"
+            aria-label={uiText('table.cell', { name: table.head[column] || (column === 0 ? 'x' : 'y'), index: at + 1 })}
+            aria-invalid={bad.has(2 * at + column) || undefined}
+            onChange={(event) => setCell(at, column as 0 | 1, event.target.value)}
+            onPaste={onPaste(at, column as 0 | 1)}
+            onKeyDown={onKeyDown(at, column as 0 | 1)}
+          />
+          )
+        }))}
+        {spacer(shown.length - last)}
+      </div>
+      <div className="grapher-options">
+        <OptionToggle label={uiText('table.connect')} checked={row.connect === true} onChange={(checked) => edit((current) => ({ ...current, connect: checked }))} />
+        <span className="grapher-value">{uiText('table.points', { count: points })}</span>
+      </div>
+      {bad.size ? (
+        <div className="grapher-error" role="status">
+          <span>{uiText('table.bad', { count: bad.size })}</span>
+          {missing.length ? (
+            <span className="grapher-chips">
+              {missing.map((name) => (
+                <button key={name} type="button" className="grapher-chip" onClick={() => addSlider(name)}>
+                  <Slider />
+                  {uiText('row.addSlider', { name })}
+                </button>
+              ))}
+            </span>
+          ) : null}
+        </div>
+      ) : null}
+      {notice ? <div className="grapher-notice" role="status">{notice}</div> : null}
+    </>
+  )
 }
 
 const ExpressionRow = (props: RowProps): ReactElement => {
@@ -370,13 +548,16 @@ const ExpressionRow = (props: RowProps): ReactElement => {
   const onKeyDown = (event: KeyboardEvent<HTMLInputElement>): void => {
     const list = event.currentTarget.closest('.grapher-list')
     const move = (delta: number): void => {
-      const inputs = Array.from(list?.querySelectorAll<HTMLInputElement>('input[data-row-input]') ?? [])
-      const target = inputs[index + delta]
+      const target = list?.querySelector<HTMLInputElement>(`[data-row-index="${index + delta}"] :is(input[data-row-input], input[data-cell])`)
       if (!target) return
       event.preventDefault()
       target.focus()
     }
-    if (event.key === 'Enter' && !trailing) {
+    if (event.key === 'Enter' && takesTables(mode) && event.currentTarget.value.trim().toLowerCase() === 'table') {
+      event.preventDefault()
+      pendingFocus = row.id
+      edit((current) => ({ ...current, text: '', table: createTable() }))
+    } else if (event.key === 'Enter' && !trailing) {
       event.preventDefault()
       props.insertAfter()
     } else if (event.key === 'Backspace' && !event.currentTarget.value && !trailing) {
@@ -384,6 +565,20 @@ const ExpressionRow = (props: RowProps): ReactElement => {
       props.remove(index > 0 ? 'previous' : 'next')
     } else if (event.key === 'ArrowUp') move(-1)
     else if (event.key === 'ArrowDown') move(1)
+  }
+  const onPaste = (event: ClipboardEvent<HTMLInputElement>): void => {
+    const input = event.currentTarget
+    const text = event.clipboardData.getData('text/plain')
+    const whole = input.selectionStart === 0 && input.selectionEnd === input.value.length
+    if (!takesTables(mode) || !(whole || !input.value) || !looksTabular(text)) return
+    event.preventDefault()
+    const { table, notice } = pastedTable(text)
+    if (notice) pendingNotice.set(row.id, notice)
+    edit((current) => ({ ...current, text: '', table }))
+  }
+  const addTable = (): void => {
+    pendingFocus = row.id
+    edit((current) => ({ ...current, text: '', table: createTable() }))
   }
   return (
     <div className="grapher-row" role="listitem" data-row-index={index} data-kind={analysis?.kind ?? 'empty'} data-hidden={row.hidden || undefined} data-dragging={props.dragging || undefined}>
@@ -419,6 +614,7 @@ const ExpressionRow = (props: RowProps): ReactElement => {
         </span>
       </div>
       <div className="grapher-row-main">
+        {row.table ? <TableGrid row={row} index={index} analysis={analysis} edit={edit} addSlider={props.addSlider} /> : (<>
         <div className="grapher-field" data-typeset={typeset || undefined}>
         {typeset ? <div className="grapher-typeset"><MathText text={row.text} otherwise={uiText('math.otherwise')} /></div> : null}
         <input
@@ -436,14 +632,20 @@ const ExpressionRow = (props: RowProps): ReactElement => {
             edit((current) => ({ ...current, text }))
           }}
           onKeyDown={onKeyDown}
+          onPaste={onPaste}
           onFocus={() => setEditing(true)}
           onBlur={() => setEditing(false)}
           onContextMenu={trailing ? undefined : openMenu}
         />
         </div>
         <Details {...props} />
+        </>)}
       </div>
-      {trailing ? <span className="grapher-row-spacer" /> : (
+      {trailing ? (takesTables(mode) ? (
+        <button type="button" className="grapher-delete grapher-add-table" aria-label={uiText('table.add')} {...api.ui.tooltip(uiText('table.add'))} onClick={addTable}>
+          <TableIcon />
+        </button>
+      ) : <span className="grapher-row-spacer" />) : (
         <button type="button" className="grapher-delete" aria-label={uiText('row.delete')} title={uiText('row.delete')} onClick={() => props.remove('next')}>
           <X />
         </button>
@@ -527,8 +729,8 @@ export const Sidebar = (): ReactElement => {
   const showMarker = drag !== null && drag.to !== drag.from && drag.to !== drag.from + 1
   const addSlider = (name: string): void => {
     store.updateRows(active, mode, (current) => {
-      const filled = current.filter((row) => row.text.trim())
-      return [...filled, { ...createRow(filled), text: `${name} = 1` }]
+      const kept = current.filter(filled)
+      return [...kept, { ...createRow(kept), text: `${name} = 1` }]
     })
   }
   return (
@@ -570,7 +772,7 @@ export const Sidebar = (): ReactElement => {
               mode={mode}
               row={row}
               index={index}
-              trailing={index === rows.length - 1 && !row.text.trim()}
+              trailing={index === rows.length - 1 && !filled(row)}
               analysis={analyses[index]}
               edit={editRow(row.id)}
               insertAfter={insertAfter(index)}

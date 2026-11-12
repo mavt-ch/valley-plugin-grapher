@@ -1,8 +1,10 @@
 //! The text the JavaScript side exchanges with the module. Rows are separated by U+001E and fields by U+001F,
 //! which an expression never contains (the plugin strips both before encoding).
 //!
-//! In: `text, from, to, hidden, from2, to2, levels, step, floor, normal` per row (the fields after `hidden` are optional;
-//! `normal` is `0` when a tangent plane leaves out its normal vector). Out, per row, a kind and its fields:
+//! In: `text, from, to, hidden, from2, to2, levels, step, floor, normal, table, cells, connect` per row (the fields after
+//! `hidden` are optional; `normal` is `0` when a tangent plane leaves out its normal vector; `table` is `1` for a table of
+//! points, whose `cells` are its x and y texts in turn, separated by U+001D; `connect` is `1` to join its points with a
+//! line). Out, per row, a kind and its fields:
 //! `empty` · `error key param missing,names` · `param name value slider` · `value number` · `function x|y` ·
 //! `definition name` · `polar from to` · `curve from to` · `point x y` · `implicit` · `surface x|y|z` ·
 //! `curve3 from to` · `point3 x y z` · `region strict|loose` · `cpoint re im name` · `csurface modulus|real` ·
@@ -10,12 +12,15 @@
 //! `psurface ufrom uto vfrom vto` (a parametric surface in u and v) · `implicit3` (a surface F(x, y, z) = 0) ·
 //! `field` and `field3` (vector fields in the plane and in space) · `contour name` (the level curves of `name(x, y)`) ·
 //! `integral value from to` (the area under a curve and its signed value) · `tangent slope intercept x y` (a tangent line
-//! and its point of contact) · `tplane gx gy a b c` (a tangent plane at (a, b, c) with the surface's partial derivatives).
+//! and its point of contact) · `tplane gx gy a b c` (a tangent plane at (a, b, c) with the surface's partial derivatives) ·
+//! `table count bad missing` (a table or list of points: how many it draws, the cells that did not evaluate as
+//! `2 · row + column` and the undefined names they read, both comma-separated).
 
-use crate::sheet::{Outcome, Plot, RowInput, Sheet};
+use crate::sheet::{MAX_TABLE_ROWS, Outcome, Plot, RowInput, Sheet};
 
 pub const RECORD: char = '\u{1e}';
 pub const FIELD: char = '\u{1f}';
+pub const CELL: char = '\u{1d}';
 
 pub fn read_rows(text: &str) -> Vec<RowInput> {
     if text.is_empty() {
@@ -27,7 +32,12 @@ pub fn read_rows(text: &str) -> Vec<RowInput> {
             let mut next = || fields.next().unwrap_or_default().to_string();
             let (text, from, to, hidden, from2, to2) = (next(), next(), next(), next(), next(), next());
             let (levels, step, floor, normal) = (next(), next(), next(), next());
-            RowInput { text, from, to, hidden: hidden == "1", from2, to2, levels, step, floor: floor == "1", hide_normal: normal == "0" }
+            let (table, cells, connect) = (next(), next(), next());
+            let table = (table == "1").then(|| {
+                let cells: Vec<&str> = if cells.is_empty() { Vec::new() } else { cells.split(CELL).collect() };
+                cells.chunks(2).take(MAX_TABLE_ROWS).map(|pair| [pair[0].to_string(), pair.get(1).copied().unwrap_or_default().to_string()]).collect()
+            });
+            RowInput { text, from, to, hidden: hidden == "1", from2, to2, levels, step, floor: floor == "1", hide_normal: normal == "0", table, connect: connect == "1" }
         })
         .collect()
 }
@@ -74,6 +84,10 @@ pub fn write_outcomes(sheet: &Sheet) -> String {
                 Outcome::Plotted(Plot::Tangent { slope, intercept, x, y }) => vec!["tangent".into(), number(*slope), number(*intercept), number(*x), number(*y)],
                 Outcome::Plotted(Plot::TangentPlane { point, gradient, .. }) => {
                     vec!["tplane".into(), number(gradient[0]), number(gradient[1]), number(point[0]), number(point[1]), number(point[2])]
+                }
+                Outcome::Plotted(Plot::Table { points, bad, missing, .. }) => {
+                    let count = points.iter().filter(|point| point.iter().all(|value| value.is_finite())).count();
+                    vec!["table".into(), count.to_string(), bad.iter().map(usize::to_string).collect::<Vec<_>>().join(","), missing.join(",")]
                 }
                 Outcome::Plotted(Plot::ParamSurface { u, v, .. }) => vec!["psurface".into(), number(u.0), number(u.1), number(v.0), number(v.1)],
                 Outcome::Plotted(Plot::CoordSurface { system, given, u, v, .. }) => {
@@ -124,6 +138,11 @@ mod tests {
         let planes = read_rows("tangent(x y, 1, 2)\u{1f}\u{1f}\u{1f}0\u{1f}\u{1f}\u{1f}\u{1f}\u{1f}0\u{1f}0\u{1e}tangent(x y, 1, 2)");
         assert!(planes[0].hide_normal && !planes[1].hide_normal);
         assert_eq!(write_outcomes(&analyze(Mode::Space, &planes[..1])), "tplane\u{1f}2\u{1f}1\u{1f}1\u{1f}2\u{1f}2");
+        let tables = read_rows("\u{1f}\u{1f}\u{1f}0\u{1f}\u{1f}\u{1f}\u{1f}\u{1f}0\u{1f}1\u{1f}1\u{1f}1\u{1d}2\u{1d}3\u{1d}k\u{1d}5\u{1f}1\u{1e}\u{1f}\u{1f}\u{1f}0\u{1f}\u{1f}\u{1f}\u{1f}\u{1f}0\u{1f}1\u{1f}1\u{1f}\u{1f}0");
+        assert_eq!(tables[0].table.as_deref().map(<[_]>::len), Some(3));
+        assert_eq!(tables[0].table.as_ref().unwrap()[2], ["5".to_string(), String::new()]);
+        assert!(tables[0].connect && !tables[1].connect && tables[1].table.as_ref().is_some_and(Vec::is_empty));
+        assert_eq!(write_outcomes(&analyze(Mode::Cartesian, &tables)), "table\u{1f}1\u{1f}3\u{1f}k\u{1e}table\u{1f}0\u{1f}\u{1f}");
         let sphere = write_outcomes(&analyze(Mode::Spherical, &read_rows("φ = π/4")));
         assert_eq!(sphere, "coords\u{1f}φ\u{1f}θ\u{1f}ρ\u{1f}0\u{1f}6.283185307179586\u{1f}0\u{1f}Infinity");
     }

@@ -24,7 +24,7 @@
       {
         "id": "plot",
         "path": "runtime/assets/plot.wasm",
-        "sha256": "e67125419276dc52fa2182ca0c96d736aa175b8e994f2b6cb6aed386660f31bb",
+        "sha256": "a89dcbd831b8d0dc92d6b88f65a6f7d87272528c9c586d15239b4b77e0450f96",
         "target": "ui",
         "memoryPagesMax": 512,
         "exports": [

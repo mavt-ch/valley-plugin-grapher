@@ -356,6 +356,33 @@ impl Graph<'_> {
         self.out.end();
     }
 
+    // ---- tables and lists of points ----
+
+    /// The points in view (each a POINT path whose parameter is its 1-based table row) and, when `connect`, one line per
+    /// run of consecutive points in the order given; a row without a point breaks the line.
+    fn table(&mut self, points: &[[f64; 2]], connect: bool) {
+        let view = self.view;
+        let given = |point: &[f64; 2]| point[0].is_finite() && point[1].is_finite();
+        if connect {
+            for (index, point) in points.iter().enumerate() {
+                if given(point) {
+                    self.out.push(view.sx(point[0]), view.sy(point[1]), point[0], point[1], (index + 1) as f64);
+                } else {
+                    self.out.end();
+                }
+            }
+            self.out.end();
+        }
+        for (index, point) in points.iter().enumerate() {
+            let (sx, sy) = (view.sx(point[0]), view.sy(point[1]));
+            if given(point) && !view.outside(&[(sx, sy)]) {
+                self.out.begin(POINT);
+                self.out.push(sx, sy, point[0], point[1], (index + 1) as f64);
+                self.out.end();
+            }
+        }
+    }
+
     // ---- vector fields F(x, y) = (P, Q) ----
 
     fn field(&mut self, p: &Expr, q: &Expr) {
@@ -688,6 +715,7 @@ pub fn sample(sheet: &mut Sheet, view: View) -> Vec<f64> {
             Plot::Region { field, relation } => graph.region(field, *relation),
             Plot::Integral { body, from, to, .. } => graph.area(body, *from, *to),
             Plot::Tangent { slope, intercept, x, y } => graph.tangent(*slope, *intercept, (*x, *y)),
+            Plot::Table { points, connect, .. } => graph.table(points, *connect),
             Plot::Surface { .. } | Plot::Curve3 { .. } | Plot::Point3 { .. } | Plot::ComplexSurface { .. } | Plot::CoordSurface { .. } | Plot::ParamSurface { .. } | Plot::Implicit3(_) | Plot::Field3 { .. } | Plot::TangentPlane { .. } => {}
         }
     }
@@ -809,6 +837,41 @@ mod tests {
         assert!(sample(&mut sheet, VIEW).is_empty());
         assert_eq!(evaluate(&mut sheet, 0, 2.0), 8.0);
         assert!(evaluate(&mut sheet, 5, 2.0).is_nan());
+    }
+
+    #[test]
+    fn tables_draw_their_points_and_an_optional_line_broken_at_gaps() {
+        let cells = |rows: &[[&str; 2]]| Some(rows.iter().map(|[x, y]| [x.to_string(), y.to_string()]).collect());
+        let rows = [["-2", "1"], ["0", "0"], ["", ""], ["1", "3"], ["2", "4"], ["500", "0"]];
+        let mut joined = analyze(Mode::Cartesian, &[RowInput { table: cells(&rows), connect: true, ..RowInput::default() }]);
+        let data = sample(&mut joined, VIEW);
+        let mut found = Vec::new();
+        let mut at = 0;
+        while at < data.len() {
+            let count = data[at + 2] as usize;
+            found.push((data[at + 1], (0..count).map(|i| [data[at + 3 + i * STRIDE + 2], data[at + 3 + i * STRIDE + 3], data[at + 3 + i * STRIDE + 4]]).collect::<Vec<_>>()));
+            at += 3 + count * STRIDE;
+        }
+        // Two runs of the line (the blank row breaks it; the far point still joins its run), then the four points in view.
+        let lines: Vec<_> = found.iter().filter(|(kind, _)| *kind == LINE).collect();
+        assert_eq!(lines.len(), 2);
+        assert_eq!(lines[0].1, vec![[-2.0, 1.0, 1.0], [0.0, 0.0, 2.0]]);
+        assert_eq!(lines[1].1.len(), 3);
+        let points: Vec<_> = found.iter().filter(|(kind, _)| *kind == POINT).map(|(_, points)| points[0]).collect();
+        assert_eq!(points, vec![[-2.0, 1.0, 1.0], [0.0, 0.0, 2.0], [1.0, 3.0, 4.0], [2.0, 4.0, 5.0]]);
+        let mut loose = analyze(Mode::Cartesian, &[RowInput { table: cells(&rows), ..RowInput::default() }]);
+        assert!(paths_of(&sample(&mut loose, VIEW)).iter().all(|kind| *kind == POINT));
+        assert_eq!(paths(Mode::Polar, &["[(1, 1), (2, 2)]"], VIEW).len(), 2);
+    }
+
+    fn paths_of(data: &[f64]) -> Vec<f64> {
+        let mut kinds = Vec::new();
+        let mut at = 0;
+        while at < data.len() {
+            kinds.push(data[at + 1]);
+            at += 3 + data[at + 2] as usize * STRIDE;
+        }
+        kinds
     }
 
     #[test]

@@ -36,6 +36,8 @@ const RESERVED_SPHERICAL: [&str; 6] = ["x", "y", "z", "ρ", "θ", "φ"];
 /// The parameters of a surface `(x(u, v), y(u, v), z(u, v))` on the 3D sheet. They are not reserved: elsewhere, and
 /// wherever the sheet defines one of them, they stay ordinary names (sliders).
 pub const SURFACE_PARAMETERS: [&str; 2] = ["u", "v"];
+/// The most rows a table of points keeps; the sidebar refuses to paste more and says so.
+pub const MAX_TABLE_ROWS: usize = 1000;
 
 thread_local! {
     /// Set by `analyze` for the sheet being read.
@@ -198,6 +200,10 @@ pub struct RowInput {
     pub floor: bool,
     /// Leave out the normal vector of a tangent plane (drawn unless the row turns it off).
     pub hide_normal: bool,
+    /// A table of points: its cells as (x, y) texts, each a constant expression; the row's text is not read.
+    pub table: Option<Vec<[String; 2]>>,
+    /// Join a table's or a list's points with a line in the order given.
+    pub connect: bool,
 }
 
 /// Which level curves to draw: at most `count` round levels across the values in view, or every multiple of `step`.
@@ -255,6 +261,10 @@ pub enum Plot {
     /// `tangent(g, a, b)` on the 3D sheet: the plane z = c + gx (x − a) + gy (y − b) touching z = g(x, y) at `point`
     /// = (a, b, c), with the normal (−gx, −gy, 1) drawn when `normal`.
     TangentPlane { point: [f64; 3], gradient: [f64; 2], normal: bool },
+    /// A table of points (or a list `[(1, 2), (3, 4)]`): one entry per table row, NaN where that row gives no point
+    /// (blank or invalid), which also breaks the line when `connect` joins the points in order. `bad` lists the cells that
+    /// did not evaluate (2 · row + column) and `missing` the undefined names they read.
+    Table { points: Vec<[f64; 2]>, connect: bool, bad: Vec<usize>, missing: Vec<String> },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -797,11 +807,7 @@ impl Analysis<'_> {
             if text.trim().is_empty() {
                 return Ok(fallback);
             }
-            let statement = tokenize(text).and_then(|tokens| parse(&tokens, &HashSet::new()))?;
-            if statement.left.is_some() {
-                return Err(MathError::new("error.unexpected", "="));
-            }
-            analysis.constant(&statement.right)
+            analysis.cell(text)
         };
         let from = bound(self, from, fallback.0)?;
         let to = bound(self, to, fallback.1)?;
@@ -810,6 +816,42 @@ impl Analysis<'_> {
             return Err(MathError::new("error.range", ""));
         }
         Ok((from, to))
+    }
+
+    /// A constant expression typed into a field of its own (a range bound, a table cell), with the sheet's parameters.
+    fn cell(&mut self, text: &str) -> Result<f64, MathError> {
+        let statement = tokenize(text).and_then(|tokens| parse(&tokens, &HashSet::new()))?;
+        if statement.left.is_some() {
+            return Err(MathError::new("error.unexpected", "="));
+        }
+        self.constant(&statement.right)
+    }
+
+    /// A table of points on a plane sheet: every cell is evaluated on its own, so one bad cell costs only its point.
+    fn table(&mut self, mode: Mode, cells: &[[String; 2]], connect: bool) -> Outcome {
+        if !matches!(mode, Mode::Cartesian | Mode::Trig | Mode::Polar | Mode::Parametric) {
+            return Outcome::Error(MathError::new("error.table", ""));
+        }
+        let mut points = Vec::with_capacity(cells.len().min(MAX_TABLE_ROWS));
+        let (mut bad, mut missing) = (Vec::new(), BTreeSet::new());
+        for (index, pair) in cells.iter().take(MAX_TABLE_ROWS).enumerate() {
+            let mut point = [f64::NAN; 2];
+            for (column, text) in pair.iter().enumerate() {
+                if text.trim().is_empty() {
+                    continue;
+                }
+                match self.cell(text) {
+                    Ok(value) if value.is_finite() => point[column] = value,
+                    Ok(_) => bad.push(2 * index + column),
+                    Err(error) => {
+                        missing.extend(error.missing);
+                        bad.push(2 * index + column);
+                    }
+                }
+            }
+            points.push(point);
+        }
+        Outcome::Plotted(Plot::Table { points, connect, bad, missing: missing.into_iter().collect() })
     }
 
     /// A triple on the 3D sheet that reads both u and v and no reserved variable is a parametric surface, unless the
@@ -882,6 +924,15 @@ impl Analysis<'_> {
             analysis.compile(node, &move |name| name == variable || !is_reserved(name))
         };
         let plot = match (&statement.left, &statement.right) {
+            // `[(1, 2), (3, 4)]`: a list of constant points draws like a table.
+            (None, Node::Tuple(items)) if items.iter().all(|item| matches!(item, Node::Tuple(pair) if pair.len() == 2 && pair.iter().all(|value| variables(value).is_empty()))) => {
+                let mut points = Vec::with_capacity(items.len());
+                for item in items {
+                    let Node::Tuple(pair) = item else { unreachable!("checked above") };
+                    points.push([self.constant(&pair[0])?, self.constant(&pair[1])?]);
+                }
+                Plot::Table { points, connect: input.connect, bad: Vec::new(), missing: Vec::new() }
+            }
             (None, Node::Tuple(items)) => match items.as_slice() {
                 [x, y] if only(x, &["t"]) && only(y, &["t"]) && (uses(x, "t") || uses(y, "t")) => {
                     let (from, to) = self.range(input)?;
@@ -1200,7 +1251,7 @@ pub fn analyze(mode: Mode, inputs: &[RowInput]) -> Sheet {
         _ => &[],
     };
     let tokens: Vec<Option<Result<Vec<Tok>, MathError>>> =
-        inputs.iter().map(|input| (!input.text.trim().is_empty()).then(|| tokenize(&input.text))).collect();
+        inputs.iter().map(|input| (input.table.is_none() && !input.text.trim().is_empty()).then(|| tokenize(&input.text))).collect();
     let user_functions: HashSet<String> = tokens.iter().flatten().flatten().filter_map(|tokens| defined_function(tokens)).collect();
     let statements: Vec<Option<Result<Statement, MathError>>> = tokens
         .into_iter()
@@ -1320,6 +1371,10 @@ pub fn analyze(mode: Mode, inputs: &[RowInput]) -> Sheet {
     };
     let mut rows = Vec::with_capacity(inputs.len());
     for (row, input) in inputs.iter().enumerate() {
+        if let Some(cells) = &input.table {
+            rows.push(Row { outcome: analysis.table(mode, cells, input.connect), hidden: input.hidden });
+            continue;
+        }
         let outcome = match (&statements[row], definition_rows.get(&row)) {
             (None, _) => Outcome::Empty,
             (Some(Err(error)), _) => Outcome::Error(error.clone()),
@@ -1749,6 +1804,51 @@ mod tests {
         let sheet = sheet(Mode::Parametric, &["cos t", "(2cos t, sin(2t))"]);
         assert_eq!(error(&sheet, 0).key, "error.pair");
         assert!(matches!(sheet.rows[1].plot(), Some(Plot::Curve { .. })));
+    }
+
+    fn table(mode: Mode, texts: &[&str], cells: &[[&str; 2]]) -> Sheet {
+        let mut inputs: Vec<RowInput> = texts.iter().map(|text| RowInput { text: text.to_string(), ..RowInput::default() }).collect();
+        let cells = cells.iter().map(|[x, y]| [x.to_string(), y.to_string()]).collect();
+        inputs.push(RowInput { text: "a = 1".into(), table: Some(cells), connect: true, ..RowInput::default() });
+        analyze(mode, &inputs)
+    }
+
+    #[test]
+    fn tables_evaluate_each_cell_with_the_sheets_parameters() {
+        let sheet = table(Mode::Cartesian, &["a = 2"], &[["1", "2"], ["π", "a^2"], ["", ""], ["3", "q"], ["x", "1/0"], ["-1.5*10^1", ""]]);
+        let Some(Plot::Table { points, connect, bad, missing }) = sheet.rows[1].plot() else { panic!("{:?}", sheet.rows[1].outcome) };
+        assert!(*connect);
+        assert_eq!(points[0], [1.0, 2.0]);
+        assert_eq!(points[1], [PI, 4.0]);
+        assert!(points[2].iter().all(|value| value.is_nan()), "a blank row gives no point");
+        assert_eq!(points[3][0], 3.0);
+        assert!(points[3][1].is_nan() && points[5][1].is_nan());
+        assert_eq!(points[5][0], -15.0);
+        // q is undefined (offered as a slider), x is a variable of the sheet, 1/0 is not finite.
+        assert_eq!(bad, &[7, 8, 9]);
+        assert_eq!(missing, &["q".to_string()]);
+        // The row's own text is not read: "a = 1" in a table row defines nothing, so a stays 2.
+        assert!(matches!(sheet.rows[0].outcome, Outcome::Parameter { value, .. } if value == 2.0));
+        // Polar and parametric sheets take tables too (Cartesian x and y); 3D and complex sheets refuse them.
+        assert!(matches!(table(Mode::Polar, &[], &[["1", "1"]]).rows[0].plot(), Some(Plot::Table { .. })));
+        assert!(matches!(table(Mode::Parametric, &[], &[["1", "1"]]).rows[0].plot(), Some(Plot::Table { .. })));
+        for mode in [Mode::Space, Mode::Complex, Mode::Cylindrical] {
+            assert_eq!(error(&table(mode, &[], &[["1", "1"]]), 0).key, "error.table");
+        }
+        let long: Vec<[&str; 2]> = (0..MAX_TABLE_ROWS + 50).map(|_| ["1", "2"]).collect();
+        let Some(Plot::Table { points, .. }) = table(Mode::Cartesian, &[], &long).rows[0].plot().cloned() else { panic!() };
+        assert_eq!(points.len(), MAX_TABLE_ROWS);
+    }
+
+    #[test]
+    fn lists_of_constant_points_draw_like_tables() {
+        let sheet = self::sheet(Mode::Cartesian, &["b = 3", "[(1, 2), (b, -1), (0, 0)]", "[(1, 2), (x, 1)]", "((1, 2), (3, 4))"]);
+        let Some(Plot::Table { points, connect, bad, .. }) = sheet.rows[1].plot() else { panic!("{:?}", sheet.rows[1].outcome) };
+        assert_eq!(points, &[[1.0, 2.0], [3.0, -1.0], [0.0, 0.0]]);
+        assert!(!connect && bad.is_empty());
+        assert!(matches!(sheet.rows[2].outcome, Outcome::Error(_)), "a point in x is not a list of points");
+        assert!(matches!(sheet.rows[3].plot(), Some(Plot::Table { points, .. }) if points.len() == 2));
+        assert_eq!(error(&self::sheet(Mode::Cartesian, &["[(1, 2), (k, 1)]"]), 0).missing, vec!["k".to_string()]);
     }
 
     #[test]

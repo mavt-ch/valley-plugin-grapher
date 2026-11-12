@@ -109,6 +109,42 @@ describe('the sidebar', () => {
     await waitFor(() => expect(screen.getAllByRole('textbox', { name: /Expression/ }).map((input) => (input as HTMLInputElement).value)).toEqual(['y = a x + b', 'a = 1', 'b = 0', 'y = x^2 - 2', '']))
   })
 
+  it('turns the empty row into a table of points by typing table, by its button or by pasting a spreadsheet block', async () => {
+    const mock = mount()
+    render(<><Sidebar /><GraphTab /></>)
+    await screen.findByDisplayValue('y = x^2 - 2')
+    let inputs = screen.getAllByRole('textbox', { name: /Expression/ })
+    const typed = inputs[inputs.length - 1]
+    fireEvent.change(typed, { target: { value: 'table' } })
+    fireEvent.keyDown(typed, { key: 'Enter' })
+    const grid = await screen.findByRole('group', { name: 'Table 5' })
+    expect(within(grid).getAllByRole('textbox')).toHaveLength(2 + 4 * 2)
+    fireEvent.change(within(grid).getByRole('textbox', { name: 'x in row 1' }), { target: { value: '1' } })
+    fireEvent.change(within(grid).getByRole('textbox', { name: 'y in row 1' }), { target: { value: '2,5' } })
+    fireEvent.change(within(grid).getByRole('textbox', { name: 'y in row 2' }), { target: { value: 'k' } })
+    const row = screen.getAllByRole('listitem')[4]
+    await waitFor(() => expect(row.getAttribute('data-kind')).toBe('table'))
+    await waitFor(() => expect(row.querySelector('.grapher-value')?.textContent).toBe('Points: 1'))
+    expect(within(row).getByRole('button', { name: 'Add slider k' })).toBeTruthy()
+    expect(within(row).getByRole('button', { name: 'Hide graph' })).toBeTruthy()
+    fireEvent.click(within(row).getByRole('switch', { name: 'Connect points' }))
+    await waitFor(async () => {
+      const saved = JSON.parse((await mock.api.data.files.readText('graphs.json')) ?? '{}')
+      expect(saved.sheets.cartesian[4]).toMatchObject({ text: '', connect: true, table: { head: ['x', 'y'], cells: [['1', '2,5'], ['', 'k']] } })
+    }, { timeout: 2000 })
+    // The quiet button in the new empty row adds another table; a spreadsheet block pasted into the empty row makes one too.
+    fireEvent.click(screen.getByRole('button', { name: 'Add table of points' }))
+    expect(await screen.findByRole('group', { name: 'Table 6' })).toBeTruthy()
+    inputs = screen.getAllByRole('textbox', { name: /Expression/ })
+    const block = ['t;s', ...Array.from({ length: 1003 }, (_, index) => `${index};${index},5`)].join('\n')
+    fireEvent.paste(inputs[inputs.length - 1], { clipboardData: { getData: () => block } })
+    const pasted = await screen.findByRole('group', { name: 'Table 7' })
+    expect((within(pasted).getByRole('textbox', { name: 'Name of column y' }) as HTMLInputElement).value).toBe('s')
+    expect((within(pasted).getByRole('textbox', { name: 's in row 2' }) as HTMLInputElement).value).toBe('1.5')
+    expect(screen.getAllByRole('listitem')[6].querySelector('.grapher-notice')?.textContent).toBe('Kept 1000 of 1003 rows: a table holds at most 1000 rows.')
+    await waitFor(() => expect(screen.getAllByRole('listitem')[6].querySelector('.grapher-value')?.textContent).toBe('Points: 1000'))
+  })
+
   it('leaves a file it cannot read untouched', async () => {
     const mock = mount({ [FILE]: '{"version": 9}' })
     render(<Sidebar />)

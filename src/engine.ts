@@ -1,6 +1,7 @@
 import type { ValleyPluginApi } from '@valley/plugin-sdk'
 import { STRIDE } from './draw'
 import type { Row } from './model'
+import { cellText } from './table'
 import { viewOf, type Mode } from './views'
 
 export { STRIDE }
@@ -9,7 +10,8 @@ export { STRIDE }
 const MODULE_ID = 'plot'
 const RECORD = '\u001e'
 const FIELD = '\u001f'
-export type RowKind = 'empty' | 'error' | 'param' | 'value' | 'function' | 'definition' | 'polar' | 'curve' | 'point' | 'implicit' | 'surface' | 'curve3' | 'point3' | 'region' | 'cpoint' | 'csurface' | 'coords' | 'psurface' | 'implicit3' | 'field' | 'field3' | 'contour' | 'integral' | 'tangent' | 'tplane'
+const CELL = '\u001d'
+export type RowKind = 'empty' | 'error' | 'param' | 'value' | 'function' | 'definition' | 'polar' | 'curve' | 'point' | 'implicit' | 'surface' | 'curve3' | 'point3' | 'region' | 'cpoint' | 'csurface' | 'coords' | 'psurface' | 'implicit3' | 'field' | 'field3' | 'contour' | 'integral' | 'tangent' | 'tplane' | 'table'
 
 export interface RowError {
   key: string
@@ -45,6 +47,10 @@ export interface RowAnalysis {
   intercept?: number
   /** `tplane` rows: the partial derivatives of the surface at the point of contact (x, y, z). */
   gradient?: [number, number]
+  /** `table` rows: how many points they draw, the cells that did not evaluate (2 · row + column) and the undefined names those read. */
+  count?: number
+  bad?: number[]
+  missing?: string[]
 }
 
 /** `contour` paths are level curves whose points carry their level as the parameter; `arrow` paths are a vector field's arrows: tail and head, the tail's parameter |F|, the head's |F| relative to the view's reference (0–1). */
@@ -102,10 +108,14 @@ interface PlotExports {
 }
 
 const EXPORTS: (keyof PlotExports)[] = ['plot_input', 'plot_analyze', 'plot_text', 'plot_sample', 'plot_samples', 'plot_eval', 'plot_space']
-const clean = (value: string): string => value.replace(/[\u001e\u001f]/g, ' ')
+const clean = (value: string): string => value.replace(/[\u001d\u001e\u001f]/g, ' ')
 
+/** One record per row; a table sends its cells (decimal commas read as points) instead of the text. */
 export function encodeRows(rows: readonly Row[]): string {
-  return rows.map((row) => [clean(row.text), clean(row.from), clean(row.to), row.hidden ? '1' : '0', clean(row.from2), clean(row.to2), row.levels === undefined ? '' : String(row.levels), clean(row.step ?? ''), row.floor ? '1' : '0', row.normal === false ? '0' : '1'].join(FIELD)).join(RECORD)
+  return rows.map((row) => {
+    const cells = row.table ? row.table.cells.flatMap(([x, y]) => [clean(cellText(x)), clean(cellText(y))]).join(CELL) : ''
+    return [row.table ? '' : clean(row.text), clean(row.from), clean(row.to), row.hidden ? '1' : '0', clean(row.from2), clean(row.to2), row.levels === undefined ? '' : String(row.levels), clean(row.step ?? ''), row.floor ? '1' : '0', row.normal === false ? '0' : '1', row.table ? '1' : '', cells, row.connect ? '1' : '0'].join(FIELD)
+  }).join(RECORD)
 }
 
 export function decodeOutcomes(text: string, count: number): RowAnalysis[] {
@@ -132,6 +142,7 @@ export function decodeOutcomes(text: string, count: number): RowAnalysis[] {
       case 'point': return { kind, x: Number(a), y: Number(b) }
       case 'integral': return { kind, value: Number(a), from: Number(b), to: Number(c) }
       case 'tangent': return { kind, slope: Number(a), intercept: Number(b), x: Number(c), y: Number(rest[0]) }
+      case 'table': return { kind, count: Number(a), bad: b ? b.split(',').map(Number) : [], missing: c ? c.split(',') : [] }
       case 'tplane': return { kind, gradient: [Number(a), Number(b)], x: Number(c), y: Number(rest[0]), z: Number(rest[1]) }
       case 'implicit':
       case 'implicit3':

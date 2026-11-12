@@ -1,4 +1,5 @@
 import { normalizePaletteValue, paletteRef } from '@valley/plugin-sdk/palette'
+import { MAX_TABLE_ROWS, type Cells } from './table'
 import { MODES, viewOf, type AxisUnits, type Example, type Mode } from './views'
 
 /** The view of a sheet (see `src/views/`). Each keeps its own rows. */
@@ -8,6 +9,12 @@ export interface Slider {
   min: number
   max: number
   step: number
+}
+
+/** A table of points: column names and the cells, x and y per row, each a number or a constant expression. */
+export interface Table {
+  head: [x: string, y: string]
+  cells: Cells
 }
 
 export interface Row {
@@ -33,6 +40,18 @@ export interface Row {
   floor?: boolean
   /** Tangent planes: draw the normal vector (added later: absent means on). */
   normal?: boolean
+  /** A table of points instead of an expression (added later): the row's text stays empty. */
+  table?: Table
+  /** Tables and lists of points: join the points with a line in the order given (added later: absent means off). */
+  connect?: boolean
+}
+
+/** A row with something in it: text, or a table (even an empty one). */
+export const filled = (row: Row): boolean => row.table !== undefined || row.text.trim() !== ''
+
+/** A fresh table: columns x and y and three rows to fill. */
+export function createTable(): Table {
+  return { head: ['x', 'y'], cells: [['', ''], ['', ''], ['', '']] }
 }
 
 /** The most level curves a row may ask for, and the count it draws when it does not say. */
@@ -72,7 +91,7 @@ export function rowId(): string {
 
 /** The first palette colour no row uses yet, else the next in turn. */
 export function nextColor(rows: readonly Row[]): string {
-  const used = new Set(rows.filter((row) => row.text.trim()).map((row) => row.color))
+  const used = new Set(rows.filter(filled).map((row) => row.color))
   const free = COLORS.map(paletteRef).find((color) => !used.has(color))
   return free ?? paletteRef(COLORS[rows.length % COLORS.length])
 }
@@ -84,8 +103,8 @@ export function createRow(rows: readonly Row[], text = '', range: Partial<Pick<R
 /** Every sheet ends in one empty row to type into, like a fresh line on paper. */
 export function withTrailingRow(rows: readonly Row[]): Row[] {
   const next = [...rows]
-  while (next.length > 1 && !next[next.length - 1].text.trim() && !next[next.length - 2].text.trim()) next.pop()
-  if (!next.length || next[next.length - 1].text.trim()) next.push(createRow(next))
+  while (next.length > 1 && !filled(next[next.length - 1]) && !filled(next[next.length - 2])) next.pop()
+  if (!next.length || filled(next[next.length - 1])) next.push(createRow(next))
   return next
 }
 
@@ -166,7 +185,25 @@ function normalizeRow(value: unknown, rows: readonly Row[]): Row | null {
     ...(typeof record.step === 'string' && record.step ? { step: text(record.step) } : {}),
     ...(typeof record.labels === 'boolean' ? { labels: record.labels } : {}),
     ...(typeof record.floor === 'boolean' ? { floor: record.floor } : {}),
-    ...(typeof record.normal === 'boolean' ? { normal: record.normal } : {})
+    ...(typeof record.normal === 'boolean' ? { normal: record.normal } : {}),
+    ...readTable(record.table),
+    ...(typeof record.connect === 'boolean' ? { connect: record.connect } : {})
+  }
+}
+
+const CELL_LIMIT = 256
+
+function readTable(value: unknown): { table?: Table } {
+  if (!value || typeof value !== 'object') return {}
+  const record = value as Record<string, unknown>
+  const head = Array.isArray(record.head) ? record.head : []
+  const cells = Array.isArray(record.cells) ? record.cells : []
+  const cell = (entry: unknown): string => (typeof entry === 'string' ? entry.slice(0, CELL_LIMIT) : typeof entry === 'number' && Number.isFinite(entry) ? String(entry) : '')
+  return {
+    table: {
+      head: [text(head[0], 'x').slice(0, CELL_LIMIT), text(head[1], 'y').slice(0, CELL_LIMIT)],
+      cells: cells.slice(0, MAX_TABLE_ROWS).map((pair): [string, string] => (Array.isArray(pair) ? [cell(pair[0]), cell(pair[1])] : ['', '']))
+    }
   }
 }
 
@@ -196,10 +233,10 @@ function normalizeGraph(record: { mode?: unknown; sheets?: unknown; units?: unkn
     if (units[mode] === 'decimal' || units[mode] === 'pi') graph.units[mode] = units[mode]
   }
   // The trigonometric sheet is now the Cartesian one with π axes: its own rows join Cartesian, its examples do not.
-  const trig = (readRows(sheets.trig) ?? []).filter((row) => row.text.trim())
+  const trig = (readRows(sheets.trig) ?? []).filter(filled)
   if (trig.length && trig.map((row) => row.text).join('\n') !== LEGACY_TRIG_EXAMPLES.join('\n')) {
     const ids = new Set(graph.sheets.cartesian.map((row) => row.id))
-    const kept = graph.sheets.cartesian.filter((row) => row.text.trim())
+    const kept = graph.sheets.cartesian.filter(filled)
     graph.sheets.cartesian = withTrailingRow([...kept, ...trig.map((row) => (ids.has(row.id) ? { ...row, id: rowId() } : row))])
   }
   if (record.mode === 'trig') {

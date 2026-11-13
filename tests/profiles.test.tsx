@@ -68,6 +68,11 @@ describe('profiles', () => {
     const css = document.getElementById('grapher-styles')?.textContent ?? ''
     // Rows never wrap: 32px high with icon and name only; the name ellipsizes.
     expect(css).toContain('.grapher-profile-row { display:flex; align-items:center; height:32px;')
+    // Both header selectors fill their row: label left, chevron at the right edge, the buttons beside them at the end.
+    expect(css).toContain('.grapher-view-picker { display:inline-flex; align-items:center; gap:6px; flex:1 1 auto; min-width:0;')
+    expect(css).toContain('.grapher-view-chevron { width:12px; height:12px; flex:0 0 auto; margin-left:auto;')
+    expect(picker().className).toContain('grapher-view-picker')
+    expect(document.querySelector('.grapher-header .grapher-header-spacer, .grapher-profile-bar .grapher-header-spacer')).toBeNull()
     expect(css).toContain('.grapher-profile-item-name { flex:0 1 auto; min-width:0; overflow:hidden; white-space:nowrap; text-overflow:ellipsis;')
 
     fireEvent.click(within(rows[1]).getByRole('button', { name: 'More for Graph 2' }))
@@ -179,7 +184,7 @@ describe('profile icons', () => {
     expect(storage.close).toHaveBeenCalledWith('h')
   })
 
-  it('changes the icon from the row menu or the row icon through a grid inside the list, never on the tab', async () => {
+  it('changes the icon from the menu flyout or the grid under the row, never on the tab', async () => {
     const mock = createMockValleyApi({ manifest: declared, wasm: { modules: [module] } })
     vi.spyOn(mock.api.workspace, 'getOpenMainTabs').mockReturnValue([])
     const call = vi.spyOn(mock.api.backend, 'call').mockResolvedValue({ icons: { star: '<svg viewBox="0 0 24 24"><path d="M12 2l3 7h7l-6 4 2 7-6-4-6 4 2-7-6-4h7z"/></svg>', wave: '<svg viewBox="0 0 24 24"><path d="M2 12h20"/></svg>' } } as never)
@@ -190,22 +195,23 @@ describe('profile icons', () => {
     await screen.findByRole('button', { name: 'Profile: Graph 1' })
     const openMenu = vi.spyOn(mock.api.ui, 'openMenu').mockResolvedValue(null)
     fireEvent.click(picker())
-    // The real sequence: the dots open the menu, Change icon closes it and the grid appears under the row.
-    fireEvent.click(screen.getByRole('button', { name: 'More for Graph 1' }))
-    await act(async () => { await (openMenu.mock.calls.at(-1)![0] as UiMenuItem[]).find((item) => item.id === 'icon')!.onSelect!() })
     await waitFor(() => expect(call).toHaveBeenCalledWith('icons', expect.objectContaining({ defaults: PROFILE_ICONS })))
-    const grid = await screen.findByRole('group', { name: /^Icons in \.valley\/assets\/icons\/grapher-icon/ })
+    await act(async () => { await refreshProfileIcons() })
+    // The dots open the menu; Change icon has a flyout with one entry (and its icon) per icon of the folder.
+    fireEvent.click(screen.getByRole('button', { name: 'More for Graph 1' }))
+    const change = (openMenu.mock.calls.at(-1)![0] as UiMenuItem[]).find((item) => item.id === 'icon')!
+    expect(change.submenu!.map((item) => [item.id, item.label, Boolean(item.icon)])).toEqual([['icon:star', 'star', true], ['icon:wave', 'wave', true]])
+    act(() => { void change.submenu!.find((item) => item.id === 'icon:wave')!.onSelect!() })
+    expect(getStore().getSnapshot().document.icons?.main).toBe('wave')
     expect(popover).not.toHaveBeenCalled()
-    await waitFor(() => expect(within(grid).getByRole('button', { name: 'star' })).toBeTruthy())
+    // The row's icon opens the grid inside the list as the second way.
+    fireEvent.click(screen.getByRole('button', { name: 'Icon of Graph 1' }))
+    const grid = screen.getByRole('group', { name: /^Icons in \.valley\/assets\/icons\/grapher-icon/ })
     fireEvent.click(within(grid).getByRole('button', { name: 'star' }))
     expect(screen.queryByRole('group', { name: /^Icons in / })).toBeNull()
     expect(getStore().getSnapshot().document.icons?.main).toBe('star')
     const row = screen.getByRole('radiogroup', { name: 'Profiles' }).querySelector<HTMLElement>('[data-profile="main"]')!
     expect(decodeURIComponent(row.querySelector<HTMLElement>('.grapher-profile-glyph')!.style.maskImage)).toContain('M12 2l3 7h7')
-    // The row's icon opens the grid too.
-    fireEvent.click(within(row).getByRole('button', { name: 'Icon of Graph 1' }))
-    expect(screen.getByRole('group', { name: /^Icons in / })).toBeTruthy()
-    fireEvent.click(within(row).getByRole('button', { name: 'Icon of Graph 1' }))
     fireEvent.click(screen.getByRole('radio', { name: /Graph 1/ }))
     expect(decodeURIComponent(picker().querySelector<HTMLElement>('.grapher-profile-glyph')!.style.maskImage)).toContain('M12 2l3 7h7')
     // The tab keeps the icon of the view it shows.

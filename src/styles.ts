@@ -3,18 +3,18 @@
 const CSS = `
 .grapher-panel, .grapher-tab { display:flex; flex-direction:column; height:100%; min-height:0; }
 
-/* The sidebar header: the shared 38px panel-header with the view button, then on flat views the ℝ | π switch beside the open button. */
+/* The sidebar header: the shared 38px panel-header; the view button fills the row up to the ℝ | π switch and the open button. */
 .grapher-header { gap:var(--space-2); }
 .grapher-header-spacer { flex:1 1 auto; }
-.grapher-view-picker { display:inline-flex; align-items:center; gap:6px; min-width:0; height:26px; padding:0 6px 0 7px;
+.grapher-view-picker { display:inline-flex; align-items:center; gap:6px; flex:1 1 auto; min-width:0; height:26px; text-align:left; padding:0 6px 0 7px;
   border:none; border-radius:var(--radius-sm); background:transparent; color:var(--text-color); font:inherit;
   font-size:var(--smaller-font-size); font-weight:500; cursor:pointer; -webkit-app-region:no-drag;
   transition:background-color var(--duration-fast) var(--ease-out); }
 .grapher-view-picker:hover, .grapher-view-picker[aria-expanded='true'] { background:var(--hover-bg); }
 .grapher-view-picker:focus-visible { outline:2px solid var(--accent-color); outline-offset:-2px; }
 .grapher-view-icon { width:16px; height:16px; flex:0 0 auto; color:var(--accent-tint-text); }
-.grapher-view-name { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.grapher-view-chevron { width:12px; height:12px; flex:0 0 auto; color:var(--text-tertiary); }
+.grapher-view-name { flex:0 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.grapher-view-chevron { width:12px; height:12px; flex:0 0 auto; margin-left:auto; color:var(--text-tertiary); }
 .grapher-units { display:inline-flex; align-items:center; flex:0 0 auto; height:24px; padding:2px; box-sizing:border-box;
   border-radius:var(--radius-sm); background:var(--container-color-light); -webkit-app-region:no-drag; }
 .grapher-unit { display:inline-flex; align-items:center; justify-content:center; min-width:24px; height:20px; padding:0 5px;
@@ -88,7 +88,6 @@ const CSS = `
 /* The profile bar under the view header: one 38px row, then the profile list in place of the rows when open. */
 .grapher-profile-bar { display:flex; align-items:center; gap:2px; flex:0 0 var(--app-bar-height); height:var(--app-bar-height);
   box-sizing:border-box; padding:0 var(--space-2); border-bottom:1px solid var(--border-light); }
-.grapher-profile-picker { max-width:calc(100% - 32px); }
 .grapher-profile-action { display:inline-flex; align-items:center; justify-content:center; flex:0 0 26px; width:26px; height:26px; padding:0;
   border:none; border-radius:var(--radius-sm); background:transparent; color:var(--text-secondary); cursor:pointer;
   transition:background-color var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out); }

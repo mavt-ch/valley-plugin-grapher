@@ -10,7 +10,8 @@ import { MathText } from './MathText'
 import { ANIMATION_SPEEDS, COLORS, DEFAULT_ANIMATION, DEFAULT_LEVELS, MAIN_GRAPH, MAX_LEVELS, MAX_NAME, MODES, profileIds, createRow, createTable, filled, graphOf, moveRow, rangeVariable, unitsOf, type Animation, type AxisUnits, type Mode, type Row, type Table } from './model'
 import { getStore, useGrapher } from './store'
 import { notePlaying } from './details'
-import { PROFILE_ICON_FOLDER, profileIconSource, profileIconSvgs, refreshProfileIcons, subscribeProfileIcons } from './profileIcons'
+import { PROFILE_ICON_FOLDER, profileIconElement, profileIconSource, profileIconSvgs, refreshProfileIcons, subscribeProfileIcons } from './profileIcons'
+import { PROFILE_ICONS } from './profileIconSet'
 import { MAX_TABLE_ROWS, looksTabular, parseTable, type Cells, type PastedTable } from './table'
 import { formatComplex, formatLinear, formatNumber, formatPolar } from './ticks'
 import { viewOf, type Insert } from './views'
@@ -259,7 +260,6 @@ const ProfileBar = ({ tab, profile, open, toggle }: { tab: string; profile: stri
         <span className="grapher-view-name">{name}</span>
         <ChevronDown className="grapher-view-chevron" />
       </button>
-      <span className="grapher-header-spacer" />
       <button
         type="button"
         className="grapher-profile-action"
@@ -272,6 +272,12 @@ const ProfileBar = ({ tab, profile, open, toggle }: { tab: string; profile: stri
       </button>
     </div>
   )
+}
+
+/** The icons the menu offers: the folder's, or the bundled ones until it has been listed. */
+const iconNames = (): string[] => {
+  const listed = Object.keys(profileIconSvgs())
+  return (listed.length ? listed : Object.keys(PROFILE_ICONS)).sort((a, b) => a.localeCompare(b))
 }
 
 /** Every profile in place of the expressions, one compact row each: the whole row picks it for the focused tab; the
@@ -327,11 +333,25 @@ const ProfileList = ({ tab, profile, close }: { tab: string; profile: string; cl
   const menu = (id: string, target: { anchor: HTMLElement } | { x: number; y: number }): void => {
     const items: UiMenuItem[] = [
       { id: 'rename', label: uiText('profile.renameItem'), icon: <Pencil />, onSelect: () => setRenaming(id) },
-      { id: 'icon', label: uiText('profile.iconItem'), icon: <Smile />, onSelect: () => setPicking(id) },
+      {
+        id: 'icon',
+        label: uiText('profile.iconItem'),
+        icon: <Smile />,
+        // A flyout beside the menu with every icon of the folder; picking one closes the menu and saves it.
+        submenu: iconNames().map((icon): UiMenuItem => ({
+          id: `icon:${icon}`,
+          type: 'radio',
+          checked: document.icons?.[id] === icon,
+          label: icon,
+          icon: profileIconElement(icon) ?? <Smile />,
+          onSelect: () => store.setProfileIcon(id, icon)
+        }))
+      },
       { id: 'duplicate', label: uiText('profile.duplicateItem'), icon: <Copy />, enabled: store.canAddProfile(), onSelect: () => store.duplicateProfile(tab, id) },
       { type: 'separator' },
       { id: 'delete', label: uiText('profile.deleteItem'), icon: <Trash />, danger: true, enabled: !last, ...(last ? { description: uiText('profile.lastOne') } : {}), onSelect: () => store.deleteProfile(id) }
     ]
+    void refreshProfileIcons()
     void api.ui.openMenu(items, target).catch(() => {})
   }
   return (
@@ -1115,7 +1135,6 @@ export const Sidebar = (): ReactElement => {
     <div className="grapher-panel">
       <div className="panel-header grapher-header">
         <ViewButton mode={mode} open={choosing} toggle={() => { setProfiling(false); setChoosing((open) => !open) }} />
-        <span className="grapher-header-spacer" />
         {!choosing ? <UnitsSwitch graph={active} mode={mode} units={units} /> : null}
         <button
           type="button"

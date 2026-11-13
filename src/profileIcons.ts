@@ -1,4 +1,5 @@
-import { api } from './runtime'
+import { React, api } from './runtime'
+import type { ReactElement } from 'react'
 import { PROFILE_ICONS } from './profileIconSet'
 
 /** The icon folder as the user sees it in the realm. */
@@ -52,4 +53,28 @@ export function profileIconSource(name: string | undefined): string | null {
 export function availableProfileIcons(): ReadonlySet<string> | null {
   const current = registry()
   return current.loaded && Object.keys(current.icons).length ? new Set(Object.keys(current.icons)) : null
+}
+
+const SHAPES = new Set(['g', 'path', 'circle', 'ellipse', 'rect', 'line', 'polyline', 'polygon'])
+const SHAPE_ATTRIBUTES: Record<string, string> = { d: 'd', cx: 'cx', cy: 'cy', r: 'r', rx: 'rx', ry: 'ry', x: 'x', y: 'y', x1: 'x1', y1: 'y1', x2: 'x2', y2: 'y2', width: 'width', height: 'height', points: 'points', transform: 'transform', opacity: 'opacity', 'fill-rule': 'fillRule', 'clip-rule': 'clipRule' }
+
+/** An icon of the folder as a plain SVG element (for menu entries): its shapes only, stroked in the current colour. */
+export function profileIconElement(name: string): ReactElement | null {
+  const svg = registry().icons[name] ?? PROFILE_ICONS[name]
+  if (!svg || typeof DOMParser === 'undefined') return null
+  const root = new DOMParser().parseFromString(svg, 'image/svg+xml').documentElement
+  if (root.localName !== 'svg') return null
+  let key = 0
+  const shapes = (parent: Element): ReactElement[] => Array.from(parent.children).filter((child) => SHAPES.has(child.localName)).map((child) => {
+    const props: Record<string, string | number> = { key: key++ }
+    for (const attribute of Array.from(child.attributes)) {
+      const prop = SHAPE_ATTRIBUTES[attribute.name]
+      if (prop && !/url\s*\(|javascript:/i.test(attribute.value)) props[prop] = attribute.value
+    }
+    return React.createElement(child.localName, props, ...shapes(child))
+  })
+  return React.createElement('svg', {
+    width: '1em', height: '1em', viewBox: root.getAttribute('viewBox') ?? '0 0 24 24', fill: 'none', stroke: 'currentColor',
+    strokeWidth: root.getAttribute('stroke-width') ?? 2, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true
+  }, ...shapes(root))
 }

@@ -8,7 +8,7 @@ import { space } from './space'
 import { spherical } from './spherical'
 import type { Mode, ViewDefinition } from './types'
 
-export type { AxisUnits, Example, Mode, PlaneView, SpaceView, ViewDefinition } from './types'
+export type { AxisUnits, Example, Insert, Mode, PlaneView, SpaceView, ViewDefinition } from './types'
 
 /** The views in header order. */
 export const VIEWS: readonly ViewDefinition[] = [cartesian, polar, parametric, space, cylindrical, spherical, complex, complexSpace]

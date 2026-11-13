@@ -2,6 +2,7 @@ import { React } from '../../runtime'
 import type { ReactElement } from 'react'
 import { Svg, type IconProps } from '../../icons'
 import type { SpaceView } from '../types'
+import { prod, sum } from '../inserts'
 
 /** A surface rising over the complex plane. */
 const Icon = (p: IconProps): ReactElement => (
@@ -20,5 +21,6 @@ export const complexSpace: SpaceView = {
   icon: Icon,
   placeholder: 'w = (z^2 - 1) / z',
   examples: ['w = (z^2 - 4) / 4', 'Re(z^2) / 5', '1 + 2i'],
+  inserts: [sum('w = sum(n, 0, 5, z^n / 10)', 'z^n / 10'), prod('w = prod(n, 1, 3, z - n)', 'z - n')],
   axisNames: ['Re', 'Im', '|w|']
 }

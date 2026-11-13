@@ -4,10 +4,14 @@
   "assets": "runtime/assets",
   "uiSlots": {
     "left_sidebar": "grapher.sidebar",
-    "main_workspace": "grapher.graph"
+    "main_workspace": "grapher.graph",
+    "right_sidebar": "grapher.reference"
   },
   "slotDefaults": {
     "left_sidebar": {
+      "order": 95
+    },
+    "right_sidebar": {
       "order": 95
     }
   },

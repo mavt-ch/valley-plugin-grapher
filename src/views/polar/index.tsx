@@ -2,6 +2,7 @@ import { React } from '../../runtime'
 import type { ReactElement } from 'react'
 import { Svg, type IconProps } from '../../icons'
 import type { PlaneView } from '../types'
+import { piecewise, prod, sum, table } from '../inserts'
 import { polarGrid } from './grid'
 
 /** Concentric circles and a ray. */
@@ -17,6 +18,7 @@ export const polar: PlaneView = {
   icon: Icon,
   placeholder: 'r = 2cos(3θ)',
   examples: ['r = 1 + cos(θ)', 'r = 2 sin(3θ)'],
+  inserts: [sum('r = sum(n, 1, 5, cos(n θ) / n)', 'cos(n θ) / n'), prod('r = prod(n, 1, 2, θ / n)', 'θ / n'), piecewise('r = {θ < π: 1, 2}', 'θ < π'), table],
   homeSpan: 8,
   grid: polarGrid,
   units: 'pi'

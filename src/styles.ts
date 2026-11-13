@@ -40,6 +40,43 @@ const CSS = `
 .grapher-view-option-hint { font-size:0.75rem; color:var(--text-tertiary); line-height:1.35; overflow-wrap:anywhere; }
 .grapher-view-option-check { width:14px; height:14px; color:var(--accent-tint-text); }
 
+/* The insert bar: one 38px row of quiet glyph buttons under the header; too many for the width scroll sideways. */
+.grapher-insert-bar { display:flex; align-items:center; gap:2px; flex:0 0 var(--app-bar-height); height:var(--app-bar-height);
+  box-sizing:border-box; padding:0 var(--space-2); border-bottom:1px solid var(--border-light); overflow-x:auto; overflow-y:hidden;
+  white-space:nowrap; scrollbar-width:none; }
+.grapher-insert-bar::-webkit-scrollbar { display:none; }
+.grapher-insert { display:inline-flex; align-items:center; justify-content:center; flex:0 0 auto; min-width:26px; height:26px;
+  padding:0 5px; border:none; border-radius:var(--radius-sm); background:transparent; color:var(--text-secondary); cursor:pointer;
+  -webkit-app-region:no-drag; transition:background-color var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out); }
+.grapher-insert:hover { background:var(--hover-bg); color:var(--text-color); }
+.grapher-insert:focus-visible { outline:2px solid var(--accent-color); outline-offset:-2px; }
+.grapher-insert-glyph { font-family:'Times New Roman', 'STIX Two Math', 'Cambria Math', serif; font-size:0.9375rem; line-height:1; }
+.grapher-insert-icon { width:15px; height:15px; }
+
+/* The reference in the right sidebar: groups of syntax, one sentence and an example that inserts itself. */
+.grapher-reference { flex:1 1 auto; min-height:0; overflow-y:auto; padding:6px 0 var(--space-3); }
+.grapher-ref-title { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:var(--smaller-font-size); font-weight:500; color:var(--text-color); }
+.grapher-ref-group { padding:0 6px; }
+.grapher-ref-heading { display:flex; align-items:center; gap:6px; width:100%; height:28px; padding:0 6px; border:none;
+  border-radius:var(--radius-sm); background:transparent; color:var(--text-secondary); font:inherit; font-size:var(--smaller-font-size);
+  font-weight:500; text-align:left; cursor:pointer; transition:background-color var(--duration-fast) var(--ease-out); }
+.grapher-ref-heading:hover { background:var(--hover-bg); color:var(--text-color); }
+.grapher-ref-heading:focus-visible { outline:2px solid var(--accent-color); outline-offset:-2px; }
+.grapher-ref-chevron { width:12px; height:12px; flex:0 0 auto; color:var(--text-tertiary); transform:rotate(-90deg);
+  transition:transform var(--duration-fast) var(--ease-out); }
+.grapher-ref-heading[aria-expanded='true'] .grapher-ref-chevron { transform:none; }
+.grapher-ref-entries { margin:0 0 6px; padding:0; list-style:none; }
+.grapher-ref-entry { display:flex; flex-direction:column; gap:2px; padding:5px 6px 5px 24px; }
+.grapher-ref-syntax { font-family:var(--mono-font); font-size:0.8125rem; color:var(--text-color); overflow-wrap:anywhere; }
+.grapher-ref-text { font-size:0.75rem; line-height:1.4; color:var(--text-secondary); }
+.grapher-ref-examples { display:flex; flex-wrap:wrap; gap:2px 6px; }
+.grapher-ref-example { padding:1px 4px; margin-left:-4px; border:none; border-radius:var(--radius-sm); background:transparent;
+  color:var(--accent-tint-text); font-family:var(--mono-font); font-size:0.75rem; text-align:left; cursor:pointer; overflow-wrap:anywhere;
+  transition:background-color var(--duration-fast) var(--ease-out); }
+.grapher-ref-example:hover:not(:disabled) { background:var(--hover-bg); }
+.grapher-ref-example:disabled { color:var(--text-tertiary); cursor:default; }
+.grapher-ref-example:focus-visible { outline:2px solid var(--accent-color); outline-offset:-2px; }
+
 .grapher-alert { flex:0 0 auto; margin:0; padding:var(--space-2) var(--space-3); border-bottom:1px solid var(--border-light);
   background:var(--danger-tint-bg); color:var(--danger-tint-text); font-size:var(--smaller-font-size); overflow-wrap:anywhere; }
 
@@ -234,7 +271,7 @@ button.grapher-handle:hover { color:var(--text-color); }
 .grapher-zoom-button:focus-visible { outline:2px solid var(--accent-color); outline-offset:2px; }
 
 @media (prefers-reduced-motion: reduce) {
-  .grapher-view-picker, .grapher-view-option, .grapher-unit, .grapher-swatch, .grapher-delete, .grapher-grip-icon, .grapher-handle .grapher-index, .grapher-zoom-button, .grapher-play-options svg { transition:none; }
+  .grapher-view-picker, .grapher-view-option, .grapher-unit, .grapher-insert, .grapher-ref-heading, .grapher-ref-chevron, .grapher-ref-example, .grapher-swatch, .grapher-delete, .grapher-grip-icon, .grapher-handle .grapher-index, .grapher-zoom-button, .grapher-play-options svg { transition:none; }
 }
 `
 

@@ -2,6 +2,7 @@ import { React } from '../../runtime'
 import type { ReactElement } from 'react'
 import { Svg, type IconProps } from '../../icons'
 import type { SpaceView } from '../types'
+import { piecewise, prod, sum } from '../inserts'
 
 /** An upright cylinder. */
 const Icon = (p: IconProps): ReactElement => (
@@ -19,6 +20,7 @@ export const cylindrical: SpaceView = {
   icon: Icon,
   placeholder: 'z = r^2',
   examples: [['r = 1 + cos(φ)', '', '', '-4', '0'], ['z = φ / 2', '', '', '0', '3']],
+  inserts: [sum('z = sum(n, 1, 3, r^n / 5)', 'r^n / 5'), prod('z = prod(n, 1, 2, r / n)', 'r / n'), piecewise('r = {φ < π: 1, 2}', 'φ < π')],
   axisNames: ['x', 'y', 'z'],
   homeRange: 5,
   ranges: { r: ['0', '∞'], φ: ['0', '2π'], z: ['−∞', '∞'] }

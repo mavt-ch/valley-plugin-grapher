@@ -3,6 +3,7 @@ import type { ReactElement } from 'react'
 import { planeGrid } from '../../draw'
 import { Svg, type IconProps } from '../../icons'
 import type { PlaneView } from '../types'
+import { piecewise, prod, sum, table } from '../inserts'
 
 /** A closed plane curve. */
 const Icon = (p: IconProps): ReactElement => (
@@ -17,6 +18,7 @@ export const parametric: PlaneView = {
   icon: Icon,
   placeholder: '(cos t, sin(2t))',
   examples: ['(cos(3t), sin(2t))', ['(0.2t cos t, 0.2t sin t)', '0', '6π']],
+  inserts: [sum('(sum(n, 1, 5, cos(n t) / n), sin t)', 'cos(n t) / n'), prod('(prod(n, 1, 2, t / n), sin t)', 't / n'), piecewise('({t < π: t, π}, sin t)', 't < π'), table],
   homeSpan: 10,
   grid: planeGrid(),
   units: 'decimal'

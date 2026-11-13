@@ -3,6 +3,7 @@ import type { ReactElement } from 'react'
 import { planeGrid } from '../../draw'
 import { Svg, type IconProps } from '../../icons'
 import type { PlaneView } from '../types'
+import { derivative, field, integral, levels, piecewise, prod, sum, table, tangent } from '../inserts'
 
 /** Axes with a parabola. */
 const Icon = (p: IconProps): ReactElement => (
@@ -21,6 +22,7 @@ export const cartesian: PlaneView = {
   icon: Icon,
   placeholder: 'int(sin(x), 0, π)',
   examples: ['y = x^2 - 2', 'y = a x + b', 'a = 1', 'b = 0'],
+  inserts: [sum('sum(n, 1, 5, x^n / n)', 'x^n / n'), prod('prod(n, 1, 3, x - n)', 'x - n'), integral, derivative, tangent, piecewise('{x < 0: -x, x^2}', 'x < 0'), field, levels, table],
   homeSpan: 20,
   grid: planeGrid(),
   units: 'decimal'

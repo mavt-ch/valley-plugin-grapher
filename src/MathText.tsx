@@ -485,7 +485,7 @@ function render(node: MNode, key: string | number = 0): ReactNode {
           <span className="gm-series-op">
             <span className="gm-series-to">{render(node.to)}</span>
             <span className="gm-series-sign">{node.sign}</span>
-            <span className="gm-series-from">{render(node.index)}<span className="gm-op gm-rel">=</span>{render(node.from)}</span>
+            <span className="gm-series-from">{render(node.index, 'index')}<span className="gm-op gm-rel">=</span>{render(node.from, 'from')}</span>
           </span>
           <span className="gm-series-body">{render(node.body)}</span>
         </span>

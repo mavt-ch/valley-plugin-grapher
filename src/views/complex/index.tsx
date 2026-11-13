@@ -3,6 +3,7 @@ import type { ReactElement } from 'react'
 import { planeGrid } from '../../draw'
 import { Svg, type IconProps } from '../../icons'
 import type { PlaneView } from '../types'
+import { prod, sum } from '../inserts'
 
 /** The Gaussian plane: axes and a complex number as an arrow. */
 const Icon = (p: IconProps): ReactElement => (
@@ -17,6 +18,7 @@ export const complex: PlaneView = {
   icon: Icon,
   placeholder: '|z - 1| < 2',
   examples: ['w = 2e^(iπ/3)', 'cos(φ) + i sin(φ)', 'φ = 0.8', '|z + 2| < 3'],
+  inserts: [sum('sum(n, 1, 3, i^n)', 'i^n'), prod('prod(n, 1, 3, 1 + i)', '1 + i')],
   homeSpan: 12,
   grid: planeGrid({ imaginary: true }),
   units: 'decimal',

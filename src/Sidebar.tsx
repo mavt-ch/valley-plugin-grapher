@@ -11,12 +11,14 @@ import { ANIMATION_SPEEDS, COLORS, DEFAULT_ANIMATION, DEFAULT_LEVELS, MAIN_GRAPH
 import { getStore, useGrapher } from './store'
 import { MAX_TABLE_ROWS, looksTabular, parseTable, type Cells, type PastedTable } from './table'
 import { formatComplex, formatLinear, formatNumber, formatPolar } from './ticks'
-import { viewOf } from './views'
+import { viewOf, type Insert } from './views'
 
 const DRAWN = new Set(['function', 'polar', 'curve', 'point', 'implicit', 'surface', 'curve3', 'point3', 'region', 'cpoint', 'csurface', 'coords', 'psurface', 'implicit3', 'field', 'field3', 'contour', 'integral', 'tangent', 'tplane', 'table'])
 
 /** The row whose input takes focus on its next render (after Enter adds a row or Backspace removes one). */
 let pendingFocus: string | null = null
+/** The selection a row's input takes with its next focus: the placeholder of an inserted template. */
+let pendingSelection: { id: string; start: number; end: number } | null = null
 /** A note for a table row's next render, such as a paste cut to the row cap. */
 const pendingNotice = new Map<string, string>()
 
@@ -71,6 +73,73 @@ function stepDigits(step: number): number {
 /** `a = 1.3`: the text a slider writes back into its row. */
 export function sliderText(name: string, value: number, step: number): string {
   return `${name} = ${Number(value.toFixed(stepDigits(step)))}`
+}
+
+/**
+ * Types an insert-bar template into a sheet through the same store edit a keystroke makes: into the row whose input is
+ * focused, replacing its selection, or else into the empty last row. The template's placeholder is selected so typing
+ * replaces it; `table` turns the empty last row (or the focused empty row) into a table of points, and a template that
+ * needs a definition such as f(x) gets it in a row above when the sheet has none.
+ */
+export function insertTemplate(graph: string, mode: Mode, insert: Pick<Insert, 'text' | 'select' | 'needs'>, focused?: { id: string; start: number; end: number } | null): void {
+  const store = getStore()
+  store.updateRows(graph, mode, (rows) => {
+    const table = insert.text === 'table'
+    if (table && !takesTables(mode)) return rows
+    const typed = focused ? rows.find((row) => row.id === focused.id && !row.table && !(table && row.text.trim())) : undefined
+    const target = typed ?? rows[rows.length - 1]
+    let next = rows.map((row) => {
+      if (row.id !== target.id) return row
+      if (table) return { ...row, text: '', table: createTable() }
+      const [start, end] = typed && focused ? [Math.min(focused.start, row.text.length), Math.min(focused.end, row.text.length)] : [0, row.text.length]
+      const text = row.text.slice(0, start) + insert.text + row.text.slice(end)
+      const at = insert.select ? insert.text.indexOf(insert.select) : -1
+      pendingSelection = at >= 0 ? { id: row.id, start: start + at, end: start + at + insert.select!.length } : { id: row.id, start: start + insert.text.length, end: start + insert.text.length }
+      return { ...row, text }
+    })
+    pendingFocus = target.id
+    const head = insert.needs?.split('=')[0].replace(/\s+/g, '')
+    if (insert.needs && head && !rows.some((row) => row.text.replace(/\s+/g, '').startsWith(`${head}=`))) {
+      const at = next.findIndex((row) => row.id === target.id)
+      next = [...next.slice(0, at), { ...createRow(next), text: insert.needs }, ...next.slice(at)]
+    }
+    return next
+  })
+}
+
+/** The row input focused in this document, with its selection: where the insert bar types. */
+function focusedRow(document: Document | undefined): { id: string; start: number; end: number } | null {
+  const input = document?.activeElement
+  if (!(input instanceof (document?.defaultView ?? window).HTMLInputElement) || !input.hasAttribute('data-row-input')) return null
+  const id = input.closest<HTMLElement>('[data-row-id]')?.dataset.rowId
+  return id ? { id, start: input.selectionStart ?? input.value.length, end: input.selectionEnd ?? input.value.length } : null
+}
+
+/** Under the header: one 38px row of small buttons that type the view's templates (Σ, ∫, f′, …); it scrolls sideways when narrow. */
+const InsertBar = ({ graph, mode }: { graph: string; mode: Mode }): ReactElement | null => {
+  const inserts = viewOf(mode).inserts?.filter((insert) => insert.text !== 'table' || takesTables(mode)) ?? []
+  if (!inserts.length) return null
+  return (
+    <div className="grapher-insert-bar" role="toolbar" aria-label={uiText('insert.bar')}>
+      {inserts.map((insert) => {
+        const label = uiText(`insert.${insert.id}`)
+        const Glyph = insert.glyph
+        return (
+          <button
+            key={insert.id}
+            type="button"
+            className="grapher-insert"
+            aria-label={label}
+            {...api.ui.tooltip(label)}
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={(event) => insertTemplate(graph, mode, insert, focusedRow(event.currentTarget.ownerDocument))}
+          >
+            {typeof Glyph === 'string' ? <span className="grapher-insert-glyph">{Glyph}</span> : <Glyph className="grapher-insert-icon" />}
+          </button>
+        )
+      })}
+    </div>
+  )
 }
 
 /** Opens a new tab with a fresh graph of its own on the given view. */
@@ -633,8 +702,10 @@ const ExpressionRow = (props: RowProps): ReactElement => {
     if (pendingFocus !== row.id) return
     pendingFocus = null
     const input = inputRef.current
+    const selection = pendingSelection?.id === row.id ? pendingSelection : null
+    pendingSelection = null
     input?.focus()
-    input?.setSelectionRange(input.value.length, input.value.length)
+    input?.setSelectionRange(selection?.start ?? input.value.length, selection?.end ?? input.value.length)
   })
   const drawn = analysis ? DRAWN.has(analysis.kind) : false
   const typeset = !editing && row.text.trim() !== ''
@@ -693,7 +764,7 @@ const ExpressionRow = (props: RowProps): ReactElement => {
     edit((current) => ({ ...current, text: '', table: createTable() }))
   }
   return (
-    <div className="grapher-row" role="listitem" data-row-index={index} data-kind={analysis?.kind ?? 'empty'} data-hidden={row.hidden || undefined} data-dragging={props.dragging || undefined}>
+    <div className="grapher-row" role="listitem" data-row-index={index} data-row-id={row.id} data-kind={analysis?.kind ?? 'empty'} data-hidden={row.hidden || undefined} data-dragging={props.dragging || undefined}>
       <div className="grapher-gutter">
         {trailing ? <span className="grapher-handle"><span className="grapher-index">{index + 1}</span></span> : (
           <button
@@ -862,6 +933,7 @@ export const Sidebar = (): ReactElement => {
           title={uiText('graph.open')}
         />
       </div>
+      {loaded && !choosing ? <InsertBar graph={active} mode={mode} /> : null}
       {problems.filter((problem) => problem.key !== 'problem.engine').map((problem) => (
         <p key={problem.key} role="alert" className="grapher-alert">{uiText(problem.key, { message: problem.message })}</p>
       ))}
@@ -895,7 +967,7 @@ export const Sidebar = (): ReactElement => {
             />
           ))}
           {showMarker ? <div className="grapher-drop-marker" style={{ top: drag.marker }} aria-hidden /> : null}
-          <p className="grapher-hint">{uiText(`hint.${mode}`)}</p>
+          <p className="grapher-hint">{uiText('hint.short')}</p>
         </div>
       ) : (
         <api.ui.ContentLoader compact />

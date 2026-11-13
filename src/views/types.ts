@@ -18,6 +18,20 @@ export type Example =
   | readonly [text: string, from: string, to: string, from2: string, to2: string]
   | { readonly text: string; readonly floor?: boolean }
 
+/** A button of the sidebar's insert bar: a template typed into the edited row at the caret, or the table row. */
+export interface Insert {
+  /** Locale key `insert.<id>` names the feature in the tooltip. */
+  id: string
+  /** A text glyph such as Σ, or a small icon. */
+  glyph: string | ((props: { className?: string }) => ReactElement)
+  /** The template, or `table` for a table of points. */
+  text: string
+  /** The part of the template typing replaces; the caret goes to the end when absent. */
+  select?: string
+  /** A row the template refers to, added above it when the sheet has no row starting with its text up to `=`. */
+  needs?: string
+}
+
 interface CommonView {
   id: Mode
   /** The kernel's mode number (`plot_analyze`). */
@@ -26,6 +40,8 @@ interface CommonView {
   /** Shown in the empty last row. */
   placeholder: string
   examples: readonly Example[]
+  /** The insert bar's buttons, each accepted by this view's kernel mode; no bar when absent. */
+  inserts?: readonly Insert[]
 }
 
 /** A flat view: pan and zoom over a grid. */

@@ -6,6 +6,8 @@ Plot functions in Cartesian, polar, parametric, 3D, cylindrical, spherical and c
 
 Open **Grapher** in the left sidebar. The dropdown in the header picks the view; each one keeps its own expressions. On flat views the **ℝ | π** switch beside it labels the axes in real numbers or in multiples of π (π/2, π, 2π …); only the labels change, so trigonometric functions use the Cartesian view with π selected (an older Trigonometric sheet opens there):
 
+Under the header, the **insert bar** offers the features of the focused view as small buttons (Σ, ∏, ∫, f′, tangent, piecewise braces, vector field, level curves, surfaces, table): a click types a template that draws on that view at the caret of the row being edited, or into the empty last row, and selects its placeholder so typing replaces it (f′ adds `f(x) = x^3` above when the sheet defines no f). Each view lists its entries as `inserts` in `src/views/<id>/`, and a test checks each one against the built kernel. The right sidebar's **Grapher** tab (a page icon) is the reference: every feature with its syntax, one sentence and examples, grouped, with the focused view's groups first and open; an example the focused view accepts inserts itself into the empty row. The long hint under the rows is replaced by one line pointing to both.
+
 | System | Grid | Typical rows |
 | --- | --- | --- |
 | Cartesian | decimal, or the x-axis in multiples of π | `y = x^2`, `x = y^2`, `f(x) = sin x`, `f'(x)`, `int(f, 0, π)`, `tangent(f, a)`, `sum(n, 0, N, x^n / n!)`, `{x < 0: -x, x^2}`, `tan x`, `x^2 + y^2 = 4`, `(1, 2)`, `[(1, 2), (3, 4)]`, `table`, `F(x, y) = (-y, x)`, `f(x, y) = x^2 - y^2` |

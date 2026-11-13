@@ -7,6 +7,7 @@ import type { ValleyPluginManifest } from '@valley/plugin-sdk/types'
 import * as plugin from '../src/index'
 import { Sidebar } from '../src/Sidebar'
 import { GraphTab } from '../src/GraphView'
+import { Reference } from '../src/Reference'
 import manifest from '../manifest.json'
 import config from '../config.json'
 
@@ -180,7 +181,6 @@ describe('the graph tab', () => {
     expect(within(torus).getByRole('textbox', { name: 'End of v' }).getAttribute('placeholder')).toBe('2π')
     fireEvent.change(within(torus).getByRole('textbox', { name: 'End of u' }), { target: { value: 'π' } })
     await waitFor(async () => expect(await mock.api.data.files.readText('graphs.json')).toContain('"to": "π"'), { timeout: 2000 })
-    expect(container.querySelector('.grapher-hint')?.textContent).toContain('A triple in u and v is a surface, in t a curve')
   })
 
   it('draws an equation in x, y and z as an implicit surface with a colour swatch and no range rows', async () => {
@@ -194,7 +194,6 @@ describe('the graph tab', () => {
     await waitFor(() => expect(sphere.getAttribute('data-kind')).toBe('implicit3'))
     expect(within(sphere).getByRole('button', { name: 'Hide graph' })).toBeTruthy()
     expect(within(sphere).queryByRole('textbox', { name: /^Start of/ })).toBeNull()
-    expect(container.querySelector('.grapher-hint')?.textContent).toContain('implicit surface F(x, y, z) = 0')
   })
 
   it('draws a vector field typed as F(x, y) = (…) and saves whether it is shaded by magnitude', async () => {
@@ -212,7 +211,6 @@ describe('the graph tab', () => {
     fireEvent.click(shading)
     expect(within(field).getByRole('switch', { name: 'Shade by magnitude' }).getAttribute('aria-checked')).toBe('false')
     await waitFor(async () => expect(await mock.api.data.files.readText('graphs.json')).toContain('"magnitude": false'), { timeout: 2000 })
-    expect(container.querySelector('.grapher-hint')?.textContent).toContain('vector field F(x, y) = (−y, x)')
   })
 
   it('draws the level curves of f(x, y) with a level count, a step and labels, and floor curves under a 3D surface', async () => {
@@ -233,7 +231,6 @@ describe('the graph tab', () => {
     expect(labels.getAttribute('aria-checked')).toBe('true')
     fireEvent.click(labels)
     await waitFor(async () => expect(await mock.api.data.files.readText('graphs.json')).toMatch(/"step": "5",\s*"labels": false/), { timeout: 2000 })
-    expect(container.querySelector('.grapher-hint')?.textContent).toContain('f(x, y) = x^2 − y^2 for its level curves')
     await pick('3D')
     const paraboloid = (await screen.findAllByRole('listitem'))[0]
     await waitFor(() => expect(paraboloid.getAttribute('data-kind')).toBe('surface'))
@@ -296,7 +293,6 @@ describe('the graph tab', () => {
     expect(normal.getAttribute('aria-checked')).toBe('true')
     fireEvent.click(normal)
     await waitFor(async () => expect(await mock.api.data.files.readText('graphs.json')).toContain('"normal": false'), { timeout: 2000 })
-    expect(container.querySelector('.grapher-hint')?.textContent).toContain('tangent(f, a, b) draws the tangent plane')
   })
 
   it('draws cylindrical surfaces with a range row for each of their two coordinates', async () => {
@@ -313,12 +309,11 @@ describe('the graph tab', () => {
     fireEvent.change(within(first).getByRole('textbox', { name: 'End of z' }), { target: { value: '2' } })
     await waitFor(async () => expect(await mock.api.data.files.readText('graphs.json')).toContain('"to2": "2"'), { timeout: 2000 })
     expect(within(first).getByRole('textbox', { name: 'End of z' }).closest('.grapher-domain')?.textContent).toContain('≤ z ≤')
-    expect(container.querySelector('.grapher-hint')?.textContent).toContain('r = 1 + cos(φ)')
   })
 
-  it('draws spherical surfaces and states the convention in the hint', async () => {
+  it('draws spherical surfaces and states the convention in the reference', async () => {
     mount()
-    const { container } = render(<><Sidebar /><GraphTab /></>)
+    const { container } = render(<><Sidebar /><GraphTab /><Reference /></>)
     await pick('Spherical')
     expect(await screen.findByDisplayValue('ρ = 2')).toBeTruthy()
     expect(await screen.findByLabelText(/^Spherical graph/)).toBeTruthy()
@@ -329,9 +324,9 @@ describe('the graph tab', () => {
     expect(within(cone).getByRole('textbox', { name: 'End of ρ' }).getAttribute('value')).toBe('2')
     expect(within(cone).getByRole('textbox', { name: 'End of θ' }).getAttribute('placeholder')).toBe('2π')
     expect(sphere.querySelector('.grapher-typeset')?.textContent).toBe('ρ=2')
-    const hint = container.querySelector('.grapher-hint')?.textContent ?? ''
-    expect(hint).toContain('θ the azimuth in the xy-plane')
-    expect(hint).toContain('φ the polar angle from the z-axis')
+    const reference = container.querySelector('.grapher-reference')?.textContent ?? ''
+    expect(reference).toContain('θ the azimuth from the x-axis')
+    expect(reference).toContain('φ the polar angle from the z-axis')
   })
 
   it('draws w = f(z) over the complex plane in the complex 3D view', async () => {

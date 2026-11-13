@@ -79,3 +79,33 @@ export const Play = (p: IconProps): ReactElement => (
 export const Pause = (p: IconProps): ReactElement => (
   <Svg {...p}><path d="M8.5 6v12M15.5 6v12" /></Svg>
 )
+
+/** A curve with a line touching it: a tangent. */
+export const TangentIcon = (p: IconProps): ReactElement => (
+  <Svg {...p}><path d="M4 18c4 0 6-10 10-10s4 4 6 6" /><path d="M5 13l14-8" /></Svg>
+)
+
+/** Small arrows turning round: a vector field. */
+export const FieldIcon = (p: IconProps): ReactElement => (
+  <Svg {...p}><path d="M5 9l4-4M9 5H6M9 5v3M19 15l-4 4M15 19h3M15 19v-3M15 5l4 4M19 9V6M19 9h-3M9 19l-4-4M5 15v3M5 15h3" /></Svg>
+)
+
+/** Nested rings: level curves. */
+export const LevelsIcon = (p: IconProps): ReactElement => (
+  <Svg {...p}><ellipse cx="12" cy="12" rx="9" ry="6" /><ellipse cx="12" cy="12" rx="5" ry="3" /></Svg>
+)
+
+/** A curved sheet: a parametric surface. */
+export const SurfaceIcon = (p: IconProps): ReactElement => (
+  <Svg {...p}><path d="M3 9c3-3 6 3 9 0s6-3 9 0M3 9v6c3-3 6 3 9 0s6-3 9 0V9" /></Svg>
+)
+
+/** A sphere: a surface F(x, y, z) = 0. */
+export const SphereIcon = (p: IconProps): ReactElement => (
+  <Svg {...p}><circle cx="12" cy="12" r="8" /><ellipse cx="12" cy="12" rx="8" ry="3" /></Svg>
+)
+
+/** A plane touching a dome: a tangent plane. */
+export const PlaneIcon = (p: IconProps): ReactElement => (
+  <Svg {...p}><path d="M5 18a7 7 0 0 1 14 0" /><path d="M3 11l6-3h12l-6 3z" /></Svg>
+)

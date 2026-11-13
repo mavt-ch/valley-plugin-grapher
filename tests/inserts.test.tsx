@@ -135,13 +135,15 @@ describe('the insert bar', () => {
 })
 
 describe('the reference', () => {
-  it('lists the focused view groups first and open, inserts an example, and leaves only a short hint on the left', async () => {
+  it('lists the focused view groups first, all collapsed, inserts an example, and leaves only a short hint on the left', async () => {
     const { api } = mount()
     const { container } = render(<><Sidebar /><Reference /></>)
     await screen.findByRole('searchbox', { name: 'Search the reference' })
     const headings = Array.from(container.querySelectorAll<HTMLButtonElement>('.grapher-ref-heading'))
     expect(headings.slice(0, 3).map((heading) => heading.textContent)).toEqual(['Basics', 'Calculus', 'Sums and products'])
-    expect(headings[0].getAttribute('aria-expanded')).toBe('true')
+    expect(headings.filter((heading) => heading.getAttribute('aria-expanded') === 'true')).toEqual([])
+    expect(screen.getByRole('button', { name: 'Expand all groups' })).toBeTruthy()
+    fireEvent.click(headings[1])
     const polar = headings.find((heading) => heading.textContent === 'Polar')!
     expect(polar.getAttribute('aria-expanded')).toBe('false')
     expect(container.querySelector('[data-group="polar"] .grapher-ref-entry')).toBeNull()
@@ -173,7 +175,11 @@ describe('the reference', () => {
     expect(screen.getByRole('status').textContent).toBe('Nothing matches “zzz”')
     fireEvent.click(screen.getByRole('button', { name: 'Clear the search' }))
     expect(headings().slice(0, 2)).toEqual(['Basics', 'Calculus'])
-    expect(container.querySelector('[data-group="space"] .grapher-ref-heading')?.getAttribute('aria-expanded')).toBe('false')
+    expect(container.querySelectorAll('.grapher-ref-heading[aria-expanded="true"]')).toHaveLength(0)
+    fireEvent.click(container.querySelector<HTMLButtonElement>('[data-group="polar"] .grapher-ref-heading')!)
+    fireEvent.change(search, { target: { value: 'tangent' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Clear the search' }))
+    expect(Array.from(container.querySelectorAll('.grapher-ref-heading[aria-expanded="true"]')).map((heading) => heading.textContent)).toEqual(['Polar'])
   })
 
   it('is a Properties segment of graph tabs and no right-sidebar slot', async () => {
@@ -194,10 +200,10 @@ describe('the reference', () => {
     mount()
     const { container } = render(<Reference />)
     const expanded = (): string[] => Array.from(container.querySelectorAll('.grapher-ref-heading[aria-expanded="true"]')).map((heading) => heading.textContent ?? '')
-    fireEvent.click(await screen.findByRole('button', { name: 'Collapse all groups' }))
-    expect(expanded()).toEqual([])
-    fireEvent.click(screen.getByRole('button', { name: 'Expand all groups' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Expand all groups' }))
     expect(expanded()).toHaveLength(REFERENCE.length)
+    fireEvent.click(screen.getByRole('button', { name: 'Collapse all groups' }))
+    expect(expanded()).toEqual([])
     fireEvent.change(screen.getByRole('searchbox', { name: 'Search the reference' }), { target: { value: 'tangent' } })
     expect(expanded()).toEqual(['Calculus', '3D'])
     fireEvent.click(screen.getByRole('button', { name: 'Collapse all groups' }))

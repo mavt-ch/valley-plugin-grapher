@@ -324,6 +324,7 @@ describe('the graph tab', () => {
     expect(within(cone).getByRole('textbox', { name: 'End of ρ' }).getAttribute('value')).toBe('2')
     expect(within(cone).getByRole('textbox', { name: 'End of θ' }).getAttribute('placeholder')).toBe('2π')
     expect(sphere.querySelector('.grapher-typeset')?.textContent).toBe('ρ=2')
+    fireEvent.click(container.querySelector<HTMLButtonElement>('[data-group="spherical"] .grapher-ref-heading')!)
     const reference = container.querySelector('.grapher-reference')?.textContent ?? ''
     expect(reference).toContain('θ the azimuth from the x-axis')
     expect(reference).toContain('φ the polar angle from the z-axis')

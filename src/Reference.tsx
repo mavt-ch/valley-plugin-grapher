@@ -8,7 +8,7 @@ import { useGrapher } from './store'
 
 /** One feature: its syntax, a sentence (`ref.<id>`) and examples that insert themselves. */
 interface Entry { id: string; syntax: string; examples?: readonly string[] }
-/** A group (`ref.group.<id>`) and the views it belongs to: those come first and open on that view. */
+/** A group (`ref.group.<id>`) and the views it belongs to: those come first on that view. */
 interface Group { id: string; views: readonly Mode[]; entries: readonly Entry[] }
 
 const PLANE: readonly Mode[] = ['cartesian', 'polar', 'parametric']
@@ -93,7 +93,7 @@ export const REFERENCE_SEGMENT = 'grapher.reference'
 
 /**
  * Grapher's tab in the right sidebar's Properties while a graph tab is focused: a search row, then every feature with its
- * syntax, a sentence and examples. Without a query the focused view's groups come first and open; a query lists the
+ * syntax, a sentence and examples. Without a query the focused view's groups come first, all closed; a query lists the
  * matching entries of every group. An example the view's kernel accepts (with the sheet's own rows, so f′(x) needs an f)
  * inserts itself into the empty last row of that graph.
  */
@@ -104,9 +104,9 @@ export const Reference = ({ graph: described }: { graph?: string }): ReactElemen
   const mode = graph.mode
   const rows = graph.sheets[mode]
   const [query, setQuery] = React.useState('')
-  const initial = (): ReadonlySet<string> => new Set(REFERENCE.filter((group) => group.views.includes(mode)).map((group) => group.id))
-  const [open, setOpen] = React.useState<ReadonlySet<string>>(initial)
-  React.useEffect(() => setOpen(initial()), [mode])
+  // Every group starts closed; the groups opened by hand (outside a search) stay open for this mount.
+  const opened = React.useRef(new Set<string>())
+  const [open, setOpen] = React.useState<ReadonlySet<string>>(() => new Set())
   const valid = React.useMemo(() => {
     const kept = rows.filter(filled)
     const all = REFERENCE.flatMap((group) => group.entries.flatMap((entry) => entry.examples ?? []))
@@ -118,27 +118,40 @@ export const Reference = ({ graph: described }: { graph?: string }): ReactElemen
     }
     return result
   }, [engine, mode, rows])
-  const toggle = (group: string): void => setOpen((current) => {
-    const next = new Set(current)
-    if (!next.delete(group)) next.add(group)
-    return next
-  })
   const searching = query.trim() !== ''
+  const remember = (group: string, isOpen: boolean): void => {
+    if (searching) return
+    if (isOpen) opened.current.add(group)
+    else opened.current.delete(group)
+  }
+  const toggle = (group: string): void => {
+    const isOpen = !open.has(group)
+    remember(group, isOpen)
+    setOpen((current) => {
+      const next = new Set(current)
+      if (isOpen) next.add(group)
+      else next.delete(group)
+      return next
+    })
+  }
   const groups = referenceOrder(mode).map((group) => ({ group, entries: matching(group, query) })).filter(({ entries }) => entries.length)
-  // A query opens every matching group; clearing it brings back the focused view's groups.
+  // A query opens every matching group; clearing it closes them again, except the groups opened by hand.
   const search = (next: string): void => {
     setQuery(next)
-    setOpen(next.trim() ? new Set(REFERENCE.filter((group) => matching(group, next).length).map((group) => group.id)) : initial())
+    setOpen(next.trim() ? new Set(REFERENCE.filter((group) => matching(group, next).length).map((group) => group.id)) : new Set(opened.current))
   }
   const anyOpen = groups.some(({ group }) => open.has(group.id))
-  const toggleAll = (): void => setOpen((current) => {
-    const next = new Set(current)
-    for (const { group } of groups) {
-      if (anyOpen) next.delete(group.id)
-      else next.add(group.id)
-    }
-    return next
-  })
+  const toggleAll = (): void => {
+    for (const { group } of groups) remember(group.id, !anyOpen)
+    setOpen((current) => {
+      const next = new Set(current)
+      for (const { group } of groups) {
+        if (anyOpen) next.delete(group.id)
+        else next.add(group.id)
+      }
+      return next
+    })
+  }
   const allLabel = uiText(anyOpen ? 'ref.collapseAll' : 'ref.expandAll')
   return (
     <div className="grapher-panel grapher-ref-panel">

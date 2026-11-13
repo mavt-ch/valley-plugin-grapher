@@ -224,13 +224,17 @@ export const ProfileGlyph = ({ profile, className }: { profile: string; classNam
   return <Icon className={className} />
 }
 
-/** The icons of the folder in a compact grid. */
+/**
+ * The icons of the folder as a compact grid drawn inside the profile list, under the profile's row. It is not a host
+ * popover: one opened from a menu entry depended on the closed menu and its anchor, and never appeared.
+ */
 const IconPicker = ({ profile, close }: { profile: string; close: () => void }): ReactElement => {
   const store = getStore()
   const icons = React.useSyncExternalStore(subscribeProfileIcons, profileIconSvgs)
+  React.useEffect(() => { void refreshProfileIcons() }, [])
   const chosen = store.getSnapshot().document.icons?.[profile]
   return (
-    <div className="grapher-icon-grid" role="group" aria-label={uiText('profile.icons', { folder: PROFILE_ICON_FOLDER })}>
+    <div className="grapher-icon-grid" role="group" aria-label={uiText('profile.icons', { folder: PROFILE_ICON_FOLDER })} onKeyDown={(event) => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); close() } }}>
       {Object.keys(icons).sort((a, b) => a.localeCompare(b)).map((name) => {
         const source = profileIconSource(name)!
         return (
@@ -241,11 +245,6 @@ const IconPicker = ({ profile, close }: { profile: string; close: () => void }):
       })}
     </div>
   )
-}
-
-const openIconPicker = (profile: string, target: { anchor: HTMLElement } | { x: number; y: number }): void => {
-  void refreshProfileIcons()
-  void api.ui.openPopover(({ close }) => <IconPicker profile={profile} close={close} />, target, { className: 'grapher-icon-popover', ariaLabel: uiText('profile.icon', { name: getStore().profileName(profile) }) })
 }
 
 /** Under the view header: the profile the focused tab shows (its icon and name) and a button for a new one. */
@@ -281,6 +280,7 @@ const ProfileList = ({ tab, profile, close }: { tab: string; profile: string; cl
   const store = getStore()
   const { document } = useGrapher()
   const [renaming, setRenaming] = React.useState<string | null>(null)
+  const [picking, setPicking] = React.useState<string | null>(null)
   const ids = profileIds(document)
   const last = ids.length < 2
   // Reordering by the grip, as the expression rows do: one marker at the midpoint of the gap nearest the pointer.
@@ -327,7 +327,7 @@ const ProfileList = ({ tab, profile, close }: { tab: string; profile: string; cl
   const menu = (id: string, target: { anchor: HTMLElement } | { x: number; y: number }): void => {
     const items: UiMenuItem[] = [
       { id: 'rename', label: uiText('profile.renameItem'), icon: <Pencil />, onSelect: () => setRenaming(id) },
-      { id: 'icon', label: uiText('profile.iconItem'), icon: <Smile />, onSelect: () => openIconPicker(id, target) },
+      { id: 'icon', label: uiText('profile.iconItem'), icon: <Smile />, onSelect: () => setPicking(id) },
       { id: 'duplicate', label: uiText('profile.duplicateItem'), icon: <Copy />, enabled: store.canAddProfile(), onSelect: () => store.duplicateProfile(tab, id) },
       { type: 'separator' },
       { id: 'delete', label: uiText('profile.deleteItem'), icon: <Trash />, danger: true, enabled: !last, ...(last ? { description: uiText('profile.lastOne') } : {}), onSelect: () => store.deleteProfile(id) }
@@ -350,8 +350,8 @@ const ProfileList = ({ tab, profile, close }: { tab: string; profile: string; cl
         const name = store.profileName(id)
         const checked = id === profile
         return (
+          <React.Fragment key={id}>
           <div
-            key={id}
             className={checked ? 'grapher-profile-row active' : 'grapher-profile-row'}
             data-profile={id}
             data-dragging={drag?.from === index || undefined}
@@ -360,9 +360,11 @@ const ProfileList = ({ tab, profile, close }: { tab: string; profile: string; cl
             <button type="button" className="grapher-profile-grip" tabIndex={-1} aria-label={uiText('profile.drag', { name })} title={uiText('profile.drag', { name })} onPointerDown={startDrag(index)}>
               <Grip />
             </button>
+            <button type="button" className="grapher-profile-icon" aria-expanded={picking === id} aria-label={uiText('profile.icon', { name })} title={uiText('profile.icon', { name })} onClick={() => setPicking((open) => (open === id ? null : id))}>
+              <ProfileGlyph profile={id} className="grapher-profile-item-icon" />
+            </button>
             {renaming === id ? (
               <span className="grapher-profile-item">
-                <ProfileGlyph profile={id} className="grapher-profile-item-icon" />
                 <input
                   className="grapher-profile-name-field"
                   defaultValue={name}
@@ -380,9 +382,7 @@ const ProfileList = ({ tab, profile, close }: { tab: string; profile: string; cl
               </span>
             ) : (
               <button type="button" role="radio" aria-checked={checked} className="grapher-profile-item" onClick={() => { store.setTabProfile(tab, id); close() }}>
-                <ProfileGlyph profile={id} className="grapher-profile-item-icon" />
                 <span className="grapher-profile-item-name">{name}</span>
-                <span className="grapher-profile-item-view">{uiText(`mode.${graphOf(document, id).mode}`)}</span>
                 {checked ? <Check className="grapher-profile-item-check" /> : null}
               </button>
             )}
@@ -390,6 +390,8 @@ const ProfileList = ({ tab, profile, close }: { tab: string; profile: string; cl
               <More />
             </button>
           </div>
+          {picking === id ? <IconPicker profile={id} close={() => setPicking(null)} /> : null}
+          </React.Fragment>
         )
       })}
       {showMarker ? <div className="grapher-drop-marker" style={{ top: drag.marker }} aria-hidden /> : null}

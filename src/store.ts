@@ -268,6 +268,14 @@ export class GrapherStore {
     if (!this.canAddProfile()) return null
     const source = this.graph(from)
     const id = this.addGraph({ mode: source.mode, sheets: source.sheets, units: source.units }, uiText('profile.copyName', { name: this.profileName(from) }).slice(0, MAX_NAME))
+    // The copy is the whole profile under a new name: icon, notes and the views and cameras of its sheets.
+    const document = this.snapshot.document
+    const icon = document.icons?.[from]
+    const note = document.notes?.[from]
+    this.change({ ...document, icons: icon ? { ...document.icons, [id]: icon } : document.icons, notes: note ? { ...document.notes, [id]: note } : document.notes })
+    for (const map of [this.viewports, this.cameras] as Record<string, unknown>[]) {
+      for (const key of Object.keys(map)) if (key.startsWith(`${from}:`)) map[`${id}:${key.slice(from.length + 1)}`] = map[key]
+    }
     this.setTabProfile(tab, id)
     return id
   }

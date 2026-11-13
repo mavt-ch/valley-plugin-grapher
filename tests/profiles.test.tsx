@@ -62,14 +62,13 @@ describe('profiles', () => {
     const rows = Array.from(list.querySelectorAll<HTMLElement>('.grapher-profile-row'))
     expect(rows.map((row) => row.querySelector('.grapher-profile-item-name')?.textContent)).toEqual(['Graph 1', 'Graph 2'])
     // One compact row each: grip, the whole-row radio (icon, name, view, tick) and a single three-dots button.
-    expect(rows.map((row) => Array.from(row.querySelectorAll('button')).map((button) => button.className))).toEqual([['grapher-profile-grip', 'grapher-profile-item', 'grapher-profile-more'], ['grapher-profile-grip', 'grapher-profile-item', 'grapher-profile-more']])
+    expect(rows.map((row) => Array.from(row.querySelectorAll('button')).map((button) => button.className))).toEqual([['grapher-profile-grip', 'grapher-profile-icon', 'grapher-profile-item', 'grapher-profile-more'], ['grapher-profile-grip', 'grapher-profile-icon', 'grapher-profile-item', 'grapher-profile-more']])
     expect(rows[1].className).toContain('active')
-    expect(rows[1].querySelector('.grapher-profile-item-view')?.textContent).toBe('Cartesian')
+    expect(rows[1].querySelector('.grapher-profile-item-view')).toBeNull()
     const css = document.getElementById('grapher-styles')?.textContent ?? ''
-    // Rows never wrap: 32px high, the name ellipsizes and the view name shrinks away first.
+    // Rows never wrap: 32px high with icon and name only; the name ellipsizes.
     expect(css).toContain('.grapher-profile-row { display:flex; align-items:center; height:32px;')
     expect(css).toContain('.grapher-profile-item-name { flex:0 1 auto; min-width:0; overflow:hidden; white-space:nowrap; text-overflow:ellipsis;')
-    expect(css).toContain('.grapher-profile-item-view { flex:0 1000 auto; min-width:0; overflow:hidden; white-space:nowrap;')
 
     fireEvent.click(within(rows[1]).getByRole('button', { name: 'More for Graph 2' }))
     const items = openMenu.mock.calls.at(-1)![0] as UiMenuItem[]
@@ -81,7 +80,7 @@ describe('profiles', () => {
     expect(within(list).getByRole('radio', { name: /Physics/ })).toBeTruthy()
     await waitFor(() => expect(titles).toHaveBeenLastCalledWith('Physics', 'main'))
 
-    fireEvent.click(list.querySelector<HTMLElement>('[data-profile="main"] .grapher-profile-item-view')!)
+    fireEvent.click(list.querySelector<HTMLElement>('[data-profile="main"] .grapher-profile-item-name')!)
     expect(picker().getAttribute('aria-label')).toBe('Profile: Graph 1')
     expect(getStore().getSnapshot().active).toBe('main')
 
@@ -143,7 +142,7 @@ describe('profiles', () => {
     expect(store.getSnapshot().active).toBe('main')
   })
 
-  it('gives every profile an object icon of its own and shows it with the name on the tab', async () => {
+  it('gives every profile an object icon of its own; the tab shows its name and the view icon', async () => {
     const mock = createMockValleyApi({ manifest: declared, wasm: { modules: [module] } })
     vi.spyOn(mock.api.workspace, 'getOpenMainTabs').mockReturnValue([])
     const provide = vi.spyOn(mock.api.interop.extensions, 'provide')
@@ -157,7 +156,7 @@ describe('profiles', () => {
     act(() => { getStore().createProfile('main', 'space') })
     expect(surface.getSnapshot!('main').title).toBe('Graph 1')
     expect(getStore().getSnapshot().document.icons?.[getStore().profileOf('main')]).toBe('cat')
-    expect(decodeURIComponent(surface.getSnapshot!('main').visual!.src!)).toBe(`data:image/svg+xml,${PROFILE_ICONS.cat}`)
+    expect(decodeURIComponent(surface.getSnapshot!('main').visual!.src!)).toContain('M12 3l8 4.5v9L12 21l-8-4.5v-9z')
   })
 })
 
@@ -180,37 +179,68 @@ describe('profile icons', () => {
     expect(storage.close).toHaveBeenCalledWith('h')
   })
 
-  it('picks an icon from the folder, shows it on the tab and falls back to the view icon', async () => {
+  it('changes the icon from the row menu or the row icon through a grid inside the list, never on the tab', async () => {
     const mock = createMockValleyApi({ manifest: declared, wasm: { modules: [module] } })
     vi.spyOn(mock.api.workspace, 'getOpenMainTabs').mockReturnValue([])
     const call = vi.spyOn(mock.api.backend, 'call').mockResolvedValue({ icons: { star: '<svg viewBox="0 0 24 24"><path d="M12 2l3 7h7l-6 4 2 7-6-4-6 4 2-7-6-4h7z"/></svg>', wave: '<svg viewBox="0 0 24 24"><path d="M2 12h20"/></svg>' } } as never)
-    const popover = vi.spyOn(mock.api.ui, 'openPopover').mockResolvedValue(undefined)
+    const popover = vi.spyOn(mock.api.ui, 'openPopover')
     const provide = vi.spyOn(mock.api.interop.extensions, 'provide')
     disposers.push(plugin.register(mock.api))
     render(<Sidebar />)
     await screen.findByRole('button', { name: 'Profile: Graph 1' })
     const openMenu = vi.spyOn(mock.api.ui, 'openMenu').mockResolvedValue(null)
     fireEvent.click(picker())
+    // The real sequence: the dots open the menu, Change icon closes it and the grid appears under the row.
     fireEvent.click(screen.getByRole('button', { name: 'More for Graph 1' }))
     await act(async () => { await (openMenu.mock.calls.at(-1)![0] as UiMenuItem[]).find((item) => item.id === 'icon')!.onSelect!() })
     await waitFor(() => expect(call).toHaveBeenCalledWith('icons', expect.objectContaining({ defaults: PROFILE_ICONS })))
+    const grid = await screen.findByRole('group', { name: /^Icons in \.valley\/assets\/icons\/grapher-icon/ })
+    expect(popover).not.toHaveBeenCalled()
+    await waitFor(() => expect(within(grid).getByRole('button', { name: 'star' })).toBeTruthy())
+    fireEvent.click(within(grid).getByRole('button', { name: 'star' }))
+    expect(screen.queryByRole('group', { name: /^Icons in / })).toBeNull()
+    expect(getStore().getSnapshot().document.icons?.main).toBe('star')
+    const row = screen.getByRole('radiogroup', { name: 'Profiles' }).querySelector<HTMLElement>('[data-profile="main"]')!
+    expect(decodeURIComponent(row.querySelector<HTMLElement>('.grapher-profile-glyph')!.style.maskImage)).toContain('M12 2l3 7h7')
+    // The row's icon opens the grid too.
+    fireEvent.click(within(row).getByRole('button', { name: 'Icon of Graph 1' }))
+    expect(screen.getByRole('group', { name: /^Icons in / })).toBeTruthy()
+    fireEvent.click(within(row).getByRole('button', { name: 'Icon of Graph 1' }))
+    fireEvent.click(screen.getByRole('radio', { name: /Graph 1/ }))
+    expect(decodeURIComponent(picker().querySelector<HTMLElement>('.grapher-profile-glyph')!.style.maskImage)).toContain('M12 2l3 7h7')
+    // The tab keeps the icon of the view it shows.
+    const surface = provide.mock.calls.map(([, value]) => value as { id?: string; getSnapshot?: (id?: string) => { visual?: { src?: string } } }).find((value) => value.id === 'grapher.main_workspace')!
+    expect(decodeURIComponent(surface.getSnapshot!('main').visual!.src!)).toContain('M7.5 5c1.5 6 3.3 9 5.2 9s3.7-3 5.3-9')
     // The seed set is everyday objects and animals, none of the view icons.
     expect(Object.keys(PROFILE_ICONS)).toHaveLength(30)
     for (const view of ['cartesian', 'polar', 'parametric', 'space', 'cylindrical', 'spherical', 'complex', 'complexSpace', 'function', 'wave', 'grid', 'sigma', 'cube', 'sphere']) expect(PROFILE_ICONS).not.toHaveProperty(view)
     expect(Object.keys(PROFILE_ICONS).every((name) => /^[a-z]+(-[a-z]+)*$/.test(name))).toBe(true)
-    const close = vi.fn()
-    const content = render(<>{(popover.mock.calls[0][0] as (context: { close: () => void }) => React.ReactNode)({ close })}</>)
-    await waitFor(() => expect(within(content.container).getByRole('button', { name: 'star' })).toBeTruthy())
-    fireEvent.click(within(content.container).getByRole('button', { name: 'star' }))
-    expect(close).toHaveBeenCalled()
-    expect(getStore().getSnapshot().document.icons?.main).toBe('star')
-    const surface = provide.mock.calls.map(([, value]) => value as { id?: string; getSnapshot?: (id?: string) => { visual?: { src?: string } } }).find((value) => value.id === 'grapher.main_workspace')!
-    expect(decodeURIComponent(surface.getSnapshot!('main').visual!.src!)).toContain('M12 2l3 7h7')
-    act(() => getStore().setProfileIcon('main', 'gone'))
-    expect(decodeURIComponent(surface.getSnapshot!('main').visual!.src!)).toContain('M7.5 5c1.5 6 3.3 9 5.2 9s3.7-3 5.3-9')
     // Once the folder is listed, a profile whose icon file is gone gets the first free object icon the folder holds.
+    act(() => getStore().setProfileIcon('main', 'gone'))
     await act(async () => { await refreshProfileIcons() })
     expect(getStore().getSnapshot().document.icons).toEqual({ main: 'star' })
+  })
+
+  it('duplicates the whole profile: sheets, icon, notes and cameras under a new name', async () => {
+    mount()
+    render(<Sidebar />)
+    await screen.findByRole('button', { name: 'Profile: Graph 1' })
+    const store = getStore()
+    act(() => {
+      store.updateRows('main', 'cartesian', (rows) => [{ ...rows[0], text: 'y = 7x' }])
+      store.setProfileIcon('main', 'owl')
+      store.setNote('main', 'my *notes*')
+    })
+    store.viewports['main:cartesian'] = { cx: 3, cy: 4, scale: 25 }
+    let copy = ''
+    act(() => { copy = store.duplicateProfile('main', 'main')! })
+    const document = store.getSnapshot().document
+    expect(store.profileName(copy)).toBe('Graph 1 copy')
+    expect(document.icons?.[copy]).toBe('owl')
+    expect(document.notes?.[copy]).toBe('my *notes*')
+    expect(store.graph(copy).sheets.cartesian[0].text).toBe('y = 7x')
+    expect(store.viewports[`${copy}:cartesian`]).toEqual({ cx: 3, cy: 4, scale: 25 })
+    expect(store.profileOf('main')).toBe(copy)
   })
 
   it('keeps every view sheet, the axis labels and the cameras of a profile across a restart', async () => {

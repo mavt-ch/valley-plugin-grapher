@@ -97,8 +97,7 @@ const CSS = `
 .grapher-profile-action:disabled { opacity:0.4; cursor:default; }
 .grapher-profile-glyph { display:inline-block; flex:0 0 auto; background:currentColor; mask-size:100% 100%; mask-repeat:no-repeat; -webkit-mask-size:100% 100%; -webkit-mask-repeat:no-repeat; }
 .grapher-profile-picker .grapher-profile-glyph { width:16px; height:16px; }
-.grapher-icon-popover { padding:calc(var(--space-3) / 2); }
-.grapher-icon-grid { display:grid; grid-template-columns:repeat(6, 30px); gap:2px; }
+.grapher-icon-grid { display:grid; grid-template-columns:repeat(auto-fill, 30px); gap:2px; padding:calc(var(--space-3) / 2) calc(var(--space-3) / 2) calc(var(--space-3) / 2) 18px; }
 .grapher-icon-choice { display:inline-flex; align-items:center; justify-content:center; width:30px; height:30px; padding:0; border:none;
   border-radius:var(--radius-sm); background:transparent; color:var(--text-secondary); cursor:pointer; }
 .grapher-icon-choice svg, .grapher-icon-choice .grapher-profile-glyph { width:18px; height:18px; }
@@ -120,9 +119,11 @@ const CSS = `
   background:transparent; color:inherit; font:inherit; font-size:var(--smaller-font-size); text-align:left; cursor:pointer; }
 .grapher-profile-item:focus-visible { outline:2px solid var(--accent-color); outline-offset:-2px; border-radius:var(--radius-sm); }
 .grapher-profile-item-icon { width:16px; height:16px; flex:0 0 16px; color:var(--text-secondary); }
+.grapher-profile-icon { display:inline-flex; align-items:center; justify-content:center; flex:0 0 24px; width:24px; height:24px; margin-left:2px; padding:0;
+  border:none; border-radius:var(--radius-sm); background:transparent; color:inherit; cursor:pointer; }
+.grapher-profile-icon:hover, .grapher-profile-icon[aria-expanded='true'] { background:var(--hover-bg); }
 .grapher-profile-row.active .grapher-profile-item-icon { color:var(--accent-tint-text); }
 .grapher-profile-item-name { flex:0 1 auto; min-width:0; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; font-weight:500; }
-.grapher-profile-item-view { flex:0 1000 auto; min-width:0; overflow:hidden; white-space:nowrap; text-overflow:clip; color:var(--text-tertiary); }
 .grapher-profile-item-check { width:14px; height:14px; flex:0 0 14px; margin-left:auto; color:var(--accent-tint-text); }
 .grapher-profile-more { display:inline-flex; align-items:center; justify-content:center; flex:0 0 26px; width:26px; height:26px; margin-right:3px;
   padding:0; border:none; border-radius:var(--radius-sm); background:transparent; color:var(--text-tertiary); cursor:pointer; }

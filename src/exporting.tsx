@@ -5,7 +5,6 @@ import { Download, iconSource } from './icons'
 import { uiText } from './localization'
 import { MAIN_GRAPH, MODES, type Mode } from './model'
 import { viewOf } from './views'
-import { profileIconSource, subscribeProfileIcons } from './profileIcons'
 import { SvgContext, type Measure, type Normalize } from './svg'
 import type { GrapherStore } from './store'
 
@@ -107,12 +106,13 @@ export function provideGraphSurface(pluginApi: ValleyPluginApi, store: GrapherSt
     surface: 'main_workspace',
     getSnapshot: (instanceId) => {
       const graph = store.profileOf(instanceId || MAIN_GRAPH)
-      // The tab shows the icon of the view the graph is on (the host draws the view's own SVG shapes).
-      const visual = { kind: 'icon', src: profileIconSource(store.getSnapshot().document.icons?.[graph]) ?? iconSource(viewOf(store.graph(graph).mode).icon) } as unknown as UiVisual
+      // The tab shows the icon of the view the graph is on (the host draws the view's own SVG shapes); the profile's own
+      // icon belongs to the profile bar and list only.
+      const visual = { kind: 'icon', src: iconSource(viewOf(store.graph(graph).mode).icon) } as unknown as UiVisual
       return { title: store.profileName(graph), visual, view: { mode: store.graph(graph).mode }, actions: exportActions(graph) }
     },
     subscribe: (listener) => {
-      const offs = [store.subscribe(listener), subscribeExporters(listener), subscribeProfileIcons(listener), pluginApi.ui.onLanguageChanged(listener)]
+      const offs = [store.subscribe(listener), subscribeExporters(listener), pluginApi.ui.onLanguageChanged(listener)]
       return () => offs.forEach((off) => off())
     },
     restore: (state, instanceId) => {

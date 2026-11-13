@@ -3,10 +3,11 @@ import type { ChangeEvent, ClipboardEvent, KeyboardEvent, MouseEvent, PointerEve
 import { paletteCssValue, paletteRef } from '@valley/plugin-sdk/palette'
 import type { UiMenuItem } from '@valley/plugin-sdk'
 import type { RowAnalysis } from './engine'
-import { Check, ChevronDown, Eye, EyeOff, Grip, Slider, TableIcon, Trash, Warning, X } from './icons'
+import { Check, ChevronDown, Eye, EyeOff, Grip, Pause, Play, Slider, TableIcon, Trash, Warning, X } from './icons'
+import { SliderAnimator, snap, startMotion } from './animate'
 import { uiText } from './localization'
 import { MathText } from './MathText'
-import { COLORS, DEFAULT_LEVELS, MAIN_GRAPH, MAX_LEVELS, MODES, createRow, createTable, filled, graphOf, moveRow, rangeVariable, unitsOf, type AxisUnits, type Mode, type Row, type Table } from './model'
+import { ANIMATION_SPEEDS, COLORS, DEFAULT_ANIMATION, DEFAULT_LEVELS, MAIN_GRAPH, MAX_LEVELS, MODES, createRow, createTable, filled, graphOf, moveRow, rangeVariable, unitsOf, type Animation, type AxisUnits, type Mode, type Row, type Table } from './model'
 import { getStore, useGrapher } from './store'
 import { MAX_TABLE_ROWS, looksTabular, parseTable, type Cells, type PastedTable } from './table'
 import { formatComplex, formatLinear, formatNumber, formatPolar } from './ticks'
@@ -175,37 +176,148 @@ interface RowProps {
   startDrag: (event: PointerEvent<HTMLButtonElement>) => void
 }
 
-const SliderControl = ({ row, analysis, edit }: Pick<RowProps, 'row' | 'analysis' | 'edit'>): ReactElement | null => {
+const SliderControl = (props: Pick<RowProps, 'mode' | 'row' | 'analysis' | 'edit'>): ReactElement | null => {
+  const { analysis } = props
   if (analysis?.kind !== 'param' || !analysis.slider || analysis.name === undefined || analysis.value === undefined) return null
-  const name = analysis.name
+  return <SliderBody {...props} name={analysis.name} value={analysis.value} />
+}
+
+const DIRECTIONS = ['forward', 'backward', 'bounce'] as const
+const DIRECTION_SIGNS: Record<Animation['direction'], string> = { forward: '→', backward: '←', bounce: '↔' }
+const speedText = (speed: number): string => (speed === 0.25 ? '¼×' : speed === 0.5 ? '½×' : `${speed}×`)
+
+/** The open graph tab, as a key: an animation stops when another tab (of any plugin, or a file) takes the focus. */
+const tabKey = (): string => {
+  const tab = api.getState().activePluginTab
+  return tab ? `${tab.pluginId}:${tab.instanceId ?? ''}` : ''
+}
+
+/**
+ * A slider row: play button, bounds and range, and a toggle for its animation options (direction, speed, loop). Playing
+ * writes the value into the row quietly each frame (at most 30 a second) and saves once when it stops; it stops when the
+ * sidebar edits another graph, another tab takes the focus, the document is hidden, the row is edited or dragged by hand,
+ * or the row goes away.
+ */
+const SliderBody = ({ mode, row, edit, name, value }: Pick<RowProps, 'mode' | 'row' | 'edit'> & { name: string; value: number }): ReactElement => {
+  const { active } = useGrapher()
   const { step } = row.slider
-  const min = Math.min(row.slider.min, analysis.value)
-  const max = Math.max(row.slider.max, analysis.value)
-  const fill = max > min ? ((analysis.value - min) / (max - min)) * 100 : 0
-  const bound = (key: 'min' | 'max') => (event: ChangeEvent<HTMLInputElement>): void => {
-    const value = Number(event.target.value)
-    if (event.target.value.trim() === '' || !Number.isFinite(value)) return
-    const next = { ...row.slider, [key]: value }
-    if (next.min < next.max) edit((current) => ({ ...current, slider: next }))
+  const min = Math.min(row.slider.min, value)
+  const max = Math.max(row.slider.max, value)
+  const fill = max > min ? ((value - min) / (max - min)) * 100 : 0
+  const settings = row.animation ?? DEFAULT_ANIMATION
+  const ref = React.useRef<HTMLDivElement>(null)
+  const [playing, setPlaying] = React.useState(false)
+  const [options, setOptions] = React.useState(false)
+  const live = React.useRef({ bounds: { min: row.slider.min, max: row.slider.max }, settings })
+  live.current = { bounds: { min: row.slider.min, max: row.slider.max }, settings }
+  const run = React.useRef<{ animator: SliderAnimator; graph: string; written: string; off: () => void } | null>(null)
+
+  const stop = React.useCallback((): void => {
+    const current = run.current
+    if (!current) return
+    run.current = null
+    current.animator.stop()
+    current.off()
+    setPlaying(false)
+    getStore().commit()
+  }, [])
+
+  const play = (): void => {
+    const view = ref.current?.ownerDocument.defaultView
+    if (!view || run.current) return
+    const graph = active
+    const id = row.id
+    const tab = tabKey()
+    const off = api.subscribeState(['activePluginTab'], () => { if (tabKey() !== tab) stop() })
+    const animator = new SliderAnimator(view, startMotion(value, live.current.bounds, settings), {
+      bounds: () => live.current.bounds,
+      settings: () => live.current.settings,
+      frame: (next) => {
+        const current = run.current
+        if (!current) return
+        const text = sliderText(name, snap(next, live.current.bounds, step), step)
+        if (text === current.written) return
+        current.written = text
+        getStore().updateRows(graph, mode, (rows) => rows.map((candidate) => (candidate.id === id ? { ...candidate, text } : candidate)), { quiet: true })
+      },
+      end: stop
+    })
+    run.current = { animator, graph, written: row.text, off }
+    setPlaying(true)
+    animator.start()
   }
+
+  // A hand edit of the row (typing, dragging the range) or another graph in the sidebar stops it; so does unmounting.
+  React.useEffect(() => { if (run.current && row.text !== run.current.written) stop() }, [row.text, stop])
+  React.useEffect(() => { if (run.current && run.current.graph !== active) stop() }, [active, stop])
+  React.useEffect(() => stop, [stop])
+
+  const bound = (key: 'min' | 'max') => (event: ChangeEvent<HTMLInputElement>): void => {
+    const next = Number(event.target.value)
+    if (event.target.value.trim() === '' || !Number.isFinite(next)) return
+    const slider = { ...row.slider, [key]: next }
+    if (slider.min < slider.max) edit((current) => ({ ...current, slider }))
+  }
+  const setAnimation = (patch: Partial<Animation>): void => edit((current) => ({ ...current, animation: { ...(current.animation ?? DEFAULT_ANIMATION), ...patch } }))
   return (
-    <div className="grapher-slider">
-      <input className="grapher-bound" type="number" step="any" value={formatBound(min)} onChange={bound('min')} aria-label={uiText('slider.min', { name })} />
-      <input
-        className="grapher-range"
-        type="range"
-        min={min}
-        max={max}
-        step={step}
-        value={analysis.value}
-        style={{ ['--slider-fill' as string]: `${fill}%` }}
-        aria-label={uiText('slider.value', { name })}
-        onChange={(event) => {
-          const value = Number(event.target.value)
-          edit((current) => ({ ...current, text: sliderText(name, value, step) }))
-        }}
-      />
-      <input className="grapher-bound" type="number" step="any" value={formatBound(max)} onChange={bound('max')} aria-label={uiText('slider.max', { name })} />
+    <div className="grapher-slider-block" ref={ref}>
+      <div className="grapher-slider">
+        <button
+          type="button"
+          className="grapher-play"
+          aria-pressed={playing}
+          aria-label={uiText(playing ? 'slider.pause' : 'slider.play', { name })}
+          title={uiText(playing ? 'slider.pause' : 'slider.play', { name })}
+          onClick={playing ? stop : play}
+        >
+          {playing ? <Pause /> : <Play />}
+        </button>
+        <input className="grapher-bound" type="number" step="any" value={formatBound(min)} onChange={bound('min')} aria-label={uiText('slider.min', { name })} />
+        <input
+          className="grapher-range"
+          type="range"
+          min={min}
+          max={max}
+          step={step}
+          value={value}
+          style={{ ['--slider-fill' as string]: `${fill}%` }}
+          aria-label={uiText('slider.value', { name })}
+          onChange={(event) => {
+            const next = Number(event.target.value)
+            edit((current) => ({ ...current, text: sliderText(name, next, step) }))
+          }}
+        />
+        <input className="grapher-bound" type="number" step="any" value={formatBound(max)} onChange={bound('max')} aria-label={uiText('slider.max', { name })} />
+        <button
+          type="button"
+          className="grapher-play-options"
+          aria-expanded={options}
+          aria-label={uiText('slider.options', { name })}
+          title={uiText('slider.options', { name })}
+          onClick={() => setOptions((open) => !open)}
+        >
+          <ChevronDown />
+        </button>
+      </div>
+      {options ? (
+        <div className="grapher-animation">
+          <div className="grapher-units" role="radiogroup" aria-label={uiText('slider.direction')}>
+            {DIRECTIONS.map((direction) => (
+              <button key={direction} type="button" role="radio" aria-checked={settings.direction === direction} className={`grapher-unit${settings.direction === direction ? ' active' : ''}`} aria-label={uiText(`slider.${direction}`)} title={uiText(`slider.${direction}`)} onClick={() => setAnimation({ direction })}>
+                {DIRECTION_SIGNS[direction]}
+              </button>
+            ))}
+          </div>
+          <div className="grapher-units" role="radiogroup" aria-label={uiText('slider.speed')}>
+            {ANIMATION_SPEEDS.map((speed) => (
+              <button key={speed} type="button" role="radio" aria-checked={settings.speed === speed} className={`grapher-unit${settings.speed === speed ? ' active' : ''}`} aria-label={uiText('slider.speedValue', { speed })} title={uiText('slider.speedValue', { speed })} onClick={() => setAnimation({ speed })}>
+                {speedText(speed)}
+              </button>
+            ))}
+          </div>
+          <OptionToggle label={uiText('slider.loop')} checked={settings.loop} onChange={(loop) => setAnimation({ loop })} />
+        </div>
+      ) : null}
     </div>
   )
 }

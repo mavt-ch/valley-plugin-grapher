@@ -115,5 +115,15 @@
   "export.saved": "已导出到 {{path}}",
   "export.failed": "导出失败：{{message}}",
   "export.noFile": "下载文件夹未保存任何文件。",
-  "export.noCanvas": "图形尚未绘制。"
+  "export.noCanvas": "图形尚未绘制。",
+  "slider.play": "播放 {{name}}",
+  "slider.pause": "暂停 {{name}}",
+  "slider.options": "{{name}} 的动画",
+  "slider.direction": "方向",
+  "slider.forward": "正向",
+  "slider.backward": "反向",
+  "slider.bounce": "往返",
+  "slider.speed": "速度",
+  "slider.speedValue": "{{speed}}× 速度",
+  "slider.loop": "循环"
 }

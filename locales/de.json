@@ -115,5 +115,15 @@
   "export.saved": "Exportiert nach {{path}}",
   "export.failed": "Export fehlgeschlagen: {{message}}",
   "export.noFile": "Der Download-Ordner hat keine Datei übernommen.",
-  "export.noCanvas": "Der Graph ist noch nicht gezeichnet."
+  "export.noCanvas": "Der Graph ist noch nicht gezeichnet.",
+  "slider.play": "{{name}} abspielen",
+  "slider.pause": "{{name}} anhalten",
+  "slider.options": "Animation von {{name}}",
+  "slider.direction": "Richtung",
+  "slider.forward": "Vorwärts",
+  "slider.backward": "Rückwärts",
+  "slider.bounce": "Hin und zurück",
+  "slider.speed": "Geschwindigkeit",
+  "slider.speedValue": "{{speed}}-fache Geschwindigkeit",
+  "slider.loop": "Wiederholen"
 }

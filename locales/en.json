@@ -115,5 +115,15 @@
   "export.saved": "Exported to {{path}}",
   "export.failed": "Export failed: {{message}}",
   "export.noFile": "the download folder took no file.",
-  "export.noCanvas": "the graph is not drawn yet."
+  "export.noCanvas": "the graph is not drawn yet.",
+  "slider.play": "Play {{name}}",
+  "slider.pause": "Pause {{name}}",
+  "slider.options": "Animation of {{name}}",
+  "slider.direction": "Direction",
+  "slider.forward": "Forward",
+  "slider.backward": "Backward",
+  "slider.bounce": "Back and forth",
+  "slider.speed": "Speed",
+  "slider.speedValue": "{{speed}}× speed",
+  "slider.loop": "Loop"
 }

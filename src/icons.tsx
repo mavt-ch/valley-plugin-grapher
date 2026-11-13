@@ -71,3 +71,11 @@ export const TableIcon = (p: IconProps): ReactElement => (
 export const Download = (p: IconProps): ReactElement => (
   <Svg {...p}><path d="M12 4v11M7 10l5 5 5-5M5 20h14" /></Svg>
 )
+
+export const Play = (p: IconProps): ReactElement => (
+  <Svg {...p}><path d="M8 5.5v13l10.5-6.5z" fill="currentColor" stroke="none" /></Svg>
+)
+
+export const Pause = (p: IconProps): ReactElement => (
+  <Svg {...p}><path d="M8.5 6v12M15.5 6v12" /></Svg>
+)

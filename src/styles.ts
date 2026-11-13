@@ -170,6 +170,16 @@ button.grapher-handle:hover { color:var(--text-color); }
   border-radius:50%; background:var(--accent-color); }
 .grapher-range:focus-visible { outline:2px solid var(--accent-color); outline-offset:2px; border-radius:var(--radius-sm); }
 
+.grapher-slider-block { display:flex; flex-direction:column; gap:6px; min-width:0; }
+.grapher-play, .grapher-play-options { display:inline-flex; align-items:center; justify-content:center; flex:0 0 auto; width:22px; height:22px;
+  padding:0; border:0; border-radius:var(--radius-sm); background:transparent; color:var(--text-secondary); cursor:pointer; }
+.grapher-play svg { width:12px; height:12px; }
+.grapher-play-options svg { width:12px; height:12px; transition:transform var(--duration-fast) var(--ease-out); }
+.grapher-play-options[aria-expanded='true'] svg { transform:rotate(180deg); }
+.grapher-play:hover, .grapher-play-options:hover { background:var(--hover-bg); color:var(--text-color); }
+.grapher-play[aria-pressed='true'] { color:var(--accent-color); }
+.grapher-play:focus-visible, .grapher-play-options:focus-visible { outline:2px solid var(--accent-color); outline-offset:-2px; }
+.grapher-animation { display:flex; flex-wrap:wrap; align-items:center; gap:6px; min-width:0; padding-left:28px; }
 .grapher-options { display:flex; flex-wrap:wrap; align-items:center; gap:6px; min-width:0; }
 .grapher-option { display:inline-flex; align-items:center; gap:5px; height:22px; padding:0 6px 0 4px; border:0; border-radius:var(--radius-sm);
   background:transparent; color:var(--text-secondary); font-size:0.6875rem; cursor:pointer; }
@@ -224,7 +234,7 @@ button.grapher-handle:hover { color:var(--text-color); }
 .grapher-zoom-button:focus-visible { outline:2px solid var(--accent-color); outline-offset:2px; }
 
 @media (prefers-reduced-motion: reduce) {
-  .grapher-view-picker, .grapher-view-option, .grapher-unit, .grapher-swatch, .grapher-delete, .grapher-grip-icon, .grapher-handle .grapher-index, .grapher-zoom-button { transition:none; }
+  .grapher-view-picker, .grapher-view-option, .grapher-unit, .grapher-swatch, .grapher-delete, .grapher-grip-icon, .grapher-handle .grapher-index, .grapher-zoom-button, .grapher-play-options svg { transition:none; }
 }
 `
 

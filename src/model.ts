@@ -11,6 +11,17 @@ export interface Slider {
   step: number
 }
 
+/** How a slider plays: forward (min to max), backward or back and forth, at a speed relative to one sweep of the range,
+ * once or looping. Saved per slider row once changed; whether it is playing is not saved. */
+export interface Animation {
+  direction: 'forward' | 'backward' | 'bounce'
+  speed: number
+  loop: boolean
+}
+
+export const ANIMATION_SPEEDS = [0.25, 0.5, 1, 2, 4] as const
+export const DEFAULT_ANIMATION: Animation = { direction: 'forward', speed: 1, loop: true }
+
 /** A table of points: column names and the cells, x and y per row, each a number or a constant expression. */
 export interface Table {
   head: [x: string, y: string]
@@ -44,6 +55,8 @@ export interface Row {
   table?: Table
   /** Tables and lists of points: join the points with a line in the order given (added later: absent means off). */
   connect?: boolean
+  /** Slider rows: how the play button animates the value (added later: absent means forward, 1×, looping). */
+  animation?: Animation
 }
 
 /** A row with something in it: text, or a table (even an empty one). */
@@ -187,8 +200,17 @@ function normalizeRow(value: unknown, rows: readonly Row[]): Row | null {
     ...(typeof record.floor === 'boolean' ? { floor: record.floor } : {}),
     ...(typeof record.normal === 'boolean' ? { normal: record.normal } : {}),
     ...readTable(record.table),
-    ...(typeof record.connect === 'boolean' ? { connect: record.connect } : {})
+    ...(typeof record.connect === 'boolean' ? { connect: record.connect } : {}),
+    ...readAnimation(record.animation)
   }
+}
+
+function readAnimation(value: unknown): { animation?: Animation } {
+  if (!value || typeof value !== 'object') return {}
+  const record = value as Record<string, unknown>
+  const direction = record.direction === 'backward' || record.direction === 'bounce' ? record.direction : 'forward'
+  const speed = ANIMATION_SPEEDS.find((candidate) => candidate === record.speed) ?? DEFAULT_ANIMATION.speed
+  return { animation: { direction, speed, loop: record.loop !== false } }
 }
 
 const CELL_LIMIT = 256

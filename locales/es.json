@@ -115,5 +115,15 @@
   "export.saved": "Exportado a {{path}}",
   "export.failed": "La exportación falló: {{message}}",
   "export.noFile": "la carpeta de descargas no guardó ningún archivo.",
-  "export.noCanvas": "la gráfica aún no está dibujada."
+  "export.noCanvas": "la gráfica aún no está dibujada.",
+  "slider.play": "Reproducir {{name}}",
+  "slider.pause": "Pausar {{name}}",
+  "slider.options": "Animación de {{name}}",
+  "slider.direction": "Dirección",
+  "slider.forward": "Hacia delante",
+  "slider.backward": "Hacia atrás",
+  "slider.bounce": "Ida y vuelta",
+  "slider.speed": "Velocidad",
+  "slider.speedValue": "Velocidad {{speed}}×",
+  "slider.loop": "Repetir"
 }

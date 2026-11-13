@@ -41,6 +41,8 @@ export class GrapherStore {
   private written: string | null = null
   private writable = false
   private timer: ReturnType<typeof setTimeout> | null = null
+  /** Quiet edits (an animated slider's frames) not yet scheduled for saving. */
+  private unsaved = false
   private pending: Promise<void> = Promise.resolve()
   private disposed = false
   private engineRequested = false
@@ -127,10 +129,10 @@ export class GrapherStore {
 
   /** Another window wrote the file: adopt it unless this window has unsaved edits. */
   private async reload(): Promise<void> {
-    if (this.timer !== null) return
+    if (this.timer !== null || this.unsaved) return
     await this.pending
     const file = await this.api.data.files.readTextBaseline(GRAPHS_FILE).catch(() => null)
-    if (this.disposed || this.timer !== null || !file || file.content === this.written) return
+    if (this.disposed || this.timer !== null || this.unsaved || !file || file.content === this.written) return
     try {
       const document = normalizeDocument(JSON.parse(file.content))
       this.baseline = file.baseline
@@ -201,9 +203,9 @@ export class GrapherStore {
     return id
   }
 
-  private editGraph(id: string, edit: (graph: Graph) => Graph | null): void {
+  private editGraph(id: string, edit: (graph: Graph) => Graph | null, quiet = false): void {
     const next = edit(this.graph(id))
-    if (next) this.change(withGraph(this.snapshot.document, id, next))
+    if (next) this.change(withGraph(this.snapshot.document, id, next), quiet)
   }
 
   setMode(id: string, mode: Mode): void {
@@ -214,13 +216,29 @@ export class GrapherStore {
     this.editGraph(id, (graph) => (graph.units[mode] === units ? null : { ...graph, units: { ...graph.units, [mode]: units } }))
   }
 
-  updateRows(id: string, mode: Mode, edit: (rows: Row[]) => Row[]): void {
-    this.editGraph(id, (graph) => ({ ...graph, sheets: { ...graph.sheets, [mode]: withTrailingRow(edit([...graph.sheets[mode]])) } }))
+  /** `quiet` applies the edit at once but leaves saving to {@link commit}: an animated slider changes its row every frame
+   * and saves once when it stops. */
+  updateRows(id: string, mode: Mode, edit: (rows: Row[]) => Row[], options: { quiet?: boolean } = {}): void {
+    this.editGraph(id, (graph) => ({ ...graph, sheets: { ...graph.sheets, [mode]: withTrailingRow(edit([...graph.sheets[mode]])) } }), options.quiet)
   }
 
-  private change(document: GrapherDocument): void {
+  /** Schedules the save of quiet edits. */
+  commit(): void {
+    if (this.unsaved && this.writable) this.schedule()
+  }
+
+  private change(document: GrapherDocument, quiet = false): void {
     this.update({ document })
     if (!this.writable) return
+    if (quiet) {
+      this.unsaved = true
+      return
+    }
+    this.schedule()
+  }
+
+  private schedule(): void {
+    this.unsaved = false
     if (this.timer !== null) clearTimeout(this.timer)
     this.timer = setTimeout(() => {
       this.timer = null
@@ -246,9 +264,10 @@ export class GrapherStore {
   }
 
   async flush(): Promise<void> {
-    if (this.timer !== null) {
-      clearTimeout(this.timer)
+    if (this.timer !== null || this.unsaved) {
+      if (this.timer !== null) clearTimeout(this.timer)
       this.timer = null
+      this.unsaved = false
       await this.save()
     }
     await this.pending

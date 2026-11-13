@@ -149,3 +149,23 @@ export const Pencil = (p: IconProps): ReactElement => (
 export const Copy = (p: IconProps): ReactElement => (
   <Svg {...p}><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3" /></Svg>
 )
+
+/** Profile icon defaults besides the eight view icons (seeded into `.valley/assets/icons/grapher-icon/`). */
+export const FunctionIcon = (p: IconProps): ReactElement => (
+  <Svg {...p}><path d="M14 4c-3 0-3 3-3.5 6S9 20 6 20" /><path d="M8 11h7M15 13l5 6M20 13l-5 6" /></Svg>
+)
+export const WaveIcon = (p: IconProps): ReactElement => (
+  <Svg {...p}><path d="M2 12c2.5-6 5-6 7.5 0s5 6 7.5 0 3.5-4 5-2" /></Svg>
+)
+export const GridIcon = (p: IconProps): ReactElement => (
+  <Svg {...p}><rect x="4" y="4" width="16" height="16" rx="1.5" /><path d="M4 9.3h16M4 14.7h16M9.3 4v16M14.7 4v16" /></Svg>
+)
+export const SigmaIcon = (p: IconProps): ReactElement => (
+  <Svg {...p}><path d="M18 6V4H6l6 8-6 8h12v-2" /></Svg>
+)
+export const CubeIcon = (p: IconProps): ReactElement => (
+  <Svg {...p}><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z" /><path d="M12 12l8-4.5M12 12v9M12 12L4 7.5" /></Svg>
+)
+export const SphereIcon2 = (p: IconProps): ReactElement => (
+  <Svg {...p}><circle cx="12" cy="12" r="9" /><ellipse cx="12" cy="12" rx="9" ry="3.5" /><path d="M12 3c-3 3-3 15 0 18" /></Svg>
+)

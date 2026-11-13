@@ -239,6 +239,7 @@ export const GraphCanvas = ({ view: plane, units, rows, analyses, engine, graph 
   const setView = React.useCallback((next: Viewport): void => {
     viewRef.current = next
     store.viewports[inputs.current.slot] = next
+    store.noteCamera()
     invalidate(true)
   }, [invalidate, store])
 

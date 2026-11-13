@@ -229,5 +229,8 @@
   "profile.nameField": "Nom de {{name}}",
   "profile.duplicate": "Dupliquer {{name}}",
   "profile.delete": "Supprimer {{name}}",
-  "profile.lastOne": "Le dernier profil ne peut pas être supprimé"
+  "profile.lastOne": "Le dernier profil ne peut pas être supprimé",
+  "profile.icon": "Icône de {{name}}",
+  "profile.iconView": "Icône de la vue",
+  "profile.icons": "Icônes dans {{folder}}"
 }

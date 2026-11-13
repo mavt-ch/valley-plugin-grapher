@@ -215,6 +215,7 @@ export const SpaceCanvas = ({ view, rows, engine, graph, units }: SpaceProps): R
     const camera = { yaw: next.yaw, pitch: Math.max(-MAX_PITCH, Math.min(MAX_PITCH, next.pitch)), range: Math.max(MIN_RANGE, Math.min(MAX_RANGE, next.range)) }
     cameraRef.current = camera
     store.cameras[inputs.current.slot] = camera
+    store.noteCamera()
     invalidate()
   }, [invalidate, store])
 

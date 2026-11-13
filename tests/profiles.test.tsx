@@ -108,3 +108,74 @@ describe('profiles', () => {
     expect(decodeURIComponent(surface.getSnapshot!('main').visual!.src!)).toContain('M12 3l8 4.5v9L12 21l-8-4.5v-9z')
   })
 })
+
+describe('profile icons', () => {
+  it('seeds the bundled icons without overwriting and lists what the folder holds', async () => {
+    const { profileIcons } = await import('../src/backend/icons')
+    const files = new Map<string, string>([['wave.svg', '<svg>mine</svg>'], ['star.svg', '<svg viewBox="0 0 24 24"><path d="M1 1"/></svg>'], ['notes.txt', 'x']])
+    const storage = {
+      open: vi.fn(async () => ({ handle: 'h' })), close: vi.fn(async () => {}), mkdir: vi.fn(async () => {}),
+      stat: vi.fn(async ({ path }: { path: string }) => (files.has(path) ? {} : null)),
+      list: vi.fn(async () => [...files].map(([name, text]) => ({ name, kind: 'file', size: text.length }))),
+      read: vi.fn(async ({ path }: { path: string }) => files.get(path)!),
+      write: vi.fn(async ({ path }: { path: string }, text: string) => { files.set(path, text) })
+    }
+    const { icons } = await profileIcons(storage, { wave: '<svg>bundled</svg>', cartesian: '<svg>axes</svg>' })
+    expect(storage.open).toHaveBeenCalledWith({ area: 'metadata', path: 'assets/icons/grapher-icon', kind: 'directory', mode: 'write' })
+    expect(files.get('wave.svg')).toBe('<svg>mine</svg>')
+    expect(files.get('cartesian.svg')).toBe('<svg>axes</svg>')
+    expect(Object.keys(icons).sort()).toEqual(['cartesian', 'star', 'wave'])
+    expect(storage.close).toHaveBeenCalledWith('h')
+  })
+
+  it('picks an icon from the folder, shows it on the tab and falls back to the view icon', async () => {
+    const mock = createMockValleyApi({ manifest: declared, wasm: { modules: [module] } })
+    vi.spyOn(mock.api.workspace, 'getOpenMainTabs').mockReturnValue([])
+    const call = vi.spyOn(mock.api.backend, 'call').mockResolvedValue({ icons: { star: '<svg viewBox="0 0 24 24"><path d="M12 2l3 7h7l-6 4 2 7-6-4-6 4 2-7-6-4h7z"/></svg>', wave: '<svg viewBox="0 0 24 24"><path d="M2 12h20"/></svg>' } } as never)
+    const popover = vi.spyOn(mock.api.ui, 'openPopover').mockResolvedValue(undefined)
+    const provide = vi.spyOn(mock.api.interop.extensions, 'provide')
+    disposers.push(plugin.register(mock.api))
+    render(<Sidebar />)
+    await screen.findByRole('button', { name: 'Profile: Graph 1' })
+    fireEvent.click(picker())
+    fireEvent.click(screen.getByRole('button', { name: 'Icon of Graph 1' }))
+    await waitFor(() => expect(call).toHaveBeenCalledWith('icons', expect.objectContaining({ defaults: expect.objectContaining({ cartesian: expect.stringContaining('<svg'), sigma: expect.stringContaining('<svg') }) })))
+    const close = vi.fn()
+    const content = render(<>{(popover.mock.calls[0][0] as (context: { close: () => void }) => React.ReactNode)({ close })}</>)
+    await waitFor(() => expect(within(content.container).getByRole('button', { name: 'star' })).toBeTruthy())
+    fireEvent.click(within(content.container).getByRole('button', { name: 'star' }))
+    expect(close).toHaveBeenCalled()
+    expect(getStore().getSnapshot().document.icons).toEqual({ main: 'star' })
+    const surface = provide.mock.calls.map(([, value]) => value as { id?: string; getSnapshot?: (id?: string) => { visual?: { src?: string } } }).find((value) => value.id === 'grapher.main_workspace')!
+    expect(decodeURIComponent(surface.getSnapshot!('main').visual!.src!)).toContain('M12 2l3 7h7')
+    act(() => getStore().setProfileIcon('main', 'gone'))
+    expect(decodeURIComponent(surface.getSnapshot!('main').visual!.src!)).toContain('M7.5 5c1.5 6 3.3 9 5.2 9s3.7-3 5.3-9')
+  })
+
+  it('keeps every view sheet, the axis labels and the cameras of a profile across a restart', async () => {
+    const { mock } = mount()
+    render(<Sidebar />)
+    await screen.findByRole('button', { name: 'Profile: Graph 1' })
+    const store = getStore()
+    act(() => {
+      store.updateRows('main', 'cartesian', (rows) => [{ ...rows[0], text: 'y = 3x' }])
+      store.setMode('main', 'polar')
+      store.updateRows('main', 'polar', (rows) => [{ ...rows[0], text: 'r = 3' }])
+      store.setUnits('main', 'polar', 'decimal')
+    })
+    store.viewports['main:polar'] = { cx: 1, cy: 2, scale: 30 }
+    store.cameras['main:space'] = { yaw: 0.5, pitch: 0.25, range: 8 }
+    store.noteCamera()
+    await store.flush()
+    const saved = await mock.api.data.files.readText('graphs.json')
+    await Promise.all(disposers.splice(0).map((dispose) => dispose()))
+    mount({ [FILE]: saved! })
+    render(<Sidebar />)
+    await screen.findByDisplayValue('r = 3')
+    const next = getStore()
+    expect(next.graph('main').sheets.cartesian[0].text).toBe('y = 3x')
+    expect(next.graph('main').units.polar).toBe('decimal')
+    expect(next.viewports['main:polar']).toEqual({ cx: 1, cy: 2, scale: 30 })
+    expect(next.cameras['main:space']).toEqual({ yaw: 0.5, pitch: 0.25, range: 8 })
+  })
+})

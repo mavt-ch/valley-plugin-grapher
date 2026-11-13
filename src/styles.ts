@@ -96,6 +96,16 @@ const CSS = `
 .grapher-profile-action:hover:not(:disabled) { background:var(--hover-bg); color:var(--text-color); }
 .grapher-profile-action:disabled { opacity:0.4; cursor:default; }
 .grapher-profile-row { display:flex; align-items:center; gap:2px; }
+.grapher-profile-glyph { display:inline-block; flex:0 0 auto; background:currentColor; mask-size:100% 100%; mask-repeat:no-repeat; -webkit-mask-size:100% 100%; -webkit-mask-repeat:no-repeat; }
+.grapher-profile-icon-button .grapher-view-option-icon { width:18px; height:18px; }
+.grapher-profile-picker .grapher-profile-glyph { width:16px; height:16px; }
+.grapher-icon-popover { padding:calc(var(--space-3) / 2); }
+.grapher-icon-grid { display:grid; grid-template-columns:repeat(6, 30px); gap:2px; }
+.grapher-icon-choice { display:inline-flex; align-items:center; justify-content:center; width:30px; height:30px; padding:0; border:none;
+  border-radius:var(--radius-sm); background:transparent; color:var(--text-secondary); cursor:pointer; }
+.grapher-icon-choice svg, .grapher-icon-choice .grapher-profile-glyph { width:18px; height:18px; }
+.grapher-icon-choice:hover { background:var(--hover-bg); color:var(--text-color); }
+.grapher-icon-choice[aria-pressed='true'] { background:var(--accent-tint-bg); color:var(--accent-color); }
 .grapher-profile-option { flex:1 1 auto; min-width:0; }
 .grapher-profile-name-field { flex:1 1 auto; min-width:0; height:36px; padding:0 10px; box-sizing:border-box; border:1px solid var(--accent-color);
   border-radius:var(--radius-sm); background:transparent; color:var(--text-color); font:inherit; font-size:var(--smaller-font-size); outline:none; }

@@ -87,6 +87,10 @@ export interface GrapherDocument extends Graph {
   names?: Record<string, string>
   /** The profile a tab shows, by tab instance id, where it is not the tab's own graph. */
   tabs?: Record<string, string>
+  /** Each profile's chosen icon: a file name (without `.svg`) in `.valley/assets/icons/grapher-icon/`. */
+  icons?: Record<string, string>
+  /** The last 2D view (`cx`, `cy`, `scale`) or 3D camera (`yaw`, `pitch`, `range`) of each profile's sheets, by `graph:mode`. */
+  cameras?: Record<string, Record<string, number>>
 }
 
 /** The graph id of the tab opened without an instance id. */
@@ -308,7 +312,7 @@ function normalizeGraph(record: { mode?: unknown; sheets?: unknown; units?: unkn
 /** Reads a stored `graphs.json`; throws when it is not a Grapher document, so the caller never overwrites it. */
 export function normalizeDocument(value: unknown): GrapherDocument {
   if (!value || typeof value !== 'object' || (value as { version?: unknown }).version !== 1) throw new Error('graphs.json is not a Grapher document (version 1).')
-  const record = value as { mode?: unknown; sheets?: unknown; units?: unknown; graphs?: unknown; names?: unknown; tabs?: unknown }
+  const record = value as { mode?: unknown; sheets?: unknown; units?: unknown; graphs?: unknown; names?: unknown; tabs?: unknown; icons?: unknown; cameras?: unknown }
   const stored = (record.graphs && typeof record.graphs === 'object' && !Array.isArray(record.graphs) ? record.graphs : {}) as Record<string, unknown>
   const graphs: Record<string, Graph> = {}
   for (const [id, graph] of Object.entries(stored).slice(0, MAX_GRAPHS)) {
@@ -320,7 +324,13 @@ export function normalizeDocument(value: unknown): GrapherDocument {
     .filter((entry): entry is [string, string] => known(entry[0]) && text(entry[1])).map(([id, name]) => [id, name.trim().slice(0, MAX_NAME)]))
   const tabs = Object.fromEntries(Object.entries(record.tabs && typeof record.tabs === 'object' ? record.tabs as Record<string, unknown> : {})
     .filter((entry): entry is [string, string] => text(entry[0]) && text(entry[1]) && known(entry[1])).slice(0, MAX_GRAPHS * 4))
-  return { version: 1, ...normalizeGraph(record), graphs, ...(Object.keys(names).length ? { names } : {}), ...(Object.keys(tabs).length ? { tabs } : {}) }
+  const icons = Object.fromEntries(Object.entries(record.icons && typeof record.icons === 'object' ? record.icons as Record<string, unknown> : {})
+    .filter((entry): entry is [string, string] => known(entry[0]) && typeof entry[1] === 'string' && /^[a-zA-Z0-9][a-zA-Z0-9 ._-]{0,63}$/.test(entry[1])))
+  const cameraFields = (entry: unknown): entry is Record<string, number> => !!entry && typeof entry === 'object' && Object.values(entry).every((field) => typeof field === 'number' && Number.isFinite(field))
+    && (['cx', 'cy', 'scale'].every((key) => key in entry) || ['yaw', 'pitch', 'range'].every((key) => key in entry))
+  const cameras = Object.fromEntries(Object.entries(record.cameras && typeof record.cameras === 'object' ? record.cameras as Record<string, unknown> : {})
+    .filter((entry): entry is [string, Record<string, number>] => known(entry[0].slice(0, entry[0].lastIndexOf(':'))) && MODES.includes(entry[0].slice(entry[0].lastIndexOf(':') + 1) as Mode) && cameraFields(entry[1])))
+  return { version: 1, ...normalizeGraph(record), graphs, ...(Object.keys(names).length ? { names } : {}), ...(Object.keys(tabs).length ? { tabs } : {}), ...(Object.keys(icons).length ? { icons } : {}), ...(Object.keys(cameras).length ? { cameras } : {}) }
 }
 
 /** The range variable of a row: θ for polar curves, t for plane and space curves. */

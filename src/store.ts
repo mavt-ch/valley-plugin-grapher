@@ -142,6 +142,7 @@ export class GrapherStore {
       this.baseline = file?.baseline ?? null
       this.written = file?.content ?? null
       this.writable = true
+      this.adoptCameras(document)
       this.update({ loaded: true, document })
       this.problem('problem.load', null)
       this.ensureGraph(this.snapshot.active)
@@ -162,6 +163,7 @@ export class GrapherStore {
     if (this.disposed || this.timer !== null || this.unsaved || !file || file.content === this.written) return
     try {
       const document = withNames(normalizeDocument(JSON.parse(file.content)), defaultName)
+      this.adoptCameras(document)
       this.baseline = file.baseline
       this.written = file.content
       this.writable = true
@@ -259,6 +261,28 @@ export class GrapherStore {
     return id
   }
 
+  /** A profile's icon (a file name in the icon folder), or null for the view's own icon. */
+  setProfileIcon(id: string, icon: string | null): void {
+    const document = this.snapshot.document
+    const icons = { ...document.icons }
+    if (icon) icons[id] = icon
+    else delete icons[id]
+    this.change({ ...document, icons })
+  }
+
+  /** The saved 2D views and 3D cameras of a loaded file become the session's, so a restart opens where it was left. */
+  private adoptCameras(document: GrapherDocument): void {
+    for (const [key, camera] of Object.entries(document.cameras ?? {})) {
+      if ('scale' in camera) this.viewports[key] = { cx: camera.cx, cy: camera.cy, scale: camera.scale }
+      else this.cameras[key] = { yaw: camera.yaw, pitch: camera.pitch, range: camera.range }
+    }
+  }
+
+  /** A pan, zoom or orbit moved a view: saved with the rest once the movement stops (the snapshot is not touched). */
+  noteCamera(): void {
+    if (this.writable && this.snapshot.loaded) this.schedule()
+  }
+
   renameProfile(id: string, name: string): void {
     const trimmed = name.trim().slice(0, MAX_NAME)
     const document = this.snapshot.document
@@ -279,24 +303,41 @@ export class GrapherStore {
     const graphs = { ...document.graphs }
     const names = { ...document.names }
     const tabs = { ...document.tabs }
+    const icons = { ...document.icons }
+    const moveCameras = (from: string, to: string | null): void => {
+      for (const map of [this.viewports, this.cameras] as Record<string, unknown>[]) {
+        for (const key of Object.keys(map)) {
+          if (!key.startsWith(`${from}:`)) continue
+          if (to) map[`${to}:${key.slice(from.length + 1)}`] = map[key]
+          delete map[key]
+        }
+      }
+    }
     let target = neighbour
     let base: GrapherDocument = document
     if (id === MAIN_GRAPH) {
       base = withGraph(document, MAIN_GRAPH, graphs[neighbour])
       names[MAIN_GRAPH] = names[neighbour] ?? this.profileName(neighbour)
+      if (icons[neighbour]) icons[MAIN_GRAPH] = icons[neighbour]
+      else delete icons[MAIN_GRAPH]
+      moveCameras(MAIN_GRAPH, null)
+      moveCameras(neighbour, MAIN_GRAPH)
       delete graphs[neighbour]
       delete names[neighbour]
+      delete icons[neighbour]
       target = MAIN_GRAPH
       for (const [tab, shown] of Object.entries(tabs)) if (shown === neighbour) tabs[tab] = MAIN_GRAPH
       tabs[neighbour] = MAIN_GRAPH
     } else {
       delete graphs[id]
       delete names[id]
+      delete icons[id]
+      moveCameras(id, null)
       for (const [tab, shown] of Object.entries(tabs)) if (shown === id) tabs[tab] = target
       tabs[id] = target
     }
     for (const [tab, shown] of Object.entries(tabs)) if (tab === shown) delete tabs[tab]
-    this.change({ ...base, graphs, names, tabs })
+    this.change({ ...base, graphs, names, tabs, icons })
   }
 
   private editGraph(id: string, edit: (graph: Graph) => Graph | null, quiet = false): void {
@@ -342,8 +383,21 @@ export class GrapherStore {
     }, SAVE_DELAY)
   }
 
+  /** The document with the session's views and cameras of existing profiles, as `graphs.json` keeps it. */
+  private saved(): GrapherDocument {
+    const document = this.snapshot.document
+    const ids = new Set(profileIds(document))
+    const cameras: Record<string, Record<string, number>> = {}
+    for (const [key, value] of [...Object.entries(this.viewports), ...Object.entries(this.cameras)]) {
+      if (ids.has(key.slice(0, key.lastIndexOf(':')))) cameras[key] = { ...value }
+    }
+    const rest: GrapherDocument = { ...document }
+    delete rest.cameras
+    return Object.keys(cameras).length ? { ...rest, cameras } : rest
+  }
+
   private save(): Promise<void> {
-    const content = JSON.stringify(this.snapshot.document, null, 2) + '\n'
+    const content = JSON.stringify(this.saved(), null, 2) + '\n'
     const run = async (): Promise<void> => {
       if (content === this.written) return
       const result = await this.api.data.files.writeTextGuarded(GRAPHS_FILE, content, this.baseline)

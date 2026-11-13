@@ -10,6 +10,7 @@ import { MathText } from './MathText'
 import { ANIMATION_SPEEDS, COLORS, DEFAULT_ANIMATION, DEFAULT_LEVELS, MAIN_GRAPH, MAX_LEVELS, MAX_NAME, MODES, profileIds, createRow, createTable, filled, graphOf, moveRow, rangeVariable, unitsOf, type Animation, type AxisUnits, type Mode, type Row, type Table } from './model'
 import { getStore, useGrapher } from './store'
 import { notePlaying } from './details'
+import { PROFILE_ICON_FOLDER, profileIconSource, profileIconSvgs, refreshProfileIcons, subscribeProfileIcons } from './profileIcons'
 import { MAX_TABLE_ROWS, looksTabular, parseTable, type Cells, type PastedTable } from './table'
 import { formatComplex, formatLinear, formatNumber, formatPolar } from './ticks'
 import { viewOf, type Insert } from './views'
@@ -212,16 +213,52 @@ const ViewList = ({ graph, mode, close }: { graph: string; mode: Mode; close: ()
   )
 }
 
-/** Under the view header: the profile the focused tab shows (its view's icon and name) and a button for a new one. */
+/** A profile's icon: the SVG chosen from the icon folder, drawn in the text colour, else the icon of its view. */
+export const ProfileGlyph = ({ profile, className }: { profile: string; className: string }): ReactElement => {
+  const { document } = useGrapher()
+  React.useSyncExternalStore(subscribeProfileIcons, profileIconSvgs)
+  const source = profileIconSource(document.icons?.[profile])
+  if (source) return <span className={`grapher-profile-glyph ${className}`} style={{ maskImage: `url("${source}")`, WebkitMaskImage: `url("${source}")` }} aria-hidden />
+  const Icon = viewOf(graphOf(document, profile).mode).icon
+  return <Icon className={className} />
+}
+
+/** The icons of the folder in a compact grid; the first choice is the view's own icon. */
+const IconPicker = ({ profile, close }: { profile: string; close: () => void }): ReactElement => {
+  const store = getStore()
+  const icons = React.useSyncExternalStore(subscribeProfileIcons, profileIconSvgs)
+  const chosen = store.getSnapshot().document.icons?.[profile]
+  const pick = (icon: string | null): void => { store.setProfileIcon(profile, icon); close() }
+  const Icon = viewOf(store.graph(profile).mode).icon
+  return (
+    <div className="grapher-icon-grid" role="group" aria-label={uiText('profile.icons', { folder: PROFILE_ICON_FOLDER })}>
+      <button type="button" className="grapher-icon-choice" aria-pressed={!chosen} aria-label={uiText('profile.iconView')} title={uiText('profile.iconView')} onClick={() => pick(null)}><Icon /></button>
+      {Object.keys(icons).sort((a, b) => a.localeCompare(b)).map((name) => {
+        const source = profileIconSource(name)!
+        return (
+          <button key={name} type="button" className="grapher-icon-choice" aria-pressed={chosen === name} aria-label={name} title={name} onClick={() => pick(name)}>
+            <span className="grapher-profile-glyph" style={{ maskImage: `url("${source}")`, WebkitMaskImage: `url("${source}")` }} aria-hidden />
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+const openIconPicker = (profile: string, anchor: HTMLElement): void => {
+  void refreshProfileIcons()
+  void api.ui.openPopover(({ close }) => <IconPicker profile={profile} close={close} />, { anchor }, { className: 'grapher-icon-popover', ariaLabel: uiText('profile.icon', { name: getStore().profileName(profile) }) })
+}
+
+/** Under the view header: the profile the focused tab shows (its icon and name) and a button for a new one. */
 const ProfileBar = ({ tab, profile, open, toggle }: { tab: string; profile: string; open: boolean; toggle: () => void }): ReactElement => {
   const store = getStore()
   const { document } = useGrapher()
-  const Icon = viewOf(graphOf(document, profile).mode).icon
   const name = store.profileName(profile)
   return (
     <div className="grapher-profile-bar">
       <button type="button" className="grapher-view-picker grapher-profile-picker" aria-expanded={open} aria-label={uiText('profile.choose', { name })} onClick={toggle}>
-        <Icon className="grapher-view-icon" />
+        <ProfileGlyph profile={profile} className="grapher-view-icon" />
         <span className="grapher-view-name">{name}</span>
         <ChevronDown className="grapher-view-chevron" />
       </button>
@@ -250,11 +287,13 @@ const ProfileList = ({ tab, profile, close }: { tab: string; profile: string; cl
   return (
     <div className="grapher-views" role="radiogroup" aria-label={uiText('profile.list')} onKeyDown={(event) => { if (event.key === 'Escape' && !renaming) { event.preventDefault(); close() } }}>
       {ids.map((id) => {
-        const Icon = viewOf(graphOf(document, id).mode).icon
         const name = store.profileName(id)
         const checked = id === profile
         return (
           <div key={id} className="grapher-profile-row">
+            <button type="button" className="grapher-profile-action grapher-profile-icon-button" aria-label={uiText('profile.icon', { name })} title={uiText('profile.icon', { name })} onClick={(event) => openIconPicker(id, event.currentTarget)}>
+              <ProfileGlyph profile={id} className="grapher-view-option-icon" />
+            </button>
             {renaming === id ? (
               <input
                 className="grapher-profile-name-field"
@@ -278,7 +317,6 @@ const ProfileList = ({ tab, profile, close }: { tab: string; profile: string; cl
                 className={checked ? 'grapher-view-option grapher-profile-option active' : 'grapher-view-option grapher-profile-option'}
                 onClick={() => { store.setTabProfile(tab, id); close() }}
               >
-                <Icon className="grapher-view-option-icon" />
                 <span className="grapher-view-option-text">
                   <span className="grapher-view-option-name">{name}</span>
                   <span className="grapher-view-option-hint">{uiText(`mode.${graphOf(document, id).mode}`)}</span>

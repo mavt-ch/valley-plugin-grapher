@@ -229,5 +229,8 @@
   "profile.nameField": "{{name}} 的名称",
   "profile.duplicate": "复制 {{name}}",
   "profile.delete": "删除 {{name}}",
-  "profile.lastOne": "无法删除最后一个配置"
+  "profile.lastOne": "无法删除最后一个配置",
+  "profile.icon": "{{name}} 的图标",
+  "profile.iconView": "视图图标",
+  "profile.icons": "{{folder}} 中的图标"
 }

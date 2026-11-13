@@ -178,6 +178,7 @@ describe('the reference', () => {
     const provide = vi.spyOn(mock.api.interop.extensions, 'provide')
     disposers.push(plugin.register(mock.api))
     expect(JSON.stringify(config)).not.toContain('right_sidebar')
+    expect(config.provides.map((entry) => entry.id)).toContain('metadataPanel.segment')
     const segment = provide.mock.calls.map(([, value]) => value as { id?: string; icon?: string; pluginSurfaces?: string[]; render?: (context: unknown) => React.ReactNode }).find((value) => value.id === 'grapher.reference')
     expect(segment).toMatchObject({ icon: 'sticky-note', pluginSurfaces: ['main_workspace'] })
     render(<>{segment!.render!({ relPath: '', kind: 'unsupported', tab: { pluginId: 'grapher' } })}</>)

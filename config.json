@@ -16,6 +16,11 @@
       "id": "workspace.surface",
       "kind": "extension",
       "version": "1.0.0"
+    },
+    {
+      "id": "metadataPanel.segment",
+      "kind": "extension",
+      "version": "1.0.0"
     }
   ],
   "locales": {

@@ -7,6 +7,9 @@ import * as plugin from '../src/index'
 import { loadPlotEngine, type PlotEngine } from '../src/engine'
 import { createRow, type Row } from '../src/model'
 import { REFERENCE } from '../src/Reference'
+import { graphDetails, noteCanvas } from '../src/details'
+import { getStore } from '../src/store'
+import { formatNumber } from '../src/ticks'
 import { Sidebar, takesTables } from '../src/Sidebar'
 import { Reference } from '../src/Reference'
 import { VIEWS, viewOf } from '../src/views'
@@ -178,10 +181,53 @@ describe('the reference', () => {
     const provide = vi.spyOn(mock.api.interop.extensions, 'provide')
     disposers.push(plugin.register(mock.api))
     expect(JSON.stringify(config)).not.toContain('right_sidebar')
-    expect(config.provides.map((entry) => entry.id)).toContain('metadataPanel.segment')
+    const declaredIds = config.provides.map((entry) => entry.id)
+    for (const [contract] of provide.mock.calls) expect(declaredIds, `config.json provides ${(contract as { id: string }).id}`).toContain((contract as { id: string }).id)
+    expect(declaredIds).toEqual(expect.arrayContaining(['metadataPanel.segment', 'workspace.details']))
     const segment = provide.mock.calls.map(([, value]) => value as { id?: string; icon?: string; pluginSurfaces?: string[]; render?: (context: unknown) => React.ReactNode }).find((value) => value.id === 'grapher.reference')
     expect(segment).toMatchObject({ icon: 'sticky-note', pluginSurfaces: ['main_workspace'] })
     render(<>{segment!.render!({ relPath: '', kind: 'unsupported', tab: { pluginId: 'grapher' } })}</>)
     expect(await screen.findByRole('searchbox', { name: 'Search the reference' })).toBeTruthy()
+  })
+
+  it('collapses and expands every group with one button, also on a filtered list', async () => {
+    mount()
+    const { container } = render(<Reference />)
+    const expanded = (): string[] => Array.from(container.querySelectorAll('.grapher-ref-heading[aria-expanded="true"]')).map((heading) => heading.textContent ?? '')
+    fireEvent.click(await screen.findByRole('button', { name: 'Collapse all groups' }))
+    expect(expanded()).toEqual([])
+    fireEvent.click(screen.getByRole('button', { name: 'Expand all groups' }))
+    expect(expanded()).toHaveLength(REFERENCE.length)
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Search the reference' }), { target: { value: 'tangent' } })
+    expect(expanded()).toEqual(['Calculus', '3D'])
+    fireEvent.click(screen.getByRole('button', { name: 'Collapse all groups' }))
+    expect(expanded()).toEqual([])
+    expect(container.querySelectorAll('.grapher-ref-heading')).toHaveLength(2)
+    fireEvent.click(screen.getByRole('button', { name: 'Expand all groups' }))
+    expect(expanded()).toEqual(['Calculus', '3D'])
+  })
+})
+
+describe('the Info rows', () => {
+  it('describe a Cartesian sheet and a 3D sheet', async () => {
+    mount()
+    render(<Sidebar />)
+    await screen.findByRole('toolbar', { name: 'Insert' })
+    await waitFor(() => expect(getStore().getSnapshot().engine).toBeTruthy())
+    noteCanvas('main:cartesian', { size: { width: 200, height: 100 }, view: { cx: 0, cy: 0, scale: 10 }, pins: 2 })
+    const plane = graphDetails(getStore(), undefined).items
+    expect(Object.fromEntries(Object.entries(plane).map(([key, value]) => [key, value.text]))).toEqual({
+      view: 'Cartesian', expressions: '4', sliders: '2', tables: '', units: 'ℝ',
+      range: `x ${formatNumber(-10)} … ${formatNumber(10)}, y ${formatNumber(-5)} … ${formatNumber(5)}`, camera: '', pins: '2', playing: '',
+      file: '.valley/plugins/data/grapher/graphs.json', graph: 'main'
+    })
+    act(() => getStore().setMode('main', 'space'))
+    noteCanvas('main:space', { size: { width: 200, height: 100 }, camera: { yaw: Math.PI / 4, pitch: Math.PI / 6, range: 10 } })
+    const space = graphDetails(getStore(), undefined).items
+    expect(space.view.text).toBe('3D')
+    expect(space.expressions.text).toBe('2')
+    expect(space.units.text).toBe('')
+    expect(space.range.text).toBe(`x, y, z ${formatNumber(-10)} … ${formatNumber(10)}`)
+    expect(space.camera.text).toBe('yaw 45°, pitch 30°')
   })
 })

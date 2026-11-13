@@ -6,6 +6,7 @@ import { Fit, Minus, Plus } from './icons'
 import { uiText } from './localization'
 import type { Row } from './model'
 import { cameraKey, getStore } from './store'
+import { noteCanvas } from './details'
 import { registerExporter, renderPng } from './exporting'
 import { formatNumber, piTicks } from './ticks'
 import type { AxisUnits } from './model'
@@ -186,6 +187,7 @@ export const SpaceCanvas = ({ view, rows, engine, graph, units }: SpaceProps): R
     const ctx = canvas?.getContext('2d')
     const size = sizeRef.current
     if (!canvas || !ctx || size.width <= 0 || size.height <= 0) return
+    noteCanvas(inputs.current.slot, { size, camera: cameraRef.current })
     const dpr = canvas.ownerDocument.defaultView?.devicePixelRatio || 1
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
     paint(ctx, readTheme(canvas))

@@ -57,8 +57,13 @@ const CSS = `
 .grapher-reference { flex:1 1 auto; min-height:0; overflow-y:auto; padding:6px 0 var(--space-3); }
 .grapher-ref-search { position:sticky; top:0; z-index:1; border-bottom:1px solid var(--border-light); background:var(--container-color-alt); }
 .grapher-ref-empty { margin:0; padding:var(--space-3); font-size:0.75rem; color:var(--text-tertiary); }
-.grapher-ref-heading:disabled { cursor:default; }
-.grapher-ref-heading:disabled:hover { background:transparent; color:var(--text-secondary); }
+.grapher-ref-search .search-field { flex:1 1 auto; width:auto; }
+.grapher-ref-all { display:inline-flex; align-items:center; justify-content:center; flex:0 0 26px; width:26px; height:26px; padding:0;
+  border:none; border-radius:var(--radius-sm); background:transparent; color:var(--text-secondary); cursor:pointer;
+  transition:background-color var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out); }
+.grapher-ref-all svg { width:15px; height:15px; }
+.grapher-ref-all:hover:not(:disabled) { background:var(--hover-bg); color:var(--text-color); }
+.grapher-ref-all:disabled { opacity:0.4; cursor:default; }
 .grapher-ref-group { padding:0 6px; }
 .grapher-ref-heading { display:flex; align-items:center; gap:6px; width:100%; height:28px; padding:0 6px; border:none;
   border-radius:var(--radius-sm); background:transparent; color:var(--text-secondary); font:inherit; font-size:var(--smaller-font-size);
@@ -277,7 +282,7 @@ button.grapher-handle:hover { color:var(--text-color); }
 .grapher-zoom-button:focus-visible { outline:2px solid var(--accent-color); outline-offset:2px; }
 
 @media (prefers-reduced-motion: reduce) {
-  .grapher-view-picker, .grapher-view-option, .grapher-unit, .grapher-insert, .grapher-ref-heading, .grapher-ref-chevron, .grapher-ref-example, .grapher-swatch, .grapher-delete, .grapher-grip-icon, .grapher-handle .grapher-index, .grapher-zoom-button, .grapher-play-options svg { transition:none; }
+  .grapher-view-picker, .grapher-view-option, .grapher-unit, .grapher-insert, .grapher-ref-all, .grapher-ref-heading, .grapher-ref-chevron, .grapher-ref-example, .grapher-swatch, .grapher-delete, .grapher-grip-icon, .grapher-handle .grapher-index, .grapher-zoom-button, .grapher-play-options svg { transition:none; }
 }
 `
 

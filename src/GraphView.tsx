@@ -7,6 +7,7 @@ import { Fit, Minus, Plus } from './icons'
 import { uiText } from './localization'
 import { MAIN_GRAPH, graphOf, unitsOf, type AxisUnits, type Row } from './model'
 import { cameraKey, getStore, useGrapher } from './store'
+import { noteCanvas } from './details'
 import { SpaceCanvas } from './Space'
 import { viewOf, type PlaneView } from './views'
 
@@ -204,6 +205,7 @@ export const GraphCanvas = ({ view: plane, units, rows, analyses, engine, graph 
     const size = sizeRef.current
     const { plane, mode, rows, engine } = inputs.current
     const view = viewRef.current ?? (viewRef.current = homeView(plane, size))
+    noteCanvas(inputs.current.slot, { size, view, pins: pinsRef.current.length })
     if (!frame.resample) return
     frame.resample = false
     generationRef.current += 1

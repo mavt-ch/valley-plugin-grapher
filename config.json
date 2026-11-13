@@ -21,6 +21,11 @@
       "id": "metadataPanel.segment",
       "kind": "extension",
       "version": "1.0.0"
+    },
+    {
+      "id": "workspace.details",
+      "kind": "extension",
+      "version": "1.0.0"
     }
   ],
   "locales": {

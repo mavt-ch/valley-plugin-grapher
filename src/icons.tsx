@@ -113,3 +113,13 @@ export const PlaneIcon = (p: IconProps): ReactElement => (
 export const Search = (p: IconProps): ReactElement => (
   <Svg {...p}><circle cx="11" cy="11" r="6.5" /><path d="M20 20l-4.2-4.2" /></Svg>
 )
+
+/** Chevrons pointing together: collapse all (the Files tree's glyph). */
+export const CollapseAll = (p: IconProps): ReactElement => (
+  <Svg {...p}><path d="M7 20l5-5 5 5M7 4l5 5 5-5" /></Svg>
+)
+
+/** Chevrons pointing apart: expand all (the Files tree's glyph). */
+export const ExpandAll = (p: IconProps): ReactElement => (
+  <Svg {...p}><path d="M7 15l5 5 5-5M7 9l5-5 5 5" /></Svg>
+)

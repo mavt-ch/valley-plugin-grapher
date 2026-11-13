@@ -1,6 +1,6 @@
 import { React } from './runtime'
 import type { ReactElement } from 'react'
-import { ChevronDown, Search, X } from './icons'
+import { ChevronDown, CollapseAll, ExpandAll, Search, X } from './icons'
 import { uiText } from './localization'
 import { MAIN_GRAPH, MODES, createRow, filled, graphOf, type Mode } from './model'
 import { insertTemplate, takesTables } from './Sidebar'
@@ -125,6 +125,21 @@ export const Reference = ({ graph: described }: { graph?: string }): ReactElemen
   })
   const searching = query.trim() !== ''
   const groups = referenceOrder(mode).map((group) => ({ group, entries: matching(group, query) })).filter(({ entries }) => entries.length)
+  // A query opens every matching group; clearing it brings back the focused view's groups.
+  const search = (next: string): void => {
+    setQuery(next)
+    setOpen(next.trim() ? new Set(REFERENCE.filter((group) => matching(group, next).length).map((group) => group.id)) : initial())
+  }
+  const anyOpen = groups.some(({ group }) => open.has(group.id))
+  const toggleAll = (): void => setOpen((current) => {
+    const next = new Set(current)
+    for (const { group } of groups) {
+      if (anyOpen) next.delete(group.id)
+      else next.add(group.id)
+    }
+    return next
+  })
+  const allLabel = uiText(anyOpen ? 'ref.collapseAll' : 'ref.expandAll')
   return (
     <div className="grapher-panel grapher-ref-panel">
       <div className="search-field-row grapher-ref-search">
@@ -138,23 +153,26 @@ export const Reference = ({ graph: described }: { graph?: string }): ReactElemen
             aria-label={uiText('ref.search')}
             spellCheck={false}
             autoComplete="off"
-            onChange={(event) => setQuery(event.target.value)}
-            onKeyDown={(event) => { if (event.key === 'Escape' && query) { event.preventDefault(); setQuery('') } }}
+            onChange={(event) => search(event.target.value)}
+            onKeyDown={(event) => { if (event.key === 'Escape' && query) { event.preventDefault(); search('') } }}
           />
           {query ? (
-            <button type="button" className="search-field-action" aria-label={uiText('ref.clear')} title={uiText('ref.clear')} onClick={() => setQuery('')}>
+            <button type="button" className="search-field-action" aria-label={uiText('ref.clear')} title={uiText('ref.clear')} onClick={() => search('')}>
               <X />
             </button>
           ) : null}
         </label>
+        <button type="button" className="grapher-ref-all" aria-label={allLabel} title={allLabel} disabled={!groups.length} onClick={toggleAll}>
+          {anyOpen ? <CollapseAll /> : <ExpandAll />}
+        </button>
       </div>
       {loaded ? (
         <div className="grapher-reference" aria-label={uiText('ref.label')}>
           {groups.map(({ group, entries }) => {
-            const expanded = searching || open.has(group.id)
+            const expanded = open.has(group.id)
             return (
               <section key={group.id} className="grapher-ref-group" data-group={group.id}>
-                <button type="button" className="grapher-ref-heading" aria-expanded={expanded} disabled={searching} onClick={() => toggle(group.id)}>
+                <button type="button" className="grapher-ref-heading" aria-expanded={expanded} onClick={() => toggle(group.id)}>
                   <ChevronDown className="grapher-ref-chevron" />
                   {uiText(`ref.group.${group.id}`)}
                 </button>

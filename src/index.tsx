@@ -16,6 +16,7 @@ import { GraphTab } from './GraphView'
 import { REFERENCE_SEGMENT, Reference } from './Reference'
 import { getStore } from './store'
 import { provideGraphSurface } from './exporting'
+import { provideGraphDetails } from './details'
 
 export function register(api: ValleyPluginApi): () => Promise<void> {
   initLocalization(api)
@@ -28,6 +29,8 @@ export function register(api: ValleyPluginApi): () => Promise<void> {
   const offNewTab = api.workspace.registerNewTabHandler(({ paneId }) => openNewGraph(store.graph(store.getSnapshot().active).mode, paneId))
   // The graph tab's three-dot menu offers the export of what it shows.
   const offSurface = provideGraphSurface(api, store)
+  // Info rows of the focused graph tab in Properties.
+  const offDetails = provideGraphDetails(api, store)
   // The reference is Grapher's tab in the right sidebar's Properties while a graph tab is focused.
   const offReference = api.interop.extensions.provide(METADATA_PANEL_SEGMENT_V1, {
     id: REFERENCE_SEGMENT, label: 'Reference', labelKey: 'ref.tab', icon: 'sticky-note', pluginSurfaces: ['main_workspace'],
@@ -39,6 +42,7 @@ export function register(api: ValleyPluginApi): () => Promise<void> {
     offNewTab()
     offSurface()
     offReference()
+    offDetails()
     disposal = store.flush().catch(() => {}).finally(() => {
       store.dispose()
       disposeStyles()

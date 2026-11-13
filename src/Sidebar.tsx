@@ -9,6 +9,7 @@ import { uiText } from './localization'
 import { MathText } from './MathText'
 import { ANIMATION_SPEEDS, COLORS, DEFAULT_ANIMATION, DEFAULT_LEVELS, MAIN_GRAPH, MAX_LEVELS, MODES, createRow, createTable, filled, graphOf, moveRow, rangeVariable, unitsOf, type Animation, type AxisUnits, type Mode, type Row, type Table } from './model'
 import { getStore, useGrapher } from './store'
+import { notePlaying } from './details'
 import { MAX_TABLE_ROWS, looksTabular, parseTable, type Cells, type PastedTable } from './table'
 import { formatComplex, formatLinear, formatNumber, formatPolar } from './ticks'
 import { viewOf, type Insert } from './views'
@@ -282,7 +283,7 @@ const SliderBody = ({ mode, row, edit, name, value }: Pick<RowProps, 'mode' | 'r
   const [options, setOptions] = React.useState(false)
   const live = React.useRef({ bounds: { min: row.slider.min, max: row.slider.max }, settings })
   live.current = { bounds: { min: row.slider.min, max: row.slider.max }, settings }
-  const run = React.useRef<{ animator: SliderAnimator; graph: string; written: string; off: () => void } | null>(null)
+  const run = React.useRef<{ animator: SliderAnimator; graph: string; row: string; written: string; off: () => void } | null>(null)
 
   const stop = React.useCallback((): void => {
     const current = run.current
@@ -290,6 +291,7 @@ const SliderBody = ({ mode, row, edit, name, value }: Pick<RowProps, 'mode' | 'r
     run.current = null
     current.animator.stop()
     current.off()
+    notePlaying(current.graph, current.row, false)
     setPlaying(false)
     getStore().commit()
   }, [])
@@ -314,7 +316,8 @@ const SliderBody = ({ mode, row, edit, name, value }: Pick<RowProps, 'mode' | 'r
       },
       end: stop
     })
-    run.current = { animator, graph, written: row.text, off }
+    run.current = { animator, graph, row: id, written: row.text, off }
+    notePlaying(graph, id, true)
     setPlaying(true)
     animator.start()
   }

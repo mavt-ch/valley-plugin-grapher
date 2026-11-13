@@ -3,13 +3,11 @@ import type { FileBaseline } from '@valley/plugin-sdk/types'
 import { React, api } from './runtime'
 import { uiText } from './localization'
 import { loadPlotEngine, type Camera, type PlotEngine, type Viewport } from './engine'
-import { MAIN_GRAPH, MODES, defaultDocument, defaultGraph, graphOf, normalizeDocument, rowId, withGraph, withTrailingRow, type AxisUnits, type Graph, type GrapherDocument, type Mode, type Row } from './model'
+import { MAIN_GRAPH, MAX_GRAPHS, MAX_NAME, MODES, defaultDocument, defaultGraph, graphOf, nextName, normalizeDocument, profileIds, profileOf, rowId, withGraph, withNames, withTrailingRow, type AxisUnits, type Graph, type GrapherDocument, type Mode, type Row } from './model'
 
 /** The sheets live in `.valley/plugins/data/grapher/graphs.json`. */
 export const GRAPHS_FILE = 'graphs.json'
 const SAVE_DELAY = 400
-/** Graphs of closed tabs are kept (reopening a tab brings its graph back) until there are more than this many. */
-const KEPT_GRAPHS = 40
 /** Waits before retrying the engine: the frame's module list arrives with the host's first snapshot. */
 const ENGINE_RETRIES = [250, 1000, 3000]
 
@@ -21,8 +19,10 @@ export interface GrapherProblem {
 export interface GrapherSnapshot {
   loaded: boolean
   document: GrapherDocument
-  /** The graph the sidebar edits: the focused Grapher tab's, else the one focused last. */
+  /** The profile (graph) the sidebar edits: the one the focused Grapher tab shows, else the one focused last. */
   active: string
+  /** The focused Grapher tab's instance id (`main` for a tab without one). */
+  tab: string
   engine: PlotEngine | null
   problems: GrapherProblem[]
 }
@@ -35,7 +35,7 @@ const messageOf = (error: unknown): string => (error instanceof Error ? error.me
  * document is left untouched until the user repairs or removes it.
  */
 export class GrapherStore {
-  private snapshot: GrapherSnapshot = { loaded: false, document: defaultDocument(), active: MAIN_GRAPH, engine: null, problems: [] }
+  private snapshot: GrapherSnapshot = { loaded: false, document: defaultDocument(), active: MAIN_GRAPH, tab: MAIN_GRAPH, engine: null, problems: [] }
   private readonly listeners = new Set<() => void>()
   private baseline: FileBaseline | null = null
   private written: string | null = null
@@ -64,8 +64,35 @@ export class GrapherStore {
   getSnapshot = (): GrapherSnapshot => this.snapshot
 
   private update(patch: Partial<GrapherSnapshot>): void {
-    this.snapshot = { ...this.snapshot, ...patch }
+    const next = { ...this.snapshot, ...patch }
+    next.active = profileOf(next.document, next.tab)
+    this.snapshot = next
+    if ('document' in patch || 'tab' in patch) this.syncTitles()
     this.listeners.forEach((listener) => listener())
+  }
+
+  private readonly titles = new Map<string, string>()
+
+  /** Each open graph tab is titled with the name of the profile it shows. */
+  private syncTitles(): void {
+    if (!this.snapshot.loaded) return
+    let open: string[] = []
+    try { open = this.api.workspace.getOpenMainTabs() } catch { return }
+    for (const tab of open) {
+      const title = this.profileName(profileOf(this.snapshot.document, tab))
+      if (this.titles.get(tab) === title) continue
+      this.titles.set(tab, title)
+      this.api.workspace.setMainTabTitle(title, tab)
+    }
+  }
+
+  /** The profile a tab shows. */
+  profileOf(tab: string): string {
+    return profileOf(this.snapshot.document, tab)
+  }
+
+  profileName(id: string): string {
+    return this.snapshot.document.names?.[id] ?? uiText('graph.title')
   }
 
   private problem(key: GrapherProblem['key'], error: unknown | null): void {
@@ -111,7 +138,7 @@ export class GrapherStore {
     try {
       const file = await this.api.data.files.readTextBaseline(GRAPHS_FILE)
       if (this.disposed) return
-      const document = file ? normalizeDocument(JSON.parse(file.content)) : defaultDocument()
+      const document = withNames(file ? normalizeDocument(JSON.parse(file.content)) : defaultDocument(), defaultName)
       this.baseline = file?.baseline ?? null
       this.written = file?.content ?? null
       this.writable = true
@@ -134,7 +161,7 @@ export class GrapherStore {
     const file = await this.api.data.files.readTextBaseline(GRAPHS_FILE).catch(() => null)
     if (this.disposed || this.timer !== null || this.unsaved || !file || file.content === this.written) return
     try {
-      const document = normalizeDocument(JSON.parse(file.content))
+      const document = withNames(normalizeDocument(JSON.parse(file.content)), defaultName)
       this.baseline = file.baseline
       this.written = file.content
       this.writable = true
@@ -147,7 +174,7 @@ export class GrapherStore {
 
   /** The sidebar follows the focused Grapher tab. */
   focus(id: string): void {
-    if (id !== this.snapshot.active) this.update({ active: id })
+    if (id !== this.snapshot.tab) this.update({ tab: id })
     this.ensureGraph(id)
   }
 
@@ -161,10 +188,10 @@ export class GrapherStore {
    */
   ensureGraph(id: string): void {
     const document = this.snapshot.document
-    if (!this.snapshot.loaded || id === MAIN_GRAPH || document.graphs[id]) return
+    if (!this.snapshot.loaded || id === MAIN_GRAPH || document.graphs[id] || document.tabs?.[id]) return
     const main = graphOf(document, MAIN_GRAPH)
     const mode = MODES.includes(id as Mode) ? (id as Mode) : main.mode
-    this.change(withGraph(document, id, { mode, sheets: main.sheets, units: main.units }))
+    this.change(withName(withGraph(document, id, { mode, sheets: main.sheets, units: main.units }), id))
   }
 
   /**
@@ -177,15 +204,9 @@ export class GrapherStore {
     const now = Date.now()
     if (now - this.adoptedAt < 1000) return
     this.adoptedAt = now
-    const id = this.forkGraph(MAIN_GRAPH)
+    const id = this.tabFor(MAIN_GRAPH)
     this.focus(id)
-    this.api.workspace.openMainTab({ instanceId: id, title: uiText('graph.title') })
-  }
-
-  /** A copy of one graph under a new id; returns the id. */
-  forkGraph(from: string): string {
-    const source = this.graph(from)
-    return this.addGraph({ mode: source.mode, sheets: source.sheets, units: source.units })
+    this.api.workspace.openMainTab({ instanceId: id, title: this.profileName(MAIN_GRAPH) })
   }
 
   /** A fresh graph with the example sheets, for a new tab; returns its id. */
@@ -193,14 +214,89 @@ export class GrapherStore {
     return this.addGraph(defaultGraph(mode))
   }
 
-  private addGraph(graph: Graph): string {
+  /** A new profile; profiles are never pruned (they are the user's to delete), only capped at `MAX_GRAPHS`. */
+  private addGraph(graph: Graph, name?: string): string {
     const id = `g-${rowId()}`
-    const open = new Set(this.api.workspace.getOpenMainTabs())
-    const graphs = { ...this.snapshot.document.graphs }
-    const closed = Object.keys(graphs).filter((key) => !open.has(key) && key !== this.snapshot.active)
-    while (Object.keys(graphs).length >= KEPT_GRAPHS && closed.length) delete graphs[closed.shift()!]
-    this.change(withGraph({ ...this.snapshot.document, graphs }, id, graph))
+    this.change(withName(withGraph(this.snapshot.document, id, graph), id, name))
     return id
+  }
+
+  /** Whether another profile can be added (`graphs.json` keeps at most `MAX_GRAPHS` besides `main`). */
+  canAddProfile(): boolean {
+    return Object.keys(this.snapshot.document.graphs).length < MAX_GRAPHS
+  }
+
+  /** A new instance id for a tab that shows `profile` (opening a profile that has no tab of its own). */
+  tabFor(profile: string): string {
+    const tab = `t-${rowId()}`
+    this.setTabProfile(tab, profile)
+    return tab
+  }
+
+  /** Shows `profile` in `tab`; the sidebar follows when the tab is focused. */
+  setTabProfile(tab: string, profile: string): void {
+    const document = this.snapshot.document
+    const tabs = { ...document.tabs }
+    if (profile === tab) delete tabs[tab]
+    else tabs[tab] = profile
+    this.change({ ...document, tabs })
+  }
+
+  /** A new profile on `mode` with that view's example sheet, shown in `tab`; returns its id. */
+  createProfile(tab: string, mode: Mode): string | null {
+    if (!this.canAddProfile()) return null
+    const id = this.addGraph(defaultGraph(mode))
+    this.setTabProfile(tab, id)
+    return id
+  }
+
+  /** A copy of a profile under "<name> copy", shown in `tab`. */
+  duplicateProfile(tab: string, from: string): string | null {
+    if (!this.canAddProfile()) return null
+    const source = this.graph(from)
+    const id = this.addGraph({ mode: source.mode, sheets: source.sheets, units: source.units }, uiText('profile.copyName', { name: this.profileName(from) }).slice(0, MAX_NAME))
+    this.setTabProfile(tab, id)
+    return id
+  }
+
+  renameProfile(id: string, name: string): void {
+    const trimmed = name.trim().slice(0, MAX_NAME)
+    const document = this.snapshot.document
+    if (!trimmed || document.names?.[id] === trimmed) return
+    this.change({ ...document, names: { ...document.names, [id]: trimmed } })
+  }
+
+  /**
+   * Removes a profile; the last one stays. Tabs that showed it show its neighbour (the next profile, else the previous).
+   * Deleting `main` moves the neighbour into the main slot, so the top level of `graphs.json` stays a graph.
+   */
+  deleteProfile(id: string): void {
+    const document = this.snapshot.document
+    const ids = profileIds(document)
+    const at = ids.indexOf(id)
+    if (ids.length < 2 || at < 0) return
+    const neighbour = ids[at + 1] ?? ids[at - 1]
+    const graphs = { ...document.graphs }
+    const names = { ...document.names }
+    const tabs = { ...document.tabs }
+    let target = neighbour
+    let base: GrapherDocument = document
+    if (id === MAIN_GRAPH) {
+      base = withGraph(document, MAIN_GRAPH, graphs[neighbour])
+      names[MAIN_GRAPH] = names[neighbour] ?? this.profileName(neighbour)
+      delete graphs[neighbour]
+      delete names[neighbour]
+      target = MAIN_GRAPH
+      for (const [tab, shown] of Object.entries(tabs)) if (shown === neighbour) tabs[tab] = MAIN_GRAPH
+      tabs[neighbour] = MAIN_GRAPH
+    } else {
+      delete graphs[id]
+      delete names[id]
+      for (const [tab, shown] of Object.entries(tabs)) if (shown === id) tabs[tab] = target
+      tabs[id] = target
+    }
+    for (const [tab, shown] of Object.entries(tabs)) if (tab === shown) delete tabs[tab]
+    this.change({ ...base, graphs, names, tabs })
   }
 
   private editGraph(id: string, edit: (graph: Graph) => Graph | null, quiet = false): void {
@@ -291,6 +387,15 @@ export function getStore(): GrapherStore {
 export function useGrapher(): GrapherSnapshot {
   const store = getStore()
   return React.useSyncExternalStore(store.subscribe, store.getSnapshot)
+}
+
+/** "Graph n" in the user's language: the name of a profile nobody named. */
+const defaultName = (n: number): string => uiText('profile.default', { n })
+
+/** The document with a name for `id` (the given one, else the next free "Graph n"). */
+function withName(document: GrapherDocument, id: string, name?: string): GrapherDocument {
+  if (!name && document.names?.[id]) return document
+  return { ...document, names: { ...document.names, [id]: name ?? nextName(document, defaultName) } }
 }
 
 /** The key of one graph's sheet in the session-only camera maps. */

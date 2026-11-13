@@ -83,11 +83,15 @@ export interface Graph {
 export interface GrapherDocument extends Graph {
   version: 1
   graphs: Record<string, Graph>
+  /** Profile names by graph id: every graph is a named profile (`main` included). Absent in files before profiles. */
+  names?: Record<string, string>
+  /** The profile a tab shows, by tab instance id, where it is not the tab's own graph. */
+  tabs?: Record<string, string>
 }
 
 /** The graph id of the tab opened without an instance id. */
 export const MAIN_GRAPH = 'main'
-const MAX_GRAPHS = 200
+export const MAX_GRAPHS = 200
 
 /** The rows a fresh trigonometric sheet had before it became Cartesian with π axes. */
 const LEGACY_TRIG_EXAMPLES = ['sin(x)', 'cos(x)', 'y = A sin(k x)', 'A = 2', 'k = 0.5']
@@ -150,6 +154,37 @@ export function defaultDocument(): GrapherDocument {
 /** The graph a tab shows: the main graph for `main`, else that tab's own graph (the main one until it exists). */
 export function graphOf(document: GrapherDocument, id: string): Graph {
   return id === MAIN_GRAPH ? document : document.graphs[id] ?? document
+}
+
+/** The longest profile name kept. */
+export const MAX_NAME = 80
+
+/** Every profile id, `main` first, the others in creation order. */
+export function profileIds(document: GrapherDocument): string[] {
+  return [MAIN_GRAPH, ...Object.keys(document.graphs)]
+}
+
+/** The profile a tab shows: its chosen profile when that still exists, else its own graph. */
+export function profileOf(document: GrapherDocument, tab: string): string {
+  const chosen = document.tabs?.[tab]
+  return chosen && (chosen === MAIN_GRAPH || document.graphs[chosen]) ? chosen : tab
+}
+
+/** The smallest "Graph n" not taken yet, in the given words (`label(n)`). */
+export function nextName(document: GrapherDocument, label: (n: number) => string): string {
+  const taken = new Set(Object.values(document.names ?? {}))
+  let n = 1
+  while (taken.has(label(n))) n++
+  return label(n)
+}
+
+/** Names every profile without one, in order (`main` is Graph 1, then creation order), so older files get profiles. */
+export function withNames(document: GrapherDocument, label: (n: number) => string): GrapherDocument {
+  const missing = profileIds(document).filter((id) => !document.names?.[id])
+  if (!missing.length) return document
+  let next: GrapherDocument = { ...document, names: { ...document.names } }
+  for (const id of missing) next = { ...next, names: { ...next.names, [id]: nextName(next, label) } }
+  return next
 }
 
 /** Replaces one graph and leaves every other tab's graph as it was. */
@@ -273,13 +308,19 @@ function normalizeGraph(record: { mode?: unknown; sheets?: unknown; units?: unkn
 /** Reads a stored `graphs.json`; throws when it is not a Grapher document, so the caller never overwrites it. */
 export function normalizeDocument(value: unknown): GrapherDocument {
   if (!value || typeof value !== 'object' || (value as { version?: unknown }).version !== 1) throw new Error('graphs.json is not a Grapher document (version 1).')
-  const record = value as { mode?: unknown; sheets?: unknown; units?: unknown; graphs?: unknown }
+  const record = value as { mode?: unknown; sheets?: unknown; units?: unknown; graphs?: unknown; names?: unknown; tabs?: unknown }
   const stored = (record.graphs && typeof record.graphs === 'object' && !Array.isArray(record.graphs) ? record.graphs : {}) as Record<string, unknown>
   const graphs: Record<string, Graph> = {}
   for (const [id, graph] of Object.entries(stored).slice(0, MAX_GRAPHS)) {
     if (id && id !== MAIN_GRAPH && id.length <= 128 && graph && typeof graph === 'object') graphs[id] = normalizeGraph(graph as Record<string, unknown>)
   }
-  return { version: 1, ...normalizeGraph(record), graphs }
+  const text = (entry: unknown): entry is string => typeof entry === 'string' && entry.trim() !== '' && entry.length <= 128
+  const known = (id: string): boolean => id === MAIN_GRAPH || id in graphs
+  const names = Object.fromEntries(Object.entries(record.names && typeof record.names === 'object' ? record.names as Record<string, unknown> : {})
+    .filter((entry): entry is [string, string] => known(entry[0]) && text(entry[1])).map(([id, name]) => [id, name.trim().slice(0, MAX_NAME)]))
+  const tabs = Object.fromEntries(Object.entries(record.tabs && typeof record.tabs === 'object' ? record.tabs as Record<string, unknown> : {})
+    .filter((entry): entry is [string, string] => text(entry[0]) && text(entry[1]) && known(entry[1])).slice(0, MAX_GRAPHS * 4))
+  return { version: 1, ...normalizeGraph(record), graphs, ...(Object.keys(names).length ? { names } : {}), ...(Object.keys(tabs).length ? { tabs } : {}) }
 }
 
 /** The range variable of a row: θ for polar curves, t for plane and space curves. */

@@ -3,11 +3,11 @@ import type { ChangeEvent, ClipboardEvent, KeyboardEvent, MouseEvent, PointerEve
 import { paletteCssValue, paletteRef } from '@valley/plugin-sdk/palette'
 import type { UiMenuItem } from '@valley/plugin-sdk'
 import type { RowAnalysis } from './engine'
-import { Check, ChevronDown, Eye, EyeOff, Grip, Pause, Play, Slider, TableIcon, Trash, Warning, X } from './icons'
+import { Check, ChevronDown, Copy, Eye, EyeOff, Grip, Pause, Pencil, Play, Plus, Slider, TableIcon, Trash, Warning, X } from './icons'
 import { SliderAnimator, snap, startMotion } from './animate'
 import { uiText } from './localization'
 import { MathText } from './MathText'
-import { ANIMATION_SPEEDS, COLORS, DEFAULT_ANIMATION, DEFAULT_LEVELS, MAIN_GRAPH, MAX_LEVELS, MODES, createRow, createTable, filled, graphOf, moveRow, rangeVariable, unitsOf, type Animation, type AxisUnits, type Mode, type Row, type Table } from './model'
+import { ANIMATION_SPEEDS, COLORS, DEFAULT_ANIMATION, DEFAULT_LEVELS, MAIN_GRAPH, MAX_LEVELS, MAX_NAME, MODES, profileIds, createRow, createTable, filled, graphOf, moveRow, rangeVariable, unitsOf, type Animation, type AxisUnits, type Mode, type Row, type Table } from './model'
 import { getStore, useGrapher } from './store'
 import { notePlaying } from './details'
 import { MAX_TABLE_ROWS, looksTabular, parseTable, type Cells, type PastedTable } from './table'
@@ -149,7 +149,7 @@ const InsertBar = ({ graph, mode }: { graph: string; mode: Mode }): ReactElement
 /** Opens a new tab with a fresh graph of its own on the given view. */
 export function openNewGraph(mode: Mode, paneId?: string): void {
   const id = getStore().createGraph(mode)
-  api.workspace.openMainTab({ instanceId: id, title: uiText('graph.title'), newTab: true, paneId })
+  api.workspace.openMainTab({ instanceId: id, title: getStore().profileName(id), newTab: true, paneId })
 }
 
 /** The header's view button: the focused graph's view; it swaps the expression list for the list of views. */
@@ -206,6 +206,90 @@ const ViewList = ({ graph, mode, close }: { graph: string; mode: Mode; close: ()
             </span>
             {checked ? <Check className="grapher-view-option-check" /> : <span className="grapher-view-option-check" />}
           </button>
+        )
+      })}
+    </div>
+  )
+}
+
+/** Under the view header: the profile the focused tab shows (its view's icon and name) and a button for a new one. */
+const ProfileBar = ({ tab, profile, open, toggle }: { tab: string; profile: string; open: boolean; toggle: () => void }): ReactElement => {
+  const store = getStore()
+  const { document } = useGrapher()
+  const Icon = viewOf(graphOf(document, profile).mode).icon
+  const name = store.profileName(profile)
+  return (
+    <div className="grapher-profile-bar">
+      <button type="button" className="grapher-view-picker grapher-profile-picker" aria-expanded={open} aria-label={uiText('profile.choose', { name })} onClick={toggle}>
+        <Icon className="grapher-view-icon" />
+        <span className="grapher-view-name">{name}</span>
+        <ChevronDown className="grapher-view-chevron" />
+      </button>
+      <span className="grapher-header-spacer" />
+      <button
+        type="button"
+        className="grapher-profile-action"
+        aria-label={uiText('profile.add')}
+        title={uiText('profile.add')}
+        disabled={!store.canAddProfile()}
+        onClick={() => store.createProfile(tab, graphOf(document, profile).mode)}
+      >
+        <Plus />
+      </button>
+    </div>
+  )
+}
+
+/** Every profile in place of the expressions: pick one for the focused tab, rename it inline, duplicate or delete it. */
+const ProfileList = ({ tab, profile, close }: { tab: string; profile: string; close: () => void }): ReactElement => {
+  const store = getStore()
+  const { document } = useGrapher()
+  const [renaming, setRenaming] = React.useState<string | null>(null)
+  const ids = profileIds(document)
+  const last = ids.length < 2
+  return (
+    <div className="grapher-views" role="radiogroup" aria-label={uiText('profile.list')} onKeyDown={(event) => { if (event.key === 'Escape' && !renaming) { event.preventDefault(); close() } }}>
+      {ids.map((id) => {
+        const Icon = viewOf(graphOf(document, id).mode).icon
+        const name = store.profileName(id)
+        const checked = id === profile
+        return (
+          <div key={id} className="grapher-profile-row">
+            {renaming === id ? (
+              <input
+                className="grapher-profile-name-field"
+                defaultValue={name}
+                maxLength={MAX_NAME}
+                aria-label={uiText('profile.nameField', { name })}
+                spellCheck={false}
+                autoComplete="off"
+                ref={(input) => { if (input && input.ownerDocument.activeElement !== input) { input.focus(); input.select() } }}
+                onBlur={(event) => { store.renameProfile(id, event.currentTarget.value); setRenaming(null) }}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') event.currentTarget.blur()
+                  else if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); event.currentTarget.value = name; setRenaming(null) }
+                }}
+              />
+            ) : (
+              <button
+                type="button"
+                role="radio"
+                aria-checked={checked}
+                className={checked ? 'grapher-view-option grapher-profile-option active' : 'grapher-view-option grapher-profile-option'}
+                onClick={() => { store.setTabProfile(tab, id); close() }}
+              >
+                <Icon className="grapher-view-option-icon" />
+                <span className="grapher-view-option-text">
+                  <span className="grapher-view-option-name">{name}</span>
+                  <span className="grapher-view-option-hint">{uiText(`mode.${graphOf(document, id).mode}`)}</span>
+                </span>
+                {checked ? <Check className="grapher-view-option-check" /> : <span className="grapher-view-option-check" />}
+              </button>
+            )}
+            <button type="button" className="grapher-profile-action" aria-label={uiText('profile.rename', { name })} title={uiText('profile.rename', { name })} onClick={() => setRenaming(id)}><Pencil /></button>
+            <button type="button" className="grapher-profile-action" aria-label={uiText('profile.duplicate', { name })} title={uiText('profile.duplicate', { name })} disabled={!store.canAddProfile()} onClick={() => store.duplicateProfile(tab, id)}><Copy /></button>
+            <button type="button" className="grapher-profile-action" aria-label={uiText('profile.delete', { name })} title={uiText(last ? 'profile.lastOne' : 'profile.delete', { name })} disabled={last} onClick={() => store.deleteProfile(id)}><Trash /></button>
+          </div>
         )
       })}
     </div>
@@ -846,13 +930,15 @@ const ExpressionRow = (props: RowProps): ReactElement => {
 /** Left sidebar: the focused graph's view button, axis labels and open button in the 38px header, then its expressions. */
 export const Sidebar = (): ReactElement => {
   const store = getStore()
-  const { loaded, document, active, engine, problems } = useGrapher()
+  const { loaded, document, active, tab, engine, problems } = useGrapher()
   const graph = graphOf(document, active)
   const mode = graph.mode
   const rows = graph.sheets[mode]
   const units = unitsOf(graph, mode)
   const [choosing, setChoosing] = React.useState(false)
+  const [profiling, setProfiling] = React.useState(false)
   React.useEffect(() => setChoosing(false), [active])
+  React.useEffect(() => setProfiling(false), [tab])
   const analyses = React.useMemo(() => (engine ? engine.analyze(mode, rows) : []), [engine, mode, rows])
   const editRow = (id: string) => (change: (row: Row) => Row): void => {
     store.updateRows(active, mode, (current) => current.map((row) => (row.id === id ? change(row) : row)))
@@ -925,7 +1011,7 @@ export const Sidebar = (): ReactElement => {
   return (
     <div className="grapher-panel">
       <div className="panel-header grapher-header">
-        <ViewButton mode={mode} open={choosing} toggle={() => setChoosing((open) => !open)} />
+        <ViewButton mode={mode} open={choosing} toggle={() => { setProfiling(false); setChoosing((open) => !open) }} />
         <span className="grapher-header-spacer" />
         {!choosing ? <UnitsSwitch graph={active} mode={mode} units={units} /> : null}
         <button
@@ -933,17 +1019,20 @@ export const Sidebar = (): ReactElement => {
           className="plugin-open-page"
           onClick={(event) => {
             if (api.ui.hasModKey(event)) openNewGraph(mode)
-            else api.workspace.openMainTab({ instanceId: active === MAIN_GRAPH ? store.forkGraph(MAIN_GRAPH) : active, title: uiText('graph.title') })
+            else api.workspace.openMainTab({ instanceId: tab === MAIN_GRAPH ? store.tabFor(active) : tab, title: store.profileName(active) })
           }}
           aria-label={uiText('graph.open')}
           title={uiText('graph.open')}
         />
       </div>
-      {loaded && !choosing ? <InsertBar graph={active} mode={mode} /> : null}
+      {loaded ? <ProfileBar tab={tab} profile={active} open={profiling} toggle={() => { setChoosing(false); setProfiling((open) => !open) }} /> : null}
+      {loaded && !choosing && !profiling ? <InsertBar graph={active} mode={mode} /> : null}
       {problems.filter((problem) => problem.key !== 'problem.engine').map((problem) => (
         <p key={problem.key} role="alert" className="grapher-alert">{uiText(problem.key, { message: problem.message })}</p>
       ))}
-      {loaded && choosing ? (
+      {loaded && profiling ? (
+        <ProfileList tab={tab} profile={active} close={() => setProfiling(false)} />
+      ) : loaded && choosing ? (
         <ViewList graph={active} mode={mode} close={() => setChoosing(false)} />
       ) : loaded ? (
         <div
@@ -975,7 +1064,7 @@ export const Sidebar = (): ReactElement => {
           {showMarker ? <div className="grapher-drop-marker" style={{ top: drag.marker }} aria-hidden /> : null}
           <p className="grapher-hint">
             {uiText('hint.short')}{' '}
-            <button type="button" className="grapher-hint-link" onClick={() => api.workspace.showProperties(active === MAIN_GRAPH ? store.forkGraph(MAIN_GRAPH) : active, { segmentId: REFERENCE_SEGMENT })}>{uiText('hint.open')}</button>
+            <button type="button" className="grapher-hint-link" onClick={() => api.workspace.showProperties(tab === MAIN_GRAPH ? store.tabFor(active) : tab, { segmentId: REFERENCE_SEGMENT })}>{uiText('hint.open')}</button>
           </p>
         </div>
       ) : (

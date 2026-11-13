@@ -44,7 +44,7 @@ const degrees = (radians: number): string => `${formatNumber((radians * 180) / M
 /** The Info rows of one graph tab; a row without text is left out by the host. */
 export function graphDetails(store: GrapherStore, instanceId: string | undefined): WorkspaceDetailsSnapshot {
   const { document, engine } = store.getSnapshot()
-  const id = instanceId || MAIN_GRAPH
+  const id = store.profileOf(instanceId || MAIN_GRAPH)
   const graph = graphOf(document, id)
   const mode = graph.mode
   const view = viewOf(mode)

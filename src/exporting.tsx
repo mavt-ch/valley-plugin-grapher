@@ -105,10 +105,10 @@ export function provideGraphSurface(pluginApi: ValleyPluginApi, store: GrapherSt
     id: 'grapher.main_workspace',
     surface: 'main_workspace',
     getSnapshot: (instanceId) => {
-      const graph = instanceId || MAIN_GRAPH
+      const graph = store.profileOf(instanceId || MAIN_GRAPH)
       // The tab shows the icon of the view the graph is on (the host draws the view's own SVG shapes).
       const visual = { kind: 'icon', src: iconSource(viewOf(store.graph(graph).mode).icon) } as unknown as UiVisual
-      return { title: uiText('graph.title'), visual, view: { mode: store.graph(graph).mode }, actions: exportActions(graph) }
+      return { title: store.profileName(graph), visual, view: { mode: store.graph(graph).mode }, actions: exportActions(graph) }
     },
     subscribe: (listener) => {
       const offs = [store.subscribe(listener), subscribeExporters(listener), pluginApi.ui.onLanguageChanged(listener)]
@@ -116,7 +116,7 @@ export function provideGraphSurface(pluginApi: ValleyPluginApi, store: GrapherSt
     },
     restore: (state, instanceId) => {
       const mode = state.mode
-      if (typeof mode === 'string' && MODES.includes(mode as Mode)) store.setMode(instanceId || MAIN_GRAPH, mode as Mode)
+      if (typeof mode === 'string' && MODES.includes(mode as Mode)) store.setMode(store.profileOf(instanceId || MAIN_GRAPH), mode as Mode)
     }
   })
 }

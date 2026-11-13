@@ -85,6 +85,21 @@ const CSS = `
 .grapher-ref-example:disabled { color:var(--text-tertiary); cursor:default; }
 .grapher-ref-example:focus-visible { outline:2px solid var(--accent-color); outline-offset:-2px; }
 
+/* The profile bar under the view header: one 38px row, then the profile list in place of the rows when open. */
+.grapher-profile-bar { display:flex; align-items:center; gap:2px; flex:0 0 var(--app-bar-height); height:var(--app-bar-height);
+  box-sizing:border-box; padding:0 var(--space-2); border-bottom:1px solid var(--border-light); }
+.grapher-profile-picker { max-width:calc(100% - 32px); }
+.grapher-profile-action { display:inline-flex; align-items:center; justify-content:center; flex:0 0 26px; width:26px; height:26px; padding:0;
+  border:none; border-radius:var(--radius-sm); background:transparent; color:var(--text-secondary); cursor:pointer;
+  transition:background-color var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out); }
+.grapher-profile-action svg { width:15px; height:15px; }
+.grapher-profile-action:hover:not(:disabled) { background:var(--hover-bg); color:var(--text-color); }
+.grapher-profile-action:disabled { opacity:0.4; cursor:default; }
+.grapher-profile-row { display:flex; align-items:center; gap:2px; }
+.grapher-profile-option { flex:1 1 auto; min-width:0; }
+.grapher-profile-name-field { flex:1 1 auto; min-width:0; height:36px; padding:0 10px; box-sizing:border-box; border:1px solid var(--accent-color);
+  border-radius:var(--radius-sm); background:transparent; color:var(--text-color); font:inherit; font-size:var(--smaller-font-size); outline:none; }
+
 .grapher-alert { flex:0 0 auto; margin:0; padding:var(--space-2) var(--space-3); border-bottom:1px solid var(--border-light);
   background:var(--danger-tint-bg); color:var(--danger-tint-text); font-size:var(--smaller-font-size); overflow-wrap:anywhere; }
 
@@ -286,7 +301,7 @@ button.grapher-handle:hover { color:var(--text-color); }
 .grapher-zoom-button:focus-visible { outline:2px solid var(--accent-color); outline-offset:2px; }
 
 @media (prefers-reduced-motion: reduce) {
-  .grapher-view-picker, .grapher-view-option, .grapher-unit, .grapher-insert, .grapher-ref-all, .grapher-ref-heading, .grapher-ref-chevron, .grapher-ref-example, .grapher-swatch, .grapher-delete, .grapher-grip-icon, .grapher-handle .grapher-index, .grapher-zoom-button, .grapher-play-options svg { transition:none; }
+  .grapher-view-picker, .grapher-view-option, .grapher-unit, .grapher-insert, .grapher-profile-action, .grapher-ref-all, .grapher-ref-heading, .grapher-ref-chevron, .grapher-ref-example, .grapher-swatch, .grapher-delete, .grapher-grip-icon, .grapher-handle .grapher-index, .grapher-zoom-button, .grapher-play-options svg { transition:none; }
 }
 `
 

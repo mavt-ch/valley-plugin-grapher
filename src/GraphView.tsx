@@ -5,7 +5,7 @@ import { NOTICE_SECONDS, onExportNotice, registerExporter, renderPng, renderSvg,
 import { MARKER, type Marker, type PlotEngine, type RowAnalysis, type SamplePath, type Viewport } from './engine'
 import { Fit, Minus, Plus } from './icons'
 import { uiText } from './localization'
-import { MAIN_GRAPH, graphOf, unitsOf, type AxisUnits, type Row } from './model'
+import { MAIN_GRAPH, graphOf, profileOf, unitsOf, type AxisUnits, type Row } from './model'
 import { cameraKey, getStore, useGrapher } from './store'
 import { noteCanvas } from './details'
 import { SpaceCanvas } from './Space'
@@ -432,9 +432,11 @@ export const GraphCanvas = ({ view: plane, units, rows, analyses, engine, graph 
 
 /** A main-workspace tab: its own graph (the main one without an instance id), edited in the sidebar while focused. */
 export const GraphTab = ({ instanceId }: { instanceId?: string }): ReactElement => {
-  const id = instanceId || MAIN_GRAPH
+  const tab = instanceId || MAIN_GRAPH
   const { loaded, document, engine, problems } = useGrapher()
-  React.useEffect(() => { if (loaded) getStore().ensureGraph(id) }, [loaded, id])
+  React.useEffect(() => { if (loaded) getStore().ensureGraph(tab) }, [loaded, tab])
+  // The tab shows the profile chosen for it in the sidebar, else its own graph.
+  const id = profileOf(document, tab)
   const graph = graphOf(document, id)
   const mode = graph.mode
   const view = viewOf(mode)

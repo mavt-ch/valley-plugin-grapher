@@ -219,5 +219,15 @@
   "details.cubeRange": "x, y, z {{range}}",
   "details.cameraAngles": "Drehung {{yaw}}, Neigung {{pitch}}",
   "ref.expandAll": "Alle Gruppen aufklappen",
-  "ref.collapseAll": "Alle Gruppen zuklappen"
+  "ref.collapseAll": "Alle Gruppen zuklappen",
+  "profile.choose": "Profil: {{name}}",
+  "profile.add": "Neues Profil",
+  "profile.list": "Profile",
+  "profile.default": "Graph {{n}}",
+  "profile.copyName": "{{name}} Kopie",
+  "profile.rename": "{{name}} umbenennen",
+  "profile.nameField": "Name von {{name}}",
+  "profile.duplicate": "{{name}} duplizieren",
+  "profile.delete": "{{name}} löschen",
+  "profile.lastOne": "Das letzte Profil kann nicht gelöscht werden"
 }

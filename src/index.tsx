@@ -34,7 +34,7 @@ export function register(api: ValleyPluginApi): () => Promise<void> {
   // The reference is Grapher's tab in the right sidebar's Properties while a graph tab is focused.
   const offReference = api.interop.extensions.provide(METADATA_PANEL_SEGMENT_V1, {
     id: REFERENCE_SEGMENT, label: 'Reference', labelKey: 'ref.tab', icon: 'sticky-note', pluginSurfaces: ['main_workspace'],
-    render: (context) => React.createElement(Reference, { graph: context.tab?.instanceId ?? context.subject?.instanceId })
+    render: (context) => React.createElement(Reference, { graph: store.profileOf(context.tab?.instanceId ?? context.subject?.instanceId ?? store.getSnapshot().tab) })
   })
   let disposal: Promise<void> | undefined
   return () => {

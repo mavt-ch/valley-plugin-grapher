@@ -219,5 +219,15 @@
   "details.cubeRange": "x、y、z {{range}}",
   "details.cameraAngles": "偏航 {{yaw}}，俯仰 {{pitch}}",
   "ref.expandAll": "展开所有分组",
-  "ref.collapseAll": "折叠所有分组"
+  "ref.collapseAll": "折叠所有分组",
+  "profile.choose": "配置：{{name}}",
+  "profile.add": "新建配置",
+  "profile.list": "配置",
+  "profile.default": "图形 {{n}}",
+  "profile.copyName": "{{name}} 副本",
+  "profile.rename": "重命名 {{name}}",
+  "profile.nameField": "{{name}} 的名称",
+  "profile.duplicate": "复制 {{name}}",
+  "profile.delete": "删除 {{name}}",
+  "profile.lastOne": "无法删除最后一个配置"
 }

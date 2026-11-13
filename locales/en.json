@@ -234,5 +234,11 @@
   "profile.duplicateItem": "Duplicate",
   "profile.deleteItem": "Delete",
   "profile.more": "More for {{name}}",
-  "profile.drag": "Drag to reorder {{name}}"
+  "profile.drag": "Drag to reorder {{name}}",
+  "notes.tab": "Notes",
+  "notes.placeholder": "Notes for {{name}} in Markdown …",
+  "notes.label": "Notes for {{name}}",
+  "notes.preview": "Show as Markdown",
+  "notes.edit": "Edit the notes",
+  "notes.empty": "No notes yet"
 }

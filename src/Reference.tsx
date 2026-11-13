@@ -2,7 +2,7 @@ import { React } from './runtime'
 import type { ReactElement } from 'react'
 import { ChevronDown, CollapseAll, ExpandAll, Search, X } from './icons'
 import { uiText } from './localization'
-import { MAIN_GRAPH, MODES, createRow, filled, graphOf, type Mode } from './model'
+import { MAIN_GRAPH, MODES, createRow, filled, graphOf, profileOf, type Mode } from './model'
 import { insertTemplate, takesTables } from './Sidebar'
 import { useGrapher } from './store'
 
@@ -97,9 +97,9 @@ export const REFERENCE_SEGMENT = 'grapher.reference'
  * matching entries of every group. An example the view's kernel accepts (with the sheet's own rows, so f′(x) needs an f)
  * inserts itself into the empty last row of that graph.
  */
-export const Reference = ({ graph: described }: { graph?: string }): ReactElement => {
+export const Reference = ({ tab }: { tab?: string }): ReactElement => {
   const { loaded, document, active, engine } = useGrapher()
-  const id = described ?? active
+  const id = tab ? profileOf(document, tab) : active
   const graph = graphOf(document, id)
   const mode = graph.mode
   const rows = graph.sheets[mode]

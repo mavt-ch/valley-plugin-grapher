@@ -240,3 +240,39 @@ describe('profile icons', () => {
     expect(next.cameras['main:space']).toEqual({ yaw: 0.5, pitch: 0.25, range: 8 })
   })
 })
+
+describe('profile notes', () => {
+  it('keeps one Markdown note per profile, switches with the profile and survives a restart', async () => {
+    const old = { ...defaultDocument(), graphs: { 'g-a': defaultGraph('polar') } }
+    const mock = createMockValleyApi({ manifest: declared, wasm: { modules: [module] }, files: { [FILE]: JSON.stringify(old) } })
+    vi.spyOn(mock.api.workspace, 'getOpenMainTabs').mockReturnValue([])
+    const provide = vi.spyOn(mock.api.interop.extensions, 'provide')
+    disposers.push(plugin.register(mock.api))
+    render(<Sidebar />)
+    await screen.findByRole('button', { name: 'Profile: Graph 1' })
+    const segment = provide.mock.calls.map(([, value]) => value as { id?: string; icon?: string; pluginSurfaces?: string[]; render?: (context: unknown) => React.ReactNode }).find((value) => value.id === 'grapher.notes')!
+    expect(segment).toMatchObject({ icon: 'text-align-left', pluginSurfaces: ['main_workspace'] })
+    const notes = render(<>{segment.render!({ relPath: '', kind: 'unsupported', tab: { pluginId: 'grapher' } })}</>)
+    const field = (): HTMLTextAreaElement => within(notes.container).getByRole('textbox', { name: /^Notes for / }) as HTMLTextAreaElement
+    expect(field().value).toBe('')
+    expect(field().placeholder).toBe('Notes for Graph 1 in Markdown …')
+    fireEvent.change(field(), { target: { value: '# Parabola\n\n- vertex at (0, -2)' } })
+    fireEvent.blur(field())
+    act(() => getStore().setTabProfile('main', 'g-a'))
+    expect(field().value).toBe('')
+    fireEvent.change(field(), { target: { value: 'polar *rose*' } })
+    act(() => getStore().setTabProfile('main', 'main'))
+    expect(field().value).toBe('# Parabola\n\n- vertex at (0, -2)')
+    await getStore().flush()
+    const saved = JSON.parse(await mock.api.data.files.readText('graphs.json') ?? '{}') as { notes: Record<string, string>; names: Record<string, string>; icons: Record<string, string> }
+    expect(saved.notes).toEqual({ main: '# Parabola\n\n- vertex at (0, -2)', 'g-a': 'polar *rose*' })
+    expect(saved.names).toEqual({ main: 'Graph 1', 'g-a': 'Graph 2' })
+    expect(saved.icons).toEqual({ main: 'cup', 'g-a': 'cat' })
+    fireEvent.click(within(notes.container).getByRole('button', { name: 'Show as Markdown' }))
+    expect(within(notes.container).queryByRole('textbox')).toBeNull()
+    fireEvent.click(within(notes.container).getByRole('button', { name: 'Edit the notes' }))
+    expect(field().value).toBe('# Parabola\n\n- vertex at (0, -2)')
+    const css = document.getElementById('grapher-styles')?.textContent ?? ''
+    expect(css).toContain('.grapher-notes-field, .grapher-notes-field:is(:hover, :focus, :focus-visible) {')
+  })
+})

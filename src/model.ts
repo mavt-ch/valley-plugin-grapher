@@ -87,6 +87,8 @@ export interface GrapherDocument extends Graph {
   names?: Record<string, string>
   /** The profile a tab shows, by tab instance id, where it is not the tab's own graph. */
   tabs?: Record<string, string>
+  /** Each profile's Markdown note, as written. */
+  notes?: Record<string, string>
   /** The order of the profile list, by graph id; profiles not listed follow in creation order. */
   order?: string[]
   /** Each profile's chosen icon: a file name (without `.svg`) in `.valley/assets/icons/grapher-icon/`. */
@@ -164,6 +166,8 @@ export function graphOf(document: GrapherDocument, id: string): Graph {
 
 /** The longest profile name kept. */
 export const MAX_NAME = 80
+/** The longest profile note kept, in characters. */
+export const MAX_NOTE = 200_000
 
 /** Every profile id, `main` first, the others in creation order. */
 export function profileIds(document: GrapherDocument): string[] {
@@ -337,7 +341,7 @@ function normalizeGraph(record: { mode?: unknown; sheets?: unknown; units?: unkn
 /** Reads a stored `graphs.json`; throws when it is not a Grapher document, so the caller never overwrites it. */
 export function normalizeDocument(value: unknown): GrapherDocument {
   if (!value || typeof value !== 'object' || (value as { version?: unknown }).version !== 1) throw new Error('graphs.json is not a Grapher document (version 1).')
-  const record = value as { mode?: unknown; sheets?: unknown; units?: unknown; graphs?: unknown; names?: unknown; tabs?: unknown; icons?: unknown; cameras?: unknown; order?: unknown }
+  const record = value as { mode?: unknown; sheets?: unknown; units?: unknown; graphs?: unknown; names?: unknown; tabs?: unknown; icons?: unknown; cameras?: unknown; order?: unknown; notes?: unknown }
   const stored = (record.graphs && typeof record.graphs === 'object' && !Array.isArray(record.graphs) ? record.graphs : {}) as Record<string, unknown>
   const graphs: Record<string, Graph> = {}
   for (const [id, graph] of Object.entries(stored).slice(0, MAX_GRAPHS)) {
@@ -356,7 +360,9 @@ export function normalizeDocument(value: unknown): GrapherDocument {
   const cameras = Object.fromEntries(Object.entries(record.cameras && typeof record.cameras === 'object' ? record.cameras as Record<string, unknown> : {})
     .filter((entry): entry is [string, Record<string, number>] => known(entry[0].slice(0, entry[0].lastIndexOf(':'))) && MODES.includes(entry[0].slice(entry[0].lastIndexOf(':') + 1) as Mode) && cameraFields(entry[1])))
   const order = Array.isArray(record.order) ? record.order.filter((id): id is string => typeof id === 'string' && known(id)).slice(0, MAX_GRAPHS + 1) : []
-  return { version: 1, ...normalizeGraph(record), graphs, ...(order.length ? { order } : {}), ...(Object.keys(names).length ? { names } : {}), ...(Object.keys(tabs).length ? { tabs } : {}), ...(Object.keys(icons).length ? { icons } : {}), ...(Object.keys(cameras).length ? { cameras } : {}) }
+  const notes = Object.fromEntries(Object.entries(record.notes && typeof record.notes === 'object' ? record.notes as Record<string, unknown> : {})
+    .filter((entry): entry is [string, string] => known(entry[0]) && typeof entry[1] === 'string' && entry[1] !== '' && entry[1].length <= MAX_NOTE))
+  return { version: 1, ...normalizeGraph(record), graphs, ...(order.length ? { order } : {}), ...(Object.keys(notes).length ? { notes } : {}), ...(Object.keys(names).length ? { names } : {}), ...(Object.keys(tabs).length ? { tabs } : {}), ...(Object.keys(icons).length ? { icons } : {}), ...(Object.keys(cameras).length ? { cameras } : {}) }
 }
 
 /** The range variable of a row: θ for polar curves, t for plane and space curves. */

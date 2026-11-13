@@ -234,5 +234,11 @@
   "profile.duplicateItem": "复制",
   "profile.deleteItem": "删除",
   "profile.more": "{{name}} 的更多操作",
-  "profile.drag": "拖动以重新排序 {{name}}"
+  "profile.drag": "拖动以重新排序 {{name}}",
+  "notes.tab": "笔记",
+  "notes.placeholder": "用 Markdown 为 {{name}} 写笔记 …",
+  "notes.label": "{{name}} 的笔记",
+  "notes.preview": "以 Markdown 显示",
+  "notes.edit": "编辑笔记",
+  "notes.empty": "还没有笔记"
 }

@@ -234,5 +234,11 @@
   "profile.duplicateItem": "Dupliquer",
   "profile.deleteItem": "Supprimer",
   "profile.more": "Plus pour {{name}}",
-  "profile.drag": "Glisser pour réordonner {{name}}"
+  "profile.drag": "Glisser pour réordonner {{name}}",
+  "notes.tab": "Notes",
+  "notes.placeholder": "Notes sur {{name}} en Markdown …",
+  "notes.label": "Notes sur {{name}}",
+  "notes.preview": "Afficher en Markdown",
+  "notes.edit": "Modifier les notes",
+  "notes.empty": "Pas encore de notes"
 }

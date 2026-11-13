@@ -234,5 +234,11 @@
   "profile.duplicateItem": "Duplizieren",
   "profile.deleteItem": "Löschen",
   "profile.more": "Mehr für {{name}}",
-  "profile.drag": "{{name}} zum Umordnen ziehen"
+  "profile.drag": "{{name}} zum Umordnen ziehen",
+  "notes.tab": "Notizen",
+  "notes.placeholder": "Notizen zu {{name}} in Markdown …",
+  "notes.label": "Notizen zu {{name}}",
+  "notes.preview": "Als Markdown anzeigen",
+  "notes.edit": "Notizen bearbeiten",
+  "notes.empty": "Noch keine Notizen"
 }

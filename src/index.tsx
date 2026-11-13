@@ -14,6 +14,7 @@ import { injectStyles } from './styles'
 import { Sidebar, openNewGraph } from './Sidebar'
 import { GraphTab } from './GraphView'
 import { REFERENCE_SEGMENT, Reference } from './Reference'
+import { NOTES_SEGMENT, Notes } from './Notes'
 import { getStore } from './store'
 import { provideGraphSurface } from './exporting'
 import { provideGraphDetails } from './details'
@@ -31,10 +32,15 @@ export function register(api: ValleyPluginApi): () => Promise<void> {
   const offSurface = provideGraphSurface(api, store)
   // Info rows of the focused graph tab in Properties.
   const offDetails = provideGraphDetails(api, store)
+  // Beside it, the profile's Markdown notes.
+  const offNotes = api.interop.extensions.provide(METADATA_PANEL_SEGMENT_V1, {
+    id: NOTES_SEGMENT, label: 'Notes', labelKey: 'notes.tab', icon: 'text-align-left', pluginSurfaces: ['main_workspace'],
+    render: (context) => React.createElement(Notes, { tab: context.tab?.instanceId ?? context.subject?.instanceId })
+  })
   // The reference is Grapher's tab in the right sidebar's Properties while a graph tab is focused.
   const offReference = api.interop.extensions.provide(METADATA_PANEL_SEGMENT_V1, {
     id: REFERENCE_SEGMENT, label: 'Reference', labelKey: 'ref.tab', icon: 'sticky-note', pluginSurfaces: ['main_workspace'],
-    render: (context) => React.createElement(Reference, { graph: store.profileOf(context.tab?.instanceId ?? context.subject?.instanceId ?? store.getSnapshot().tab) })
+    render: (context) => React.createElement(Reference, { tab: context.tab?.instanceId ?? context.subject?.instanceId })
   })
   let disposal: Promise<void> | undefined
   return () => {
@@ -43,6 +49,7 @@ export function register(api: ValleyPluginApi): () => Promise<void> {
     offSurface()
     offReference()
     offDetails()
+    offNotes()
     disposal = store.flush().catch(() => {}).finally(() => {
       store.dispose()
       disposeStyles()

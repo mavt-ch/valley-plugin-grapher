@@ -131,6 +131,17 @@ const CSS = `
 .grapher-profile-name-field { flex:1 1 auto; min-width:0; height:24px; padding:0 4px; box-sizing:border-box; border:none; border-radius:var(--radius-sm);
   background:transparent; color:var(--text-color); font:inherit; font-weight:500; outline:none; box-shadow:none; }
 
+.grapher-notes-bar { display:flex; align-items:center; gap:6px; flex:0 0 var(--app-bar-height); height:var(--app-bar-height);
+  box-sizing:border-box; padding:0 var(--space-2) 0 var(--space-3); border-bottom:1px solid var(--border-light); }
+.grapher-notes-icon { width:15px; height:15px; flex:0 0 15px; color:var(--text-secondary); }
+.grapher-notes-title { min-width:0; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; font-size:var(--smaller-font-size); font-weight:500; color:var(--text-color); }
+.grapher-notes-field, .grapher-notes-field:is(:hover, :focus, :focus-visible) { flex:1 1 auto; min-height:0; width:100%; box-sizing:border-box; margin:0;
+  padding:var(--space-3); border:none; outline:none; box-shadow:none; background:transparent; resize:none; color:var(--text-color);
+  font:inherit; font-size:var(--smaller-font-size); line-height:1.55; }
+.grapher-notes-field::placeholder { color:var(--text-tertiary); }
+.grapher-notes-preview { flex:1 1 auto; min-height:0; overflow-y:auto; padding:var(--space-3); font-size:var(--smaller-font-size); }
+.grapher-notes-empty { margin:0; color:var(--text-tertiary); }
+
 .grapher-alert { flex:0 0 auto; margin:0; padding:var(--space-2) var(--space-3); border-bottom:1px solid var(--border-light);
   background:var(--danger-tint-bg); color:var(--danger-tint-text); font-size:var(--smaller-font-size); overflow-wrap:anywhere; }
 

@@ -237,3 +237,17 @@ describe('the Info rows', () => {
     expect(space.camera.text).toBe('yaw 45°, pitch 30°')
   })
 })
+
+describe('the row input', () => {
+  it('shows no focus ring, overriding the host base sheet', async () => {
+    mount()
+    render(<Sidebar />)
+    await screen.findByRole('toolbar', { name: 'Insert' })
+    const css = document.getElementById('grapher-styles')?.textContent ?? ''
+    expect(css).toContain('.grapher-panel .grapher-input:is(:focus, :focus-visible) { outline:none; border:none; box-shadow:none; background:transparent; }')
+    const row = input(1)
+    act(() => row.focus())
+    expect(getComputedStyle(row).outlineStyle === '' || getComputedStyle(row).outlineStyle === 'none').toBe(true)
+  })
+})
+

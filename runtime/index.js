@@ -124,6 +124,10 @@ button.grapher-handle:hover { color:var(--text-color); }
 .grapher-input { box-sizing:border-box; width:100%; min-width:0; height:24px; margin:0; padding:0 2px; border:none; outline:none;
   background:transparent; color:var(--text-color); font-family:var(--mono-font); font-size:0.8125rem; }
 .grapher-input::placeholder { color:var(--text-tertiary); }
+/* The row field is borderless: the caret is its only focus sign. The host's base sheet rings every focused input
+   (':root :where(input\u2026):focus-visible', also after a programmatic focus such as an insert-bar click), so it is undone here. */
+.grapher-panel .grapher-input:is(:focus, :focus-visible) { outline:none; border:none; box-shadow:none; background:transparent; }
+.grapher-panel .grapher-bound:is(:focus, :focus-visible) { outline:none; box-shadow:none; }
 
 /* A row not being edited shows its typeset form; the transparent input lies on top, so a click edits it. */
 .grapher-field { position:relative; min-width:0; }

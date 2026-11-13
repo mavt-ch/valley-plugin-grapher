@@ -1,16 +1,12 @@
 import { api } from './runtime'
-import { CubeIcon, FunctionIcon, GridIcon, SigmaIcon, SphereIcon2, WaveIcon, iconSource } from './icons'
-import { VIEWS } from './views'
+import { PROFILE_ICONS } from './profileIconSet'
 
 /** The icon folder as the user sees it in the realm. */
 export const PROFILE_ICON_FOLDER = '.valley/assets/icons/grapher-icon'
 
-const EXTRAS = { function: FunctionIcon, wave: WaveIcon, grid: GridIcon, sigma: SigmaIcon, cube: CubeIcon, sphere: SphereIcon2 }
-
-/** The bundled icons as SVG files: the eight view icons by view id, then a few neutral ones. */
+/** The bundled icons as SVG files: everyday objects and animals (`src/profileIconSet.ts`). */
 export function defaultIcons(): Record<string, string> {
-  const svg = (source: string): string => decodeURIComponent(source.slice('data:image/svg+xml,'.length))
-  return Object.fromEntries([...VIEWS.map((view) => [view.id, svg(iconSource(view.icon))]), ...Object.entries(EXTRAS).map(([name, icon]) => [name, svg(iconSource(icon))])])
+  return { ...PROFILE_ICONS }
 }
 
 interface Registry { icons: Record<string, string>; listeners: Set<() => void>; pending: Promise<void> | null; loaded: boolean }
@@ -48,6 +44,12 @@ export function subscribeProfileIcons(listener: () => void): () => void {
 
 /** An icon's SVG as a `data:` URI (for a CSS mask in the sidebar and the host-drawn tab icon), or null when it is missing. */
 export function profileIconSource(name: string | undefined): string | null {
-  const svg = name ? registry().icons[name] : undefined
+  const svg = name ? registry().icons[name] ?? PROFILE_ICONS[name] : undefined
   return svg ? `data:image/svg+xml,${encodeURIComponent(svg)}` : null
+}
+
+/** The icon names the folder holds, once it has been listed (null before). */
+export function availableProfileIcons(): ReadonlySet<string> | null {
+  const current = registry()
+  return current.loaded && Object.keys(current.icons).length ? new Set(Object.keys(current.icons)) : null
 }

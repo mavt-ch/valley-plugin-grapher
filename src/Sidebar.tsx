@@ -3,7 +3,7 @@ import type { ChangeEvent, ClipboardEvent, KeyboardEvent, MouseEvent, PointerEve
 import { paletteCssValue, paletteRef } from '@valley/plugin-sdk/palette'
 import type { UiMenuItem } from '@valley/plugin-sdk'
 import type { RowAnalysis } from './engine'
-import { Check, ChevronDown, Copy, Eye, EyeOff, Grip, Pause, Pencil, Play, Plus, Slider, TableIcon, Trash, Warning, X } from './icons'
+import { Check, ChevronDown, Copy, Eye, EyeOff, Grip, More, Pause, Pencil, Play, Plus, Slider, Smile, TableIcon, Trash, Warning, X } from './icons'
 import { SliderAnimator, snap, startMotion } from './animate'
 import { uiText } from './localization'
 import { MathText } from './MathText'
@@ -213,7 +213,8 @@ const ViewList = ({ graph, mode, close }: { graph: string; mode: Mode; close: ()
   )
 }
 
-/** A profile's icon: the SVG chosen from the icon folder, drawn in the text colour, else the icon of its view. */
+/** A profile's icon: its SVG from the icon folder (or the bundled copy of it), drawn in the text colour; the view's icon
+ * only while a profile has none yet. */
 export const ProfileGlyph = ({ profile, className }: { profile: string; className: string }): ReactElement => {
   const { document } = useGrapher()
   React.useSyncExternalStore(subscribeProfileIcons, profileIconSvgs)
@@ -223,20 +224,17 @@ export const ProfileGlyph = ({ profile, className }: { profile: string; classNam
   return <Icon className={className} />
 }
 
-/** The icons of the folder in a compact grid; the first choice is the view's own icon. */
+/** The icons of the folder in a compact grid. */
 const IconPicker = ({ profile, close }: { profile: string; close: () => void }): ReactElement => {
   const store = getStore()
   const icons = React.useSyncExternalStore(subscribeProfileIcons, profileIconSvgs)
   const chosen = store.getSnapshot().document.icons?.[profile]
-  const pick = (icon: string | null): void => { store.setProfileIcon(profile, icon); close() }
-  const Icon = viewOf(store.graph(profile).mode).icon
   return (
     <div className="grapher-icon-grid" role="group" aria-label={uiText('profile.icons', { folder: PROFILE_ICON_FOLDER })}>
-      <button type="button" className="grapher-icon-choice" aria-pressed={!chosen} aria-label={uiText('profile.iconView')} title={uiText('profile.iconView')} onClick={() => pick(null)}><Icon /></button>
       {Object.keys(icons).sort((a, b) => a.localeCompare(b)).map((name) => {
         const source = profileIconSource(name)!
         return (
-          <button key={name} type="button" className="grapher-icon-choice" aria-pressed={chosen === name} aria-label={name} title={name} onClick={() => pick(name)}>
+          <button key={name} type="button" className="grapher-icon-choice" aria-pressed={chosen === name} aria-label={name} title={name} onClick={() => { store.setProfileIcon(profile, name); close() }}>
             <span className="grapher-profile-glyph" style={{ maskImage: `url("${source}")`, WebkitMaskImage: `url("${source}")` }} aria-hidden />
           </button>
         )
@@ -245,9 +243,9 @@ const IconPicker = ({ profile, close }: { profile: string; close: () => void }):
   )
 }
 
-const openIconPicker = (profile: string, anchor: HTMLElement): void => {
+const openIconPicker = (profile: string, target: { anchor: HTMLElement } | { x: number; y: number }): void => {
   void refreshProfileIcons()
-  void api.ui.openPopover(({ close }) => <IconPicker profile={profile} close={close} />, { anchor }, { className: 'grapher-icon-popover', ariaLabel: uiText('profile.icon', { name: getStore().profileName(profile) }) })
+  void api.ui.openPopover(({ close }) => <IconPicker profile={profile} close={close} />, target, { className: 'grapher-icon-popover', ariaLabel: uiText('profile.icon', { name: getStore().profileName(profile) }) })
 }
 
 /** Under the view header: the profile the focused tab shows (its icon and name) and a button for a new one. */
@@ -277,59 +275,124 @@ const ProfileBar = ({ tab, profile, open, toggle }: { tab: string; profile: stri
   )
 }
 
-/** Every profile in place of the expressions: pick one for the focused tab, rename it inline, duplicate or delete it. */
+/** Every profile in place of the expressions, one compact row each: the whole row picks it for the focused tab; the
+ * three dots (or a right-click) open Rename, Change icon, Duplicate and Delete. */
 const ProfileList = ({ tab, profile, close }: { tab: string; profile: string; close: () => void }): ReactElement => {
   const store = getStore()
   const { document } = useGrapher()
   const [renaming, setRenaming] = React.useState<string | null>(null)
   const ids = profileIds(document)
   const last = ids.length < 2
+  // Reordering by the grip, as the expression rows do: one marker at the midpoint of the gap nearest the pointer.
+  const listRef = React.useRef<HTMLDivElement>(null)
+  const dragRef = React.useRef<{ pointer: number; from: number; to: number } | null>(null)
+  const [drag, setDrag] = React.useState<{ from: number; to: number; marker: number } | null>(null)
+  const gapAt = (clientY: number): { gap: number; marker: number } | null => {
+    const rows = Array.from(listRef.current?.querySelectorAll<HTMLElement>('[data-profile]') ?? [])
+    if (!rows.length) return null
+    let gap = 0
+    rows.forEach((row, at) => {
+      const rect = row.getBoundingClientRect()
+      if (clientY > rect.top + rect.height / 2) gap = at + 1
+    })
+    const before = rows[gap - 1]
+    const after = rows[gap]
+    const marker = before && after ? (before.offsetTop + before.offsetHeight + after.offsetTop) / 2 : after ? after.offsetTop : before.offsetTop + before.offsetHeight
+    return { gap, marker }
+  }
+  const startDrag = (index: number) => (event: PointerEvent<HTMLButtonElement>): void => {
+    if (event.button !== 0) return
+    event.preventDefault()
+    event.currentTarget.setPointerCapture(event.pointerId)
+    const found = gapAt(event.clientY)
+    dragRef.current = { pointer: event.pointerId, from: index, to: index }
+    setDrag({ from: index, to: index, marker: found?.marker ?? 0 })
+  }
+  const moveDrag = (event: PointerEvent<HTMLDivElement>): void => {
+    const current = dragRef.current
+    if (!current || current.pointer !== event.pointerId) return
+    const found = gapAt(event.clientY)
+    if (!found) return
+    current.to = found.gap
+    setDrag({ from: current.from, to: found.gap, marker: found.marker })
+  }
+  const endDrag = (commit: boolean) => (event: PointerEvent<HTMLDivElement>): void => {
+    const current = dragRef.current
+    if (!current || current.pointer !== event.pointerId) return
+    dragRef.current = null
+    setDrag(null)
+    if (commit) store.moveProfile(current.from, current.to)
+  }
+  const showMarker = drag !== null && drag.to !== drag.from && drag.to !== drag.from + 1
+  const menu = (id: string, target: { anchor: HTMLElement } | { x: number; y: number }): void => {
+    const items: UiMenuItem[] = [
+      { id: 'rename', label: uiText('profile.renameItem'), icon: <Pencil />, onSelect: () => setRenaming(id) },
+      { id: 'icon', label: uiText('profile.iconItem'), icon: <Smile />, onSelect: () => openIconPicker(id, target) },
+      { id: 'duplicate', label: uiText('profile.duplicateItem'), icon: <Copy />, enabled: store.canAddProfile(), onSelect: () => store.duplicateProfile(tab, id) },
+      { type: 'separator' },
+      { id: 'delete', label: uiText('profile.deleteItem'), icon: <Trash />, danger: true, enabled: !last, ...(last ? { description: uiText('profile.lastOne') } : {}), onSelect: () => store.deleteProfile(id) }
+    ]
+    void api.ui.openMenu(items, target).catch(() => {})
+  }
   return (
-    <div className="grapher-views" role="radiogroup" aria-label={uiText('profile.list')} onKeyDown={(event) => { if (event.key === 'Escape' && !renaming) { event.preventDefault(); close() } }}>
-      {ids.map((id) => {
+    <div
+      ref={listRef}
+      className="grapher-views grapher-profiles"
+      role="radiogroup"
+      aria-label={uiText('profile.list')}
+      data-dragging={drag ? '' : undefined}
+      onKeyDown={(event) => { if (event.key === 'Escape' && !renaming) { event.preventDefault(); close() } }}
+      onPointerMove={moveDrag}
+      onPointerUp={endDrag(true)}
+      onPointerCancel={endDrag(false)}
+    >
+      {ids.map((id, index) => {
         const name = store.profileName(id)
         const checked = id === profile
         return (
-          <div key={id} className="grapher-profile-row">
-            <button type="button" className="grapher-profile-action grapher-profile-icon-button" aria-label={uiText('profile.icon', { name })} title={uiText('profile.icon', { name })} onClick={(event) => openIconPicker(id, event.currentTarget)}>
-              <ProfileGlyph profile={id} className="grapher-view-option-icon" />
+          <div
+            key={id}
+            className={checked ? 'grapher-profile-row active' : 'grapher-profile-row'}
+            data-profile={id}
+            data-dragging={drag?.from === index || undefined}
+            onContextMenu={(event) => { event.preventDefault(); menu(id, { x: event.clientX, y: event.clientY }) }}
+          >
+            <button type="button" className="grapher-profile-grip" tabIndex={-1} aria-label={uiText('profile.drag', { name })} title={uiText('profile.drag', { name })} onPointerDown={startDrag(index)}>
+              <Grip />
             </button>
             {renaming === id ? (
-              <input
-                className="grapher-profile-name-field"
-                defaultValue={name}
-                maxLength={MAX_NAME}
-                aria-label={uiText('profile.nameField', { name })}
-                spellCheck={false}
-                autoComplete="off"
-                ref={(input) => { if (input && input.ownerDocument.activeElement !== input) { input.focus(); input.select() } }}
-                onBlur={(event) => { store.renameProfile(id, event.currentTarget.value); setRenaming(null) }}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter') event.currentTarget.blur()
-                  else if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); event.currentTarget.value = name; setRenaming(null) }
-                }}
-              />
+              <span className="grapher-profile-item">
+                <ProfileGlyph profile={id} className="grapher-profile-item-icon" />
+                <input
+                  className="grapher-profile-name-field"
+                  defaultValue={name}
+                  maxLength={MAX_NAME}
+                  aria-label={uiText('profile.nameField', { name })}
+                  spellCheck={false}
+                  autoComplete="off"
+                  ref={(input) => { if (input && input.ownerDocument.activeElement !== input) { input.focus(); input.select() } }}
+                  onBlur={(event) => { store.renameProfile(id, event.currentTarget.value); setRenaming(null) }}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') event.currentTarget.blur()
+                    else if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); event.currentTarget.value = name; setRenaming(null) }
+                  }}
+                />
+              </span>
             ) : (
-              <button
-                type="button"
-                role="radio"
-                aria-checked={checked}
-                className={checked ? 'grapher-view-option grapher-profile-option active' : 'grapher-view-option grapher-profile-option'}
-                onClick={() => { store.setTabProfile(tab, id); close() }}
-              >
-                <span className="grapher-view-option-text">
-                  <span className="grapher-view-option-name">{name}</span>
-                  <span className="grapher-view-option-hint">{uiText(`mode.${graphOf(document, id).mode}`)}</span>
-                </span>
-                {checked ? <Check className="grapher-view-option-check" /> : <span className="grapher-view-option-check" />}
+              <button type="button" role="radio" aria-checked={checked} className="grapher-profile-item" onClick={() => { store.setTabProfile(tab, id); close() }}>
+                <ProfileGlyph profile={id} className="grapher-profile-item-icon" />
+                <span className="grapher-profile-item-name">{name}</span>
+                <span className="grapher-profile-item-view">{uiText(`mode.${graphOf(document, id).mode}`)}</span>
+                {checked ? <Check className="grapher-profile-item-check" /> : null}
               </button>
             )}
-            <button type="button" className="grapher-profile-action" aria-label={uiText('profile.rename', { name })} title={uiText('profile.rename', { name })} onClick={() => setRenaming(id)}><Pencil /></button>
-            <button type="button" className="grapher-profile-action" aria-label={uiText('profile.duplicate', { name })} title={uiText('profile.duplicate', { name })} disabled={!store.canAddProfile()} onClick={() => store.duplicateProfile(tab, id)}><Copy /></button>
-            <button type="button" className="grapher-profile-action" aria-label={uiText('profile.delete', { name })} title={uiText(last ? 'profile.lastOne' : 'profile.delete', { name })} disabled={last} onClick={() => store.deleteProfile(id)}><Trash /></button>
+            <button type="button" className="grapher-profile-more" aria-haspopup="menu" aria-label={uiText('profile.more', { name })} title={uiText('profile.more', { name })} onClick={(event) => menu(id, { anchor: event.currentTarget })}>
+              <More />
+            </button>
           </div>
         )
       })}
+      {showMarker ? <div className="grapher-drop-marker" style={{ top: drag.marker }} aria-hidden /> : null}
     </div>
   )
 }

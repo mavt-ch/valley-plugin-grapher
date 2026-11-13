@@ -2,8 +2,10 @@ import type { ValleyPluginApi } from '@valley/plugin-sdk'
 import type { FileBaseline } from '@valley/plugin-sdk/types'
 import { React, api } from './runtime'
 import { uiText } from './localization'
+import { PROFILE_ICON_ORDER } from './profileIconSet'
+import { availableProfileIcons, subscribeProfileIcons } from './profileIcons'
 import { loadPlotEngine, type Camera, type PlotEngine, type Viewport } from './engine'
-import { MAIN_GRAPH, MAX_GRAPHS, MAX_NAME, MODES, defaultDocument, defaultGraph, graphOf, nextName, normalizeDocument, profileIds, profileOf, rowId, withGraph, withNames, withTrailingRow, type AxisUnits, type Graph, type GrapherDocument, type Mode, type Row } from './model'
+import { MAIN_GRAPH, MAX_GRAPHS, MAX_NAME, MODES, defaultDocument, defaultGraph, graphOf, nextName, normalizeDocument, profileIds, profileOf, rowId, withGraph, withIcons, withNames, withTrailingRow, type AxisUnits, type Graph, type GrapherDocument, type Mode, type Row } from './model'
 
 /** The sheets live in `.valley/plugins/data/grapher/graphs.json`. */
 export const GRAPHS_FILE = 'graphs.json'
@@ -131,6 +133,12 @@ export class GrapherStore {
       this.focus(activePluginTab.instanceId ?? MAIN_GRAPH)
       this.adoptUntitledTab()
     }))
+    // Once the icon folder is listed, a profile whose icon file is gone gets the next free bundled one.
+    this.offs.push(subscribeProfileIcons(() => {
+      if (!this.snapshot.loaded) return
+      const document = withIcons(this.snapshot.document, PROFILE_ICON_ORDER, availableProfileIcons())
+      if (document !== this.snapshot.document) this.change(document)
+    }))
     void this.read()
   }
 
@@ -138,7 +146,7 @@ export class GrapherStore {
     try {
       const file = await this.api.data.files.readTextBaseline(GRAPHS_FILE)
       if (this.disposed) return
-      const document = withNames(file ? normalizeDocument(JSON.parse(file.content)) : defaultDocument(), defaultName)
+      const document = withIcons(withNames(file ? normalizeDocument(JSON.parse(file.content)) : defaultDocument(), defaultName), PROFILE_ICON_ORDER, availableProfileIcons())
       this.baseline = file?.baseline ?? null
       this.written = file?.content ?? null
       this.writable = true
@@ -162,7 +170,7 @@ export class GrapherStore {
     const file = await this.api.data.files.readTextBaseline(GRAPHS_FILE).catch(() => null)
     if (this.disposed || this.timer !== null || this.unsaved || !file || file.content === this.written) return
     try {
-      const document = withNames(normalizeDocument(JSON.parse(file.content)), defaultName)
+      const document = withIcons(withNames(normalizeDocument(JSON.parse(file.content)), defaultName), PROFILE_ICON_ORDER, availableProfileIcons())
       this.adoptCameras(document)
       this.baseline = file.baseline
       this.written = file.content
@@ -193,7 +201,7 @@ export class GrapherStore {
     if (!this.snapshot.loaded || id === MAIN_GRAPH || document.graphs[id] || document.tabs?.[id]) return
     const main = graphOf(document, MAIN_GRAPH)
     const mode = MODES.includes(id as Mode) ? (id as Mode) : main.mode
-    this.change(withName(withGraph(document, id, { mode, sheets: main.sheets, units: main.units }), id))
+    this.change(withIcons(withName(withGraph(document, id, { mode, sheets: main.sheets, units: main.units }), id), PROFILE_ICON_ORDER, availableProfileIcons()))
   }
 
   /**
@@ -219,7 +227,7 @@ export class GrapherStore {
   /** A new profile; profiles are never pruned (they are the user's to delete), only capped at `MAX_GRAPHS`. */
   private addGraph(graph: Graph, name?: string): string {
     const id = `g-${rowId()}`
-    this.change(withName(withGraph(this.snapshot.document, id, graph), id, name))
+    this.change(withIcons(withName(withGraph(this.snapshot.document, id, graph), id, name), PROFILE_ICON_ORDER, availableProfileIcons()))
     return id
   }
 
@@ -283,6 +291,15 @@ export class GrapherStore {
     if (this.writable && this.snapshot.loaded) this.schedule()
   }
 
+  /** Moves the profile at `from` into the gap before `to` (gaps 0…count) of the profile list. */
+  moveProfile(from: number, to: number): void {
+    const ids = profileIds(this.snapshot.document)
+    if (from < 0 || from >= ids.length || to === from || to === from + 1) return
+    const [moved] = ids.splice(from, 1)
+    ids.splice(to > from ? to - 1 : to, 0, moved)
+    this.change({ ...this.snapshot.document, order: ids })
+  }
+
   renameProfile(id: string, name: string): void {
     const trimmed = name.trim().slice(0, MAX_NAME)
     const document = this.snapshot.document
@@ -337,7 +354,9 @@ export class GrapherStore {
       tabs[id] = target
     }
     for (const [tab, shown] of Object.entries(tabs)) if (tab === shown) delete tabs[tab]
-    this.change({ ...base, graphs, names, tabs, icons })
+    // The list keeps its order: the deleted entry goes; deleting main puts main where its neighbour was.
+    const order = ids.filter((entry) => entry !== id).map((entry) => (id === MAIN_GRAPH && entry === neighbour ? MAIN_GRAPH : entry))
+    this.change({ ...base, graphs, names, tabs, icons, order })
   }
 
   private editGraph(id: string, edit: (graph: Graph) => Graph | null, quiet = false): void {

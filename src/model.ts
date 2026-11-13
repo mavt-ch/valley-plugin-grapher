@@ -87,6 +87,8 @@ export interface GrapherDocument extends Graph {
   names?: Record<string, string>
   /** The profile a tab shows, by tab instance id, where it is not the tab's own graph. */
   tabs?: Record<string, string>
+  /** The order of the profile list, by graph id; profiles not listed follow in creation order. */
+  order?: string[]
   /** Each profile's chosen icon: a file name (without `.svg`) in `.valley/assets/icons/grapher-icon/`. */
   icons?: Record<string, string>
   /** The last 2D view (`cx`, `cy`, `scale`) or 3D camera (`yaw`, `pitch`, `range`) of each profile's sheets, by `graph:mode`. */
@@ -165,7 +167,11 @@ export const MAX_NAME = 80
 
 /** Every profile id, `main` first, the others in creation order. */
 export function profileIds(document: GrapherDocument): string[] {
-  return [MAIN_GRAPH, ...Object.keys(document.graphs)]
+  const all = [MAIN_GRAPH, ...Object.keys(document.graphs)]
+  const known = new Set(all)
+  const ordered = (document.order ?? []).filter((id, index, list) => known.has(id) && list.indexOf(id) === index)
+  const placed = new Set(ordered)
+  return [...ordered, ...all.filter((id) => !placed.has(id))]
 }
 
 /** The profile a tab shows: its chosen profile when that still exists, else its own graph. */
@@ -189,6 +195,25 @@ export function withNames(document: GrapherDocument, label: (n: number) => strin
   let next: GrapherDocument = { ...document, names: { ...document.names } }
   for (const id of missing) next = { ...next, names: { ...next.names, [id]: nextName(next, label) } }
   return next
+}
+
+/**
+ * Gives every profile without an icon (or with one the folder no longer holds) the first icon of `order` no other
+ * profile uses, so every tab shows an object icon; `available` is the folder's listing, or null before it is known.
+ */
+export function withIcons(document: GrapherDocument, order: readonly string[], available: ReadonlySet<string> | null): GrapherDocument {
+  const icons = { ...document.icons }
+  const candidates = available ? order.filter((name) => available.has(name)) : order
+  if (!candidates.length) return document
+  let changed = false
+  profileIds(document).forEach((id, index) => {
+    const icon = icons[id]
+    if (icon && (!available || available.has(icon))) return
+    const used = new Set(Object.entries(icons).filter(([other]) => other !== id).map(([, name]) => name))
+    icons[id] = candidates.find((name) => !used.has(name)) ?? candidates[index % candidates.length]
+    changed = true
+  })
+  return changed ? { ...document, icons } : document
 }
 
 /** Replaces one graph and leaves every other tab's graph as it was. */
@@ -312,7 +337,7 @@ function normalizeGraph(record: { mode?: unknown; sheets?: unknown; units?: unkn
 /** Reads a stored `graphs.json`; throws when it is not a Grapher document, so the caller never overwrites it. */
 export function normalizeDocument(value: unknown): GrapherDocument {
   if (!value || typeof value !== 'object' || (value as { version?: unknown }).version !== 1) throw new Error('graphs.json is not a Grapher document (version 1).')
-  const record = value as { mode?: unknown; sheets?: unknown; units?: unknown; graphs?: unknown; names?: unknown; tabs?: unknown; icons?: unknown; cameras?: unknown }
+  const record = value as { mode?: unknown; sheets?: unknown; units?: unknown; graphs?: unknown; names?: unknown; tabs?: unknown; icons?: unknown; cameras?: unknown; order?: unknown }
   const stored = (record.graphs && typeof record.graphs === 'object' && !Array.isArray(record.graphs) ? record.graphs : {}) as Record<string, unknown>
   const graphs: Record<string, Graph> = {}
   for (const [id, graph] of Object.entries(stored).slice(0, MAX_GRAPHS)) {
@@ -330,7 +355,8 @@ export function normalizeDocument(value: unknown): GrapherDocument {
     && (['cx', 'cy', 'scale'].every((key) => key in entry) || ['yaw', 'pitch', 'range'].every((key) => key in entry))
   const cameras = Object.fromEntries(Object.entries(record.cameras && typeof record.cameras === 'object' ? record.cameras as Record<string, unknown> : {})
     .filter((entry): entry is [string, Record<string, number>] => known(entry[0].slice(0, entry[0].lastIndexOf(':'))) && MODES.includes(entry[0].slice(entry[0].lastIndexOf(':') + 1) as Mode) && cameraFields(entry[1])))
-  return { version: 1, ...normalizeGraph(record), graphs, ...(Object.keys(names).length ? { names } : {}), ...(Object.keys(tabs).length ? { tabs } : {}), ...(Object.keys(icons).length ? { icons } : {}), ...(Object.keys(cameras).length ? { cameras } : {}) }
+  const order = Array.isArray(record.order) ? record.order.filter((id): id is string => typeof id === 'string' && known(id)).slice(0, MAX_GRAPHS + 1) : []
+  return { version: 1, ...normalizeGraph(record), graphs, ...(order.length ? { order } : {}), ...(Object.keys(names).length ? { names } : {}), ...(Object.keys(tabs).length ? { tabs } : {}), ...(Object.keys(icons).length ? { icons } : {}), ...(Object.keys(cameras).length ? { cameras } : {}) }
 }
 
 /** The range variable of a row: θ for polar curves, t for plane and space curves. */

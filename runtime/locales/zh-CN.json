@@ -225,12 +225,14 @@
   "profile.list": "配置",
   "profile.default": "图形 {{n}}",
   "profile.copyName": "{{name}} 副本",
-  "profile.rename": "重命名 {{name}}",
   "profile.nameField": "{{name}} 的名称",
-  "profile.duplicate": "复制 {{name}}",
-  "profile.delete": "删除 {{name}}",
   "profile.lastOne": "无法删除最后一个配置",
   "profile.icon": "{{name}} 的图标",
-  "profile.iconView": "视图图标",
-  "profile.icons": "{{folder}} 中的图标"
+  "profile.icons": "{{folder}} 中的图标",
+  "profile.renameItem": "重命名",
+  "profile.iconItem": "更换图标",
+  "profile.duplicateItem": "复制",
+  "profile.deleteItem": "删除",
+  "profile.more": "{{name}} 的更多操作",
+  "profile.drag": "拖动以重新排序 {{name}}"
 }

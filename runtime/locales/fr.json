@@ -225,12 +225,14 @@
   "profile.list": "Profils",
   "profile.default": "Graphe {{n}}",
   "profile.copyName": "{{name}} copie",
-  "profile.rename": "Renommer {{name}}",
   "profile.nameField": "Nom de {{name}}",
-  "profile.duplicate": "Dupliquer {{name}}",
-  "profile.delete": "Supprimer {{name}}",
   "profile.lastOne": "Le dernier profil ne peut pas être supprimé",
   "profile.icon": "Icône de {{name}}",
-  "profile.iconView": "Icône de la vue",
-  "profile.icons": "Icônes dans {{folder}}"
+  "profile.icons": "Icônes dans {{folder}}",
+  "profile.renameItem": "Renommer",
+  "profile.iconItem": "Changer d’icône",
+  "profile.duplicateItem": "Dupliquer",
+  "profile.deleteItem": "Supprimer",
+  "profile.more": "Plus pour {{name}}",
+  "profile.drag": "Glisser pour réordonner {{name}}"
 }

@@ -197,5 +197,6 @@
   "ref.wOfZ": "Höhe |f(z)|, Farbe das Argument (Rot ist positiv reell).",
   "ref.parts": "Eine vorzeichenbehaftete Höhe statt des Betrags.",
   "ref.play": "Den Schieberegler mit dem Knopf in seiner Zeile abspielen; der Pfeil daneben setzt Richtung, Tempo und Wiederholung.",
-  "ref.export": "Das Menü des Graph-Tabs speichert den Graphen als PNG oder SVG."
+  "ref.export": "Das Menü des Graph-Tabs speichert den Graphen als PNG oder SVG.",
+  "hint.open": "Referenz öffnen"
 }

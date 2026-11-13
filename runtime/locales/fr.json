@@ -197,5 +197,6 @@
   "ref.wOfZ": "Hauteur |f(z)|, couleur l’argument (rouge pour réel positif).",
   "ref.parts": "Une hauteur signée au lieu du module.",
   "ref.play": "Lancez un curseur avec le bouton de sa ligne ; le chevron règle sens, vitesse et boucle.",
-  "ref.export": "Le menu de l’onglet du graphe l’enregistre en PNG ou SVG."
+  "ref.export": "Le menu de l’onglet du graphe l’enregistre en PNG ou SVG.",
+  "hint.open": "Ouvrir la référence"
 }

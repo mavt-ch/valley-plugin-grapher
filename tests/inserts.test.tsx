@@ -1,6 +1,6 @@
 import React from 'react'
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { afterEach, beforeAll, describe, expect, it } from 'vitest'
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { createMockValleyApi, loadPackageWasm, type PackageWasmModule } from '@valley/plugin-testkit'
 import type { ValleyPluginManifest } from '@valley/plugin-sdk/types'
 import * as plugin from '../src/index'
@@ -34,9 +34,10 @@ function sheet(...texts: string[]): Row[] {
   return rows
 }
 
-function mount(): void {
+function mount(): ReturnType<typeof createMockValleyApi> {
   const mock = createMockValleyApi({ manifest: declared, wasm: { modules: [module] } })
   disposers.push(plugin.register(mock.api))
+  return mock
 }
 
 const input = (index: number): HTMLInputElement => screen.getByRole('textbox', { name: new RegExp(`^Expression ${index}$`) }) as HTMLInputElement
@@ -132,7 +133,7 @@ describe('the insert bar', () => {
 
 describe('the reference', () => {
   it('lists the focused view groups first and open, inserts an example, and leaves only a short hint on the left', async () => {
-    mount()
+    const { api } = mount()
     const { container } = render(<><Sidebar /><Reference /></>)
     await screen.findByText('Reference · Cartesian')
     const headings = Array.from(container.querySelectorAll<HTMLButtonElement>('.grapher-ref-heading'))
@@ -147,6 +148,9 @@ describe('the reference', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: 'Insert tangent(x^2, 1)' }).hasAttribute('disabled')).toBe(false))
     fireEvent.click(screen.getByRole('button', { name: 'Insert tangent(x^2, 1)' }))
     await waitFor(() => expect(input(5).value).toBe('tangent(x^2, 1)'))
-    expect(container.querySelector('.grapher-hint')?.textContent).toBe('The bar above inserts templates; the reference in the right sidebar lists every feature.')
+    expect(container.querySelector('.grapher-hint')?.textContent).toBe('The bar above inserts templates; the reference in the right sidebar lists every feature. Open the reference')
+    const reveal = vi.spyOn(api.workspace, 'revealOwnPanel')
+    fireEvent.click(screen.getByRole('button', { name: 'Open the reference' }))
+    expect(reveal).toHaveBeenCalledWith('right_sidebar')
   })
 })

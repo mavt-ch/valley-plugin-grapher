@@ -197,5 +197,6 @@
   "ref.wOfZ": "Altura |f(z)|, color el argumento (rojo es real positivo).",
   "ref.parts": "Una altura con signo en lugar del módulo.",
   "ref.play": "Reproduce un deslizador con el botón de su fila; la flecha fija dirección, velocidad y bucle.",
-  "ref.export": "El menú de la pestaña del gráfico lo guarda como PNG o SVG."
+  "ref.export": "El menú de la pestaña del gráfico lo guarda como PNG o SVG.",
+  "hint.open": "Abrir la referencia"
 }

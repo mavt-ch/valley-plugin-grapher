@@ -967,7 +967,10 @@ export const Sidebar = (): ReactElement => {
             />
           ))}
           {showMarker ? <div className="grapher-drop-marker" style={{ top: drag.marker }} aria-hidden /> : null}
-          <p className="grapher-hint">{uiText('hint.short')}</p>
+          <p className="grapher-hint">
+            {uiText('hint.short')}{' '}
+            <button type="button" className="grapher-hint-link" onClick={() => api.workspace.revealOwnPanel('right_sidebar')}>{uiText('hint.open')}</button>
+          </p>
         </div>
       ) : (
         <api.ui.ContentLoader compact />

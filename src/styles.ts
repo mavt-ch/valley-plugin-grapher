@@ -242,6 +242,9 @@ button.grapher-handle:hover { color:var(--text-color); }
 .grapher-notice { font-size:var(--smaller-font-size); color:var(--text-secondary); padding:0 2px; }
 .grapher-add-table { opacity:0.5; }
 .grapher-hint { margin:0; padding:var(--space-3); font-size:0.6875rem; line-height:1.5; color:var(--text-tertiary); }
+.grapher-hint-link { padding:0; border:none; background:none; color:var(--accent-tint-text); font:inherit; cursor:pointer; }
+.grapher-hint-link:hover { text-decoration:underline; }
+.grapher-hint-link:focus-visible { outline:2px solid var(--accent-color); outline-offset:1px; border-radius:var(--radius-sm); }
 .grapher-menu-swatch { display:inline-block; width:12px; height:12px; border-radius:50%; }
 
 /* ---- the graph tab ---- */

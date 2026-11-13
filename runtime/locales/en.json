@@ -197,5 +197,6 @@
   "ref.wOfZ": "Height |f(z)|, colour the argument (red is positive real).",
   "ref.parts": "A signed height instead of the modulus.",
   "ref.play": "Play a slider with the button in its row; the chevron sets direction, speed and loop.",
-  "ref.export": "The graph tab’s menu saves the graph as PNG or SVG."
+  "ref.export": "The graph tab’s menu saves the graph as PNG or SVG.",
+  "hint.open": "Open the reference"
 }

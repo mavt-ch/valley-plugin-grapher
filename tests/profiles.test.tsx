@@ -281,7 +281,9 @@ describe('profile notes', () => {
     render(<Sidebar />)
     await screen.findByRole('button', { name: 'Profile: Graph 1' })
     const segment = provide.mock.calls.map(([, value]) => value as { id?: string; icon?: string; pluginSurfaces?: string[]; render?: (context: unknown) => React.ReactNode }).find((value) => value.id === 'grapher.notes')!
-    expect(segment).toMatchObject({ icon: 'text-align-left', pluginSurfaces: ['main_workspace'] })
+    expect(segment).toMatchObject({ pluginSurfaces: ['main_workspace'] })
+    // The Material "edit note" shape, as an SVG the host draws in the icon colour.
+    expect(decodeURIComponent(segment.icon!)).toBe('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 10h11v2H3zm0-2h11V6H3zm0 8h7v-2H3zm15.01-3.13.71-.71a.996.996 0 0 1 1.41 0l.71.71c.39.39.39 1.02 0 1.41l-.71.71zm-.71.71-5.3 5.3V21h2.12l5.3-5.3z"/></svg>')
     const notes = render(<>{segment.render!({ relPath: '', kind: 'unsupported', tab: { pluginId: 'grapher' } })}</>)
     const field = (): HTMLTextAreaElement => within(notes.container).getByRole('textbox', { name: /^Notes for / }) as HTMLTextAreaElement
     expect(field().value).toBe('')

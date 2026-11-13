@@ -14,7 +14,7 @@ import { injectStyles } from './styles'
 import { Sidebar, openNewGraph } from './Sidebar'
 import { GraphTab } from './GraphView'
 import { REFERENCE_SEGMENT, Reference } from './Reference'
-import { NOTES_SEGMENT, Notes } from './Notes'
+import { EDIT_NOTE_ICON, NOTES_SEGMENT, Notes } from './Notes'
 import { getStore } from './store'
 import { provideGraphSurface } from './exporting'
 import { provideGraphDetails } from './details'
@@ -34,7 +34,7 @@ export function register(api: ValleyPluginApi): () => Promise<void> {
   const offDetails = provideGraphDetails(api, store)
   // Beside it, the profile's Markdown notes.
   const offNotes = api.interop.extensions.provide(METADATA_PANEL_SEGMENT_V1, {
-    id: NOTES_SEGMENT, label: 'Notes', labelKey: 'notes.tab', icon: 'text-align-left', pluginSurfaces: ['main_workspace'],
+    id: NOTES_SEGMENT, label: 'Notes', labelKey: 'notes.tab', icon: EDIT_NOTE_ICON, pluginSurfaces: ['main_workspace'],
     render: (context) => React.createElement(Notes, { tab: context.tab?.instanceId ?? context.subject?.instanceId })
   })
   // The reference is Grapher's tab in the right sidebar's Properties while a graph tab is focused.

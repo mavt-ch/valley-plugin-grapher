@@ -140,8 +140,7 @@
   "insert.implicit3": "Insérer une surface implicite",
   "insert.field3": "Insérer un champ de vecteurs dans l’espace",
   "insert.tplane": "Insérer un plan tangent",
-  "hint.short": "La barre du haut insère des modèles ; la référence dans la barre latérale droite liste toutes les fonctions.",
-  "ref.title": "Référence · {{mode}}",
+  "hint.short": "La barre du haut insère des modèles ; l’onglet Grapher dans Propriétés liste toutes les fonctions.",
   "ref.label": "Référence de Grapher",
   "ref.insert": "Insérer {{example}}",
   "ref.elsewhere": "{{example}} ne fonctionne pas dans cette vue",
@@ -198,5 +197,9 @@
   "ref.parts": "Une hauteur signée au lieu du module.",
   "ref.play": "Lancez un curseur avec le bouton de sa ligne ; le chevron règle sens, vitesse et boucle.",
   "ref.export": "Le menu de l’onglet du graphe l’enregistre en PNG ou SVG.",
-  "hint.open": "Ouvrir la référence"
+  "hint.open": "Ouvrir la référence",
+  "ref.tab": "Référence",
+  "ref.search": "Rechercher dans la référence",
+  "ref.clear": "Effacer la recherche",
+  "ref.none": "Aucun résultat pour « {{query}} »"
 }

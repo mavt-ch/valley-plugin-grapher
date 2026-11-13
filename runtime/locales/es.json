@@ -140,8 +140,7 @@
   "insert.implicit3": "Insertar una superficie implícita",
   "insert.field3": "Insertar un campo vectorial en el espacio",
   "insert.tplane": "Insertar un plano tangente",
-  "hint.short": "La barra de arriba inserta plantillas; la referencia de la barra lateral derecha lista todas las funciones.",
-  "ref.title": "Referencia · {{mode}}",
+  "hint.short": "La barra de arriba inserta plantillas; la pestaña Grapher en Propiedades lista todas las funciones.",
   "ref.label": "Referencia de Grapher",
   "ref.insert": "Insertar {{example}}",
   "ref.elsewhere": "{{example}} no funciona en esta vista",
@@ -198,5 +197,9 @@
   "ref.parts": "Una altura con signo en lugar del módulo.",
   "ref.play": "Reproduce un deslizador con el botón de su fila; la flecha fija dirección, velocidad y bucle.",
   "ref.export": "El menú de la pestaña del gráfico lo guarda como PNG o SVG.",
-  "hint.open": "Abrir la referencia"
+  "hint.open": "Abrir la referencia",
+  "ref.tab": "Referencia",
+  "ref.search": "Buscar en la referencia",
+  "ref.clear": "Borrar la búsqueda",
+  "ref.none": "Nada coincide con «{{query}}»"
 }

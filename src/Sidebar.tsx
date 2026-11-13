@@ -13,6 +13,9 @@ import { MAX_TABLE_ROWS, looksTabular, parseTable, type Cells, type PastedTable 
 import { formatComplex, formatLinear, formatNumber, formatPolar } from './ticks'
 import { viewOf, type Insert } from './views'
 
+/** The reference's Properties segment id (`src/Reference.tsx` imports this module, so it is spelled out here). */
+const REFERENCE_SEGMENT = 'grapher.reference'
+
 const DRAWN = new Set(['function', 'polar', 'curve', 'point', 'implicit', 'surface', 'curve3', 'point3', 'region', 'cpoint', 'csurface', 'coords', 'psurface', 'implicit3', 'field', 'field3', 'contour', 'integral', 'tangent', 'tplane', 'table'])
 
 /** The row whose input takes focus on its next render (after Enter adds a row or Backspace removes one). */
@@ -969,7 +972,7 @@ export const Sidebar = (): ReactElement => {
           {showMarker ? <div className="grapher-drop-marker" style={{ top: drag.marker }} aria-hidden /> : null}
           <p className="grapher-hint">
             {uiText('hint.short')}{' '}
-            <button type="button" className="grapher-hint-link" onClick={() => api.workspace.revealOwnPanel('right_sidebar')}>{uiText('hint.open')}</button>
+            <button type="button" className="grapher-hint-link" onClick={() => api.workspace.showProperties(active === MAIN_GRAPH ? store.forkGraph(MAIN_GRAPH) : active, { segmentId: REFERENCE_SEGMENT })}>{uiText('hint.open')}</button>
           </p>
         </div>
       ) : (

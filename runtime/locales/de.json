@@ -140,8 +140,7 @@
   "insert.implicit3": "Implizite Fläche einfügen",
   "insert.field3": "Vektorfeld im Raum einfügen",
   "insert.tplane": "Tangentialebene einfügen",
-  "hint.short": "Die Leiste oben fügt Vorlagen ein; die Referenz in der rechten Seitenleiste listet alle Funktionen.",
-  "ref.title": "Referenz · {{mode}}",
+  "hint.short": "Die Leiste oben fügt Vorlagen ein; der Grapher-Tab unter Eigenschaften listet alle Funktionen.",
   "ref.label": "Grapher-Referenz",
   "ref.insert": "{{example}} einfügen",
   "ref.elsewhere": "{{example}} funktioniert in dieser Ansicht nicht",
@@ -198,5 +197,9 @@
   "ref.parts": "Eine vorzeichenbehaftete Höhe statt des Betrags.",
   "ref.play": "Den Schieberegler mit dem Knopf in seiner Zeile abspielen; der Pfeil daneben setzt Richtung, Tempo und Wiederholung.",
   "ref.export": "Das Menü des Graph-Tabs speichert den Graphen als PNG oder SVG.",
-  "hint.open": "Referenz öffnen"
+  "hint.open": "Referenz öffnen",
+  "ref.tab": "Referenz",
+  "ref.search": "Referenz durchsuchen",
+  "ref.clear": "Suche löschen",
+  "ref.none": "Nichts passt zu „{{query}}“"
 }

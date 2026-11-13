@@ -55,7 +55,10 @@ const CSS = `
 
 /* The reference in the right sidebar: groups of syntax, one sentence and an example that inserts itself. */
 .grapher-reference { flex:1 1 auto; min-height:0; overflow-y:auto; padding:6px 0 var(--space-3); }
-.grapher-ref-title { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:var(--smaller-font-size); font-weight:500; color:var(--text-color); }
+.grapher-ref-search { position:sticky; top:0; z-index:1; border-bottom:1px solid var(--border-light); background:var(--container-color-alt); }
+.grapher-ref-empty { margin:0; padding:var(--space-3); font-size:0.75rem; color:var(--text-tertiary); }
+.grapher-ref-heading:disabled { cursor:default; }
+.grapher-ref-heading:disabled:hover { background:transparent; color:var(--text-secondary); }
 .grapher-ref-group { padding:0 6px; }
 .grapher-ref-heading { display:flex; align-items:center; gap:6px; width:100%; height:28px; padding:0 6px; border:none;
   border-radius:var(--radius-sm); background:transparent; color:var(--text-secondary); font:inherit; font-size:var(--smaller-font-size);

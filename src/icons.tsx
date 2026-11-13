@@ -109,3 +109,7 @@ export const SphereIcon = (p: IconProps): ReactElement => (
 export const PlaneIcon = (p: IconProps): ReactElement => (
   <Svg {...p}><path d="M5 18a7 7 0 0 1 14 0" /><path d="M3 11l6-3h12l-6 3z" /></Svg>
 )
+
+export const Search = (p: IconProps): ReactElement => (
+  <Svg {...p}><circle cx="11" cy="11" r="6.5" /><path d="M20 20l-4.2-4.2" /></Svg>
+)

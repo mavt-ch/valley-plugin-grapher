@@ -140,8 +140,7 @@
   "insert.implicit3": "Insert an implicit surface",
   "insert.field3": "Insert a vector field in space",
   "insert.tplane": "Insert a tangent plane",
-  "hint.short": "The bar above inserts templates; the reference in the right sidebar lists every feature.",
-  "ref.title": "Reference · {{mode}}",
+  "hint.short": "The bar above inserts templates; the Grapher tab in Properties lists every feature.",
   "ref.label": "Grapher reference",
   "ref.insert": "Insert {{example}}",
   "ref.elsewhere": "{{example}} does not work on this view",
@@ -198,5 +197,9 @@
   "ref.parts": "A signed height instead of the modulus.",
   "ref.play": "Play a slider with the button in its row; the chevron sets direction, speed and loop.",
   "ref.export": "The graph tab’s menu saves the graph as PNG or SVG.",
-  "hint.open": "Open the reference"
+  "hint.open": "Open the reference",
+  "ref.tab": "Reference",
+  "ref.search": "Search the reference",
+  "ref.clear": "Clear the search",
+  "ref.none": "Nothing matches “{{query}}”"
 }

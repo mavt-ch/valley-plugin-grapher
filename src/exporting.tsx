@@ -105,8 +105,7 @@ export function provideGraphSurface(pluginApi: ValleyPluginApi, store: GrapherSt
     surface: 'main_workspace',
     getSnapshot: (instanceId) => {
       const graph = instanceId || MAIN_GRAPH
-      // Graph tabs always carry an instance; the right sidebar's reference tab has none and shows a page icon.
-      return { title: uiText('graph.title'), ...(instanceId ? {} : { visual: { kind: 'icon' as const, name: 'sticky-note' } }), view: { mode: store.graph(graph).mode }, actions: exportActions(graph) }
+      return { title: uiText('graph.title'), view: { mode: store.graph(graph).mode }, actions: exportActions(graph) }
     },
     subscribe: (listener) => {
       const offs = [store.subscribe(listener), subscribeExporters(listener), pluginApi.ui.onLanguageChanged(listener)]

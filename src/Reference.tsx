@@ -1,8 +1,8 @@
 import { React } from './runtime'
 import type { ReactElement } from 'react'
-import { ChevronDown } from './icons'
+import { ChevronDown, Search, X } from './icons'
 import { uiText } from './localization'
-import { MODES, createRow, filled, graphOf, type Mode } from './model'
+import { MAIN_GRAPH, MODES, createRow, filled, graphOf, type Mode } from './model'
 import { insertTemplate, takesTables } from './Sidebar'
 import { useGrapher } from './store'
 
@@ -77,17 +77,36 @@ export function referenceOrder(mode: Mode): Group[] {
   return [...REFERENCE.filter((group) => group.views.includes(mode)), ...REFERENCE.filter((group) => !group.views.includes(mode))]
 }
 
+/** The entries of a group whose syntax, name or sentence contain every word of the query (case-insensitive). */
+export function matching(group: Group, query: string): readonly Entry[] {
+  const words = query.toLowerCase().split(/\s+/).filter(Boolean)
+  if (!words.length) return group.entries
+  const heading = uiText(`ref.group.${group.id}`)
+  return group.entries.filter((entry) => {
+    const haystack = [entry.syntax, entry.id, heading, uiText(`ref.${entry.id}`), ...(entry.examples ?? [])].join(' ').toLowerCase()
+    return words.every((word) => haystack.includes(word))
+  })
+}
+
+/** The Properties segment of a graph tab: Grapher's reference. */
+export const REFERENCE_SEGMENT = 'grapher.reference'
+
 /**
- * The right sidebar's reference: every feature with its syntax, a sentence and examples. An example the focused view's
- * kernel accepts (with the sheet's own rows, so f′(x) needs an f) inserts itself into the empty last row.
+ * Grapher's tab in the right sidebar's Properties while a graph tab is focused: a search row, then every feature with its
+ * syntax, a sentence and examples. Without a query the focused view's groups come first and open; a query lists the
+ * matching entries of every group. An example the view's kernel accepts (with the sheet's own rows, so f′(x) needs an f)
+ * inserts itself into the empty last row of that graph.
  */
-export const Reference = (): ReactElement => {
+export const Reference = ({ graph: described }: { graph?: string }): ReactElement => {
   const { loaded, document, active, engine } = useGrapher()
-  const graph = graphOf(document, active)
+  const id = described ?? active
+  const graph = graphOf(document, id)
   const mode = graph.mode
   const rows = graph.sheets[mode]
-  const [open, setOpen] = React.useState<ReadonlySet<string>>(() => new Set(REFERENCE.filter((group) => group.views.includes(mode)).map((group) => group.id)))
-  React.useEffect(() => setOpen(new Set(REFERENCE.filter((group) => group.views.includes(mode)).map((group) => group.id))), [mode])
+  const [query, setQuery] = React.useState('')
+  const initial = (): ReadonlySet<string> => new Set(REFERENCE.filter((group) => group.views.includes(mode)).map((group) => group.id))
+  const [open, setOpen] = React.useState<ReadonlySet<string>>(initial)
+  React.useEffect(() => setOpen(initial()), [mode])
   const valid = React.useMemo(() => {
     const kept = rows.filter(filled)
     const all = REFERENCE.flatMap((group) => group.entries.flatMap((entry) => entry.examples ?? []))
@@ -99,29 +118,49 @@ export const Reference = (): ReactElement => {
     }
     return result
   }, [engine, mode, rows])
-  const toggle = (id: string): void => setOpen((current) => {
+  const toggle = (group: string): void => setOpen((current) => {
     const next = new Set(current)
-    if (!next.delete(id)) next.add(id)
+    if (!next.delete(group)) next.add(group)
     return next
   })
+  const searching = query.trim() !== ''
+  const groups = referenceOrder(mode).map((group) => ({ group, entries: matching(group, query) })).filter(({ entries }) => entries.length)
   return (
-    <div className="grapher-panel">
-      <div className="panel-header grapher-header">
-        <span className="grapher-ref-title">{uiText('ref.title', { mode: uiText(`mode.${mode}`) })}</span>
+    <div className="grapher-panel grapher-ref-panel">
+      <div className="search-field-row grapher-ref-search">
+        <label className="search-field">
+          <Search className="search-field-icon" />
+          <input
+            className="search-field-input"
+            type="search"
+            value={query}
+            placeholder={uiText('ref.search')}
+            aria-label={uiText('ref.search')}
+            spellCheck={false}
+            autoComplete="off"
+            onChange={(event) => setQuery(event.target.value)}
+            onKeyDown={(event) => { if (event.key === 'Escape' && query) { event.preventDefault(); setQuery('') } }}
+          />
+          {query ? (
+            <button type="button" className="search-field-action" aria-label={uiText('ref.clear')} title={uiText('ref.clear')} onClick={() => setQuery('')}>
+              <X />
+            </button>
+          ) : null}
+        </label>
       </div>
       {loaded ? (
         <div className="grapher-reference" aria-label={uiText('ref.label')}>
-          {referenceOrder(mode).map((group) => {
-            const expanded = open.has(group.id)
+          {groups.map(({ group, entries }) => {
+            const expanded = searching || open.has(group.id)
             return (
               <section key={group.id} className="grapher-ref-group" data-group={group.id}>
-                <button type="button" className="grapher-ref-heading" aria-expanded={expanded} onClick={() => toggle(group.id)}>
+                <button type="button" className="grapher-ref-heading" aria-expanded={expanded} disabled={searching} onClick={() => toggle(group.id)}>
                   <ChevronDown className="grapher-ref-chevron" />
                   {uiText(`ref.group.${group.id}`)}
                 </button>
                 {expanded ? (
                   <ul className="grapher-ref-entries">
-                    {group.entries.map((entry) => (
+                    {entries.map((entry) => (
                       <li key={entry.id} className="grapher-ref-entry">
                         <code className="grapher-ref-syntax">{entry.syntax}</code>
                         <span className="grapher-ref-text">{uiText(`ref.${entry.id}`)}</span>
@@ -131,7 +170,7 @@ export const Reference = (): ReactElement => {
                               const usable = valid.get(example) === true
                               const label = uiText(usable ? 'ref.insert' : 'ref.elsewhere', { example })
                               return (
-                                <button key={example} type="button" className="grapher-ref-example" disabled={!usable} aria-label={label} title={label} onClick={() => insertTemplate(active, mode, { text: example })}>
+                                <button key={example} type="button" className="grapher-ref-example" disabled={!usable} aria-label={label} title={label} onClick={() => insertTemplate(id || MAIN_GRAPH, mode, { text: example })}>
                                   {example}
                                 </button>
                               )
@@ -145,6 +184,7 @@ export const Reference = (): ReactElement => {
               </section>
             )
           })}
+          {searching && !groups.length ? <p className="grapher-ref-empty" role="status">{uiText('ref.none', { query: query.trim() })}</p> : null}
         </div>
       ) : null}
     </div>

@@ -140,8 +140,7 @@
   "insert.implicit3": "插入隐式曲面",
   "insert.field3": "插入空间向量场",
   "insert.tplane": "插入切平面",
-  "hint.short": "上方工具栏插入模板；右侧边栏的参考列出全部功能。",
-  "ref.title": "参考 · {{mode}}",
+  "hint.short": "上方工具栏插入模板；“属性”中的 Grapher 标签页列出全部功能。",
   "ref.label": "Grapher 参考",
   "ref.insert": "插入 {{example}}",
   "ref.elsewhere": "{{example}} 在此视图中不可用",
@@ -198,5 +197,9 @@
   "ref.parts": "用有符号的高度代替模。",
   "ref.play": "用行内按钮播放滑块；旁边的箭头设置方向、速度和循环。",
   "ref.export": "图形标签页的菜单可将图形保存为 PNG 或 SVG。",
-  "hint.open": "打开参考"
+  "hint.open": "打开参考",
+  "ref.tab": "参考",
+  "ref.search": "搜索参考",
+  "ref.clear": "清除搜索",
+  "ref.none": "没有与“{{query}}”匹配的内容"
 }

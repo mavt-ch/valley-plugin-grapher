@@ -251,3 +251,32 @@ describe('the row input', () => {
   })
 })
 
+
+describe('the view list and tab icon', () => {
+  it('describes every view in at most ten words in each language', async () => {
+    for (const locale of ['en', 'de', 'es', 'fr', 'zh-CN']) {
+      const catalog = (await import(`../locales/${locale}.json`)).default as Record<string, string>
+      for (const view of VIEWS) {
+        const text = catalog[`mode.${view.id}.hint`]
+        expect(text, `${locale} ${view.id}`).toBeTruthy()
+        if (locale === 'zh-CN') expect(text.length, `${locale} ${view.id}`).toBeLessThanOrEqual(24)
+        else expect(text.split(/\s+/).length, `${locale} ${view.id}: ${text}`).toBeLessThanOrEqual(10)
+      }
+    }
+  })
+
+  it('gives the graph tab the icon of the view it shows', async () => {
+    const mock = createMockValleyApi({ manifest: declared, wasm: { modules: [module] } })
+    const provide = vi.spyOn(mock.api.interop.extensions, 'provide')
+    disposers.push(plugin.register(mock.api))
+    render(<Sidebar />)
+    await screen.findByRole('toolbar', { name: 'Insert' })
+    const surface = provide.mock.calls.map(([, value]) => value as { id?: string; getSnapshot?: (id?: string) => { visual?: { kind: string; src?: string } } }).find((value) => value.id === 'grapher.main_workspace')!
+    const svg = (): string => decodeURIComponent(surface.getSnapshot!(undefined).visual!.src!.slice('data:image/svg+xml,'.length))
+    expect(surface.getSnapshot!(undefined).visual?.kind).toBe('icon')
+    expect(svg()).toContain('<path d="M7.5 5c1.5 6 3.3 9 5.2 9s3.7-3 5.3-9"/>')
+    act(() => getStore().setMode('main', 'space'))
+    expect(svg()).toContain('<path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/>')
+    expect(svg()).toMatch(/^<svg [^>]*viewBox="0 0 24 24"/)
+  })
+})

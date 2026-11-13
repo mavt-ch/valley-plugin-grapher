@@ -123,3 +123,21 @@ export const CollapseAll = (p: IconProps): ReactElement => (
 export const ExpandAll = (p: IconProps): ReactElement => (
   <Svg {...p}><path d="M7 15l5 5 5-5M7 9l5-5 5 5" /></Svg>
 )
+
+const SVG_ATTRIBUTES: Record<string, string> = { strokeWidth: 'stroke-width', strokeLinecap: 'stroke-linecap', strokeLinejoin: 'stroke-linejoin', fillRule: 'fill-rule' }
+
+/** One of these icons as an SVG `data:` URI for a host-drawn tab icon: the same shapes, stroked in the icon colour. */
+export function iconSource(Icon: (props: IconProps) => ReactElement): string {
+  const shapes = (node: ReactNode): string => {
+    if (Array.isArray(node)) return node.map(shapes).join('')
+    if (!node || typeof node !== 'object' || !('type' in node)) return ''
+    const element = node as ReactElement<Record<string, unknown>>
+    if (typeof element.type !== 'string') return shapes(element.props.children as ReactNode)
+    const attributes = Object.entries(element.props).filter(([key, value]) => key !== 'children' && (typeof value === 'string' || typeof value === 'number'))
+      .map(([key, value]) => ` ${SVG_ATTRIBUTES[key] ?? key}="${String(value)}"`).join('')
+    return `<${element.type}${attributes}/>`
+  }
+  const root = Icon({})
+  const markup = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${shapes((root.props as { children?: ReactNode }).children)}</svg>`
+  return `data:image/svg+xml,${encodeURIComponent(markup)}`
+}

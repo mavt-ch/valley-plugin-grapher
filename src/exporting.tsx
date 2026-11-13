@@ -1,9 +1,10 @@
-import { PLUGIN_SURFACE_V1, type UiMenuItem, type ValleyPluginApi } from '@valley/plugin-sdk'
+import { PLUGIN_SURFACE_V1, type UiMenuItem, type UiVisual, type ValleyPluginApi } from '@valley/plugin-sdk'
 import { React, api } from './runtime'
 import type { Size } from './draw'
-import { Download } from './icons'
+import { Download, iconSource } from './icons'
 import { uiText } from './localization'
 import { MAIN_GRAPH, MODES, type Mode } from './model'
+import { viewOf } from './views'
 import { SvgContext, type Measure, type Normalize } from './svg'
 import type { GrapherStore } from './store'
 
@@ -105,7 +106,9 @@ export function provideGraphSurface(pluginApi: ValleyPluginApi, store: GrapherSt
     surface: 'main_workspace',
     getSnapshot: (instanceId) => {
       const graph = instanceId || MAIN_GRAPH
-      return { title: uiText('graph.title'), view: { mode: store.graph(graph).mode }, actions: exportActions(graph) }
+      // The tab shows the icon of the view the graph is on (the host draws the view's own SVG shapes).
+      const visual = { kind: 'icon', src: iconSource(viewOf(store.graph(graph).mode).icon) } as unknown as UiVisual
+      return { title: uiText('graph.title'), visual, view: { mode: store.graph(graph).mode }, actions: exportActions(graph) }
     },
     subscribe: (listener) => {
       const offs = [store.subscribe(listener), subscribeExporters(listener), pluginApi.ui.onLanguageChanged(listener)]

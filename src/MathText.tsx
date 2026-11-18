@@ -488,7 +488,8 @@ function render(node: MNode, key: string | number = 0): ReactNode {
           ))}
           <span className="gm-int-body">{render(node.body)}</span>
           {/* The innermost integral's variable comes first: ∫∫∫ f dz dy dx. */}
-          {['x', 'y', 'z'].slice(0, 1 + (node.inner?.length ?? 0)).reverse().map((name) => (
+          {node.inner && integralAxes.element ? <span className="gm-dx gm-fn">{integralAxes.element}</span> : null}
+          {(node.inner ? integralAxes : XYZ).names.slice(0, 1 + (node.inner?.length ?? 0)).reverse().map((name) => (
             <span key={name} className="gm-dx"><span className="gm-fn">d</span><span className="gm-var">{name}</span></span>
           ))}
         </span>
@@ -547,8 +548,23 @@ export function parseMath(source: string): MNode {
   return markVectorField(new Parser(tokenizeMath(source)).parse())
 }
 
-/** `otherwise` labels the branch of a piecewise function without a condition, in the sheet's language. */
-export const MathText = ({ text, otherwise }: { text: string; otherwise?: string }): ReactElement => {
+/** The variables of a double or triple integral, outermost first, and the volume element it is weighted with. */
+export interface IntegralAxes {
+  names: readonly [string, string, string]
+  element?: string
+}
+
+const XYZ: IntegralAxes = { names: ['x', 'y', 'z'] }
+/** A sheet in cylindrical or spherical coordinates integrates over its own coordinates, with their volume element. */
+export const INTEGRAL_AXES: Partial<Record<string, IntegralAxes>> = {
+  cylindrical: { names: ['r', 'φ', 'z'], element: 'r' },
+  spherical: { names: ['ρ', 'θ', 'φ'], element: 'ρ² sin φ' }
+}
+let integralAxes = XYZ
+
+/** `otherwise` labels the branch of a piecewise function without a condition, in the sheet's language; `axes` names the
+ * variables of a double or triple integral on a sheet whose coordinates are not x, y and z. */
+export const MathText = ({ text, otherwise, axes }: { text: string; otherwise?: string; axes?: IntegralAxes }): ReactElement => {
   const node = React.useMemo(() => {
     try {
       return parseMath(text)
@@ -557,5 +573,6 @@ export const MathText = ({ text, otherwise }: { text: string; otherwise?: string
     }
   }, [text])
   otherwiseLabel = otherwise ?? 'otherwise'
+  integralAxes = axes ?? XYZ
   return <span className="gm-math" aria-hidden>{render(node)}</span>
 }

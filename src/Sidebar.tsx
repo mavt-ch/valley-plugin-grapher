@@ -6,7 +6,7 @@ import type { RowAnalysis } from './engine'
 import { Check, ChevronDown, Copy, Eye, EyeOff, FolderIcon, FolderPlus, Grip, More, Pause, Pencil, Play, Plus, Slider, Smile, TableIcon, Trash, Warning, X } from './icons'
 import { SliderAnimator, snap, startMotion } from './animate'
 import { uiText } from './localization'
-import { MathText } from './MathText'
+import { INTEGRAL_AXES, MathText } from './MathText'
 import { ANIMATION_SPEEDS, COLORS, DEFAULT_ANIMATION, DEFAULT_LEVELS, MAIN_GRAPH, MAX_LEVELS, MAX_NAME, MODES, profileIds, blockEnd, createRow, createTable, filled, graphOf, intoNewFolder, leaveFolder, moveIntoGap, rangeVariable, removeFolder, unitsOf, type Animation, type AxisUnits, type Mode, type Row, type Table } from './model'
 import { getStore, useGrapher } from './store'
 import { notePlaying } from './details'
@@ -1104,7 +1104,7 @@ const ExpressionRow = (props: RowProps): ReactElement => {
       <div className="grapher-row-main">
         {row.table ? <TableGrid row={row} index={index} analysis={analysis} edit={edit} addSlider={props.addSlider} /> : (<>
         <div className="grapher-field" data-typeset={typeset || undefined}>
-        {typeset ? <div className="grapher-typeset"><MathText text={row.text} otherwise={uiText('math.otherwise')} /></div> : null}
+        {typeset ? <div className="grapher-typeset"><MathText text={row.text} otherwise={uiText('math.otherwise')} axes={INTEGRAL_AXES[props.mode]} /></div> : null}
         <input
           ref={inputRef}
           data-row-input=""

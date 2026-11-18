@@ -23,7 +23,7 @@
 //! surface; the point and the normal (−gx, −gy, 1), scaled to a fixed share of the cube, are drawn on it.
 //!
 //! A double or triple integral is drawn as the solid it runs over: x over its interval, y between its two bounds at that
-//! x and z between its two bounds at that (x, y), on a 24 × 24 grid. The top and the bottom are sampled surfaces and the
+//! x and z between its two bounds at that (x, y), on a 32 × 32 grid (in the sheet's own coordinates, then converted to x, y and z). The top and the bottom are sampled surfaces and the
 //! four sides are strips between them; every face is clipped to the cube and shaded like a surface, so the solid is
 //! ordered back to front with whatever else the sheet draws. Its edges are drawn as curves so the faces read apart.
 //!
@@ -73,8 +73,9 @@ const PATCH: f64 = 0.35;
 const NORMAL_LENGTH: f64 = 0.4;
 /// Cells per edge of the patch, so it interleaves with the surface it touches when ordered back to front.
 const PATCH_CELLS: usize = 12;
-/// Cells per side of the solid of a double or triple integral: 6 · 24² faces at most, about as many as one surface.
-const SOLID_CELLS: usize = 24;
+/// Cells per side of the solid of a double or triple integral: 6 · 32² faces at most, about as many as one surface, and
+/// a full turn of an angle in steps of 11.25°.
+const SOLID_CELLS: usize = 32;
 /// Light direction in camera space (right, up, toward the viewer), normalized at use.
 const LIGHT: [f64; 3] = [-0.35, 0.55, 1.0];
 
@@ -617,28 +618,30 @@ impl Scene<'_> {
         }
     }
 
-    /// The solid of a double or triple integral: x over `x`, y between `y` at that x, z between `z` at that (x, y).
-    fn solid(&mut self, row: f64, x: (f64, f64), y: (&Expr, &Expr), z: (&Expr, &Expr)) {
+    /// The solid of a double or triple integral: the first coordinate over `u`, the second between `v` at that value, the
+    /// third between `w` at those two; `system` converts the sheet's coordinates to (x, y, z).
+    fn solid(&mut self, row: f64, u: (f64, f64), v: (&Expr, &Expr), w: (&Expr, &Expr), slots: [usize; 3], system: Option<System>) {
         let range = self.camera.range;
         let n = SOLID_CELLS;
         let stride = n + 1;
+        let place = |c: Vec3| system.map_or(c, |system| system.cartesian(c));
         let (mut bottom, mut top) = (Vec::with_capacity(stride * stride), Vec::with_capacity(stride * stride));
         for i in 0..=n {
-            let px = x.0 + (x.1 - x.0) * i as f64 / n as f64;
-            self.env[X] = px;
-            let (from, to) = (eval(y.0, self.env, self.functions), eval(y.1, self.env, self.functions));
+            let first = u.0 + (u.1 - u.0) * i as f64 / n as f64;
+            self.env[slots[0]] = first;
+            let (from, to) = (eval(v.0, self.env, self.functions), eval(v.1, self.env, self.functions));
             for j in 0..=n {
-                let py = from + (to - from) * j as f64 / n as f64;
-                self.env[X] = px;
-                self.env[Y] = py;
-                let low = eval(z.0, self.env, self.functions);
-                self.env[X] = px;
-                self.env[Y] = py;
-                let high = eval(z.1, self.env, self.functions);
+                let second = from + (to - from) * j as f64 / n as f64;
+                self.env[slots[0]] = first;
+                self.env[slots[1]] = second;
+                let low = eval(w.0, self.env, self.functions);
+                self.env[slots[0]] = first;
+                self.env[slots[1]] = second;
+                let high = eval(w.1, self.env, self.functions);
                 // Where one bound has no value there is no solid: neither face is drawn.
                 let both = if low.is_finite() && high.is_finite() { 0.0 } else { f64::NAN };
-                bottom.push([px, py, low + both]);
-                top.push([px, py, high + both]);
+                bottom.push(place([first, second, low + both]));
+                top.push(place([first, second, high + both]));
             }
         }
         let at = |i: usize, j: usize| i * stride + j;
@@ -646,9 +649,11 @@ impl Scene<'_> {
             if quad.iter().any(|p| p.iter().any(|value| !value.is_finite())) {
                 return;
             }
+            // A face without area (a side at r = 0, a cell at the pole of a ball) is left out.
+            let Some(normal) = normalize(cross(sub(quad[2], quad[0]), sub(quad[3], quad[1]))).filter(|normal| normal.iter().all(|value| value.is_finite())) else { return };
             let clipped = clip_cube(&quad, &[0, 1, 2], range);
             if clipped.len() >= 3 {
-                let shade = scene.shade(normalize(cross(sub(quad[2], quad[0]), sub(quad[3], quad[1]))));
+                let shade = scene.shade(Some(normal));
                 scene.push(POLYGON, row, shade, &clipped);
             }
         };
@@ -663,6 +668,7 @@ impl Scene<'_> {
         let rim: Vec<(usize, usize)> = (0..n).map(|k| (k, 0)).chain((0..n).map(|k| (n, k))).chain((0..n).map(|k| (n - k, n))).chain((0..n).map(|k| (0, n - k))).collect();
         let edge = |scene: &mut Self, a: Vec3, b: Vec3| {
             if a.iter().chain(&b).all(|value| value.is_finite())
+                && dot(sub(a, b), sub(a, b)) > (range * 1e-9).powi(2)
                 && let Some((a, b)) = clip_segment(a, b, range)
             {
                 scene.push(SEGMENT, row, 1.0, &[a, b]);
@@ -817,7 +823,7 @@ pub fn render(sheet: &mut Sheet, camera: Camera) -> Vec<f64> {
             Plot::CoordSurface { expr, system, given, u, v } => scene.coord_surface(index, expr, *system, *given, *u, *v),
             Plot::ParamSurface { x, y, z, u, v, slots } => scene.param_surface(index, (x, y, z), *u, *v, *slots),
             Plot::Field3 { x, y, z } => scene.field(index, (x, y, z), row.flow),
-            Plot::Volume { x, y, z, .. } => scene.solid(index, *x, (&y.0, &y.1), (&z.0, &z.1)),
+            Plot::Volume { u, v, w, slots, system, .. } => scene.solid(index, *u, (&v.0, &v.1), (&w.0, &w.1), *slots, *system),
             Plot::TangentPlane { point, gradient, normal } => scene.tangent_plane(index, *point, *gradient, *normal),
             _ => {}
         }
@@ -1184,8 +1190,9 @@ mod tests {
     fn a_double_integral_is_the_solid_under_its_surface() {
         let solid = records(&["int(4 - x^2 - y^2, -1, 1, -1, 1)"], CAMERA);
         let faces: Vec<&Record> = solid.iter().filter(|record| record.kind == POLYGON).collect();
-        // Top, bottom and four sides of a 24 × 24 grid, all inside the cube.
+        // Top, bottom and four sides of the grid, all inside the cube.
         assert_eq!(faces.len(), 2 * SOLID_CELLS * SOLID_CELLS + 4 * SOLID_CELLS);
+        assert_eq!(SOLID_CELLS, 32);
         assert!(faces.iter().all(|record| record.row == 0.0 && record.points.len() >= 3));
         assert_eq!(solid.iter().filter(|record| record.kind == SEGMENT).count(), 8 * SOLID_CELLS + 4);
         // A solid reaching out of the cube is cut at its faces: nothing is drawn beyond the cube's outline on screen.
@@ -1200,7 +1207,7 @@ mod tests {
         // The ball of radius 3: y between ±√(9 − x²), z between ±√(9 − x² − y²).
         let ball = records(&["int(1, -3, 3, -sqrt(9 - x^2), sqrt(9 - x^2), -sqrt(9 - x^2 - y^2), sqrt(9 - x^2 - y^2))"], CAMERA);
         let faces = ball.iter().filter(|record| record.kind == POLYGON).count();
-        assert!(faces >= 2 * SOLID_CELLS * SOLID_CELLS, "{faces}");
+        assert!(faces >= 2 * SOLID_CELLS * (SOLID_CELLS - 2), "{faces}");
         // A hidden row and an undefined bound draw nothing.
         let inputs = [RowInput { text: "int(1, 0, 1, 0, 1, 0, 1)".into(), hidden: true, ..RowInput::default() }];
         let mut sheet = analyze(Mode::Space, &inputs);
@@ -1234,5 +1241,22 @@ mod tests {
         let again = arrows(true, 1.1);
         assert_eq!(early.len(), again.len());
         assert!(early.iter().flatten().zip(again.iter().flatten()).all(|(a, b)| (a.0 - b.0).abs() < 1e-6 && (a.1 - b.1).abs() < 1e-6));
+    }
+
+    #[test]
+    fn solids_in_cylindrical_and_spherical_coordinates_are_round() {
+        let camera = Camera { range: 4.0, ..CAMERA };
+        let frame = records_in(Mode::Cylindrical, &[], camera).len();
+        // A cylinder of radius 2 from z = 0 to 3: its side at r = 0 has no area and is left out.
+        let cylinder = records_in(Mode::Cylindrical, &["int(1, 0, 2, 0, 2π, 0, 3)"], camera);
+        let faces = cylinder.iter().filter(|record| record.kind == POLYGON).count();
+        assert_eq!(faces, 2 * SOLID_CELLS * SOLID_CELLS + 3 * SOLID_CELLS);
+        assert!(cylinder.len() > frame);
+        // The ball of radius 2 fills a disc on screen: every face lies within 2 units of the centre.
+        let ball = records_in(Mode::Spherical, &["int(1, 0, 2, 0, 2π, 0, π)"], camera);
+        let scale = camera.width.min(camera.height) / (2.0 * camera.range * 3_f64.sqrt());
+        let faces: Vec<&Record> = ball.iter().filter(|record| record.kind == POLYGON).collect();
+        assert!(faces.len() > SOLID_CELLS * SOLID_CELLS);
+        assert!(faces.iter().all(|record| record.points.iter().all(|p| (p.0 - 300.0).hypot(p.1 - 200.0) <= 2.0 * scale * 1.2 + 1e-6)));
     }
 }

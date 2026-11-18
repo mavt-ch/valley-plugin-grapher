@@ -233,6 +233,15 @@ describe('the graph tab', () => {
     expect(rows[1].querySelectorAll('.gm-int-sign')).toHaveLength(3)
   })
 
+  it('shows a triple integral in spherical coordinates with its volume element', async () => {
+    mount({ [FILE]: JSON.stringify({ version: 1, mode: 'spherical', sheets: { spherical: [{ id: 'a', text: 'int(1, 0, 2, 0, 2π, 0, π)' }] } }) })
+    render(<Sidebar />)
+    const rows = await screen.findAllByRole('listitem')
+    await waitFor(() => expect(rows[0].getAttribute('data-kind')).toBe('volume'))
+    expect(rows[0].querySelector('.grapher-value')?.textContent).toBe('= 33.51032164')
+    expect([...rows[0].querySelectorAll('.gm-dx')].map((node) => node.textContent)).toEqual(['ρ² sin φ', 'dφ', 'dθ', 'dρ'])
+  })
+
   it('draws the level curves of f(x, y) with a level count, a step and labels, and floor curves under a 3D surface', async () => {
     const mock = mount()
     const { container } = render(<><Sidebar /><GraphTab /></>)

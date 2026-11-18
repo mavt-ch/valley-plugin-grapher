@@ -258,11 +258,12 @@ pub enum Plot {
     CoordSurface { expr: Expr, system: System, given: usize, u: Span, v: Span },
     /// `int(g, a, b)` on the Cartesian sheet: the area between g(x) and the x-axis from a to b, and its signed value.
     Integral { body: Expr, from: f64, to: f64, value: f64 },
-    /// A double or triple integral on the 3D sheet, drawn as a solid: x runs over `x`, y between the two `y` bounds (which
-    /// may read x) and z between the two `z` bounds (which may read x and y). `int(g, a, b, c, d)` is the solid between
-    /// the xy-plane and z = g(x, y), whose signed volume is the value; `int(g, a, b, c, d, e, f)` is the region the
+    /// A double or triple integral on a 3D sheet, drawn as a solid. Its variables are the sheet's coordinates in order
+    /// (`slots`; x, y, z without a `system`): the first runs over `u`, the second between the two `v` bounds (which may
+    /// read the first) and the third between the two `w` bounds (which may read both). `int(g, a, b, c, d)` is the solid
+    /// between the plane z = 0 and z = g, whose signed volume is the value; `int(g, a, b, c, d, e, f)` is the region the
     /// triple integral runs over (`triple`), whose volume is the value when g is 1.
-    Volume { x: (f64, f64), y: (Expr, Expr), z: (Expr, Expr), value: f64, triple: bool },
+    Volume { u: (f64, f64), v: (Expr, Expr), w: (Expr, Expr), slots: [usize; 3], system: Option<System>, value: f64, triple: bool },
     /// `tangent(g, a)`: the line y = slope · x + intercept touching g at (x, y).
     Tangent { slope: f64, intercept: f64, x: f64, y: f64 },
     /// `tangent(g, a, b)` on the 3D sheet: the plane z = c + gx (x − a) + gy (y − b) touching z = g(x, y) at `point`
@@ -916,7 +917,7 @@ impl Analysis<'_> {
         if let (None, Node::Call(callee @ (Callee::Integral | Callee::Tangent), args)) = (&statement.left, &statement.right) {
             match (callee, mode) {
                 (Callee::Integral, Mode::Cartesian | Mode::Trig) if args.len() == 3 => return self.integral(args),
-                (Callee::Integral, Mode::Space) if args.len() > 3 => return self.volume(args),
+                (Callee::Integral, Mode::Space | Mode::Cylindrical | Mode::Spherical) if args.len() > 3 => return self.volume(args, mode.system()),
                 // Elsewhere a double or triple integral is its value, like any expression without variables.
                 (Callee::Integral, _) if args.len() > 3 => {}
                 (_, Mode::Cartesian | Mode::Trig) => return self.tangent(args),
@@ -1028,23 +1029,42 @@ impl Analysis<'_> {
         Ok(Outcome::Plotted(Plot::Integral { body, from, to, value }))
     }
 
-    /// `int(g, a, b, c, d)` or `int(g, a, b, c, d, e, f)` as a row of the 3D sheet: its value and the solid it runs over.
-    /// The bounds of x are numbers and finite, since they span the solid.
-    fn volume(&mut self, args: &[Node]) -> Result<Outcome, MathError> {
+    /// `int(g, a, b, c, d)` or `int(g, a, b, c, d, e, f)` as a row of a 3D sheet: its value and the solid it runs over.
+    /// The variables are the sheet's coordinates in their order, (x, y, z), (r, φ, z) or (ρ, θ, φ), the first outermost;
+    /// on the cylindrical and spherical sheets the integrand is weighted with the volume element, r or ρ² sin φ. The
+    /// bounds of the first variable are numbers and finite, since they span the solid.
+    fn volume(&mut self, args: &[Node], system: Option<System>) -> Result<Outcome, MathError> {
         let [body, from, to, bounds @ ..] = args else { return Err(MathError::new("error.arity", "int")) };
         let triple = bounds.len() == 4;
-        let x = (self.constant(from)?, self.constant(to)?);
-        if !x.0.is_finite() || !x.1.is_finite() {
+        let (names, slots) = system.map_or((INTEGRAL_AXES, [X, Y, Z]), |system| (system.names(), system.slots()));
+        // A double integral needs a height over its two variables: z over (x, y) or over (r, φ). A function named
+        // without arguments is called with x, y and z, which the other sheets do not have.
+        if system.is_some() && (matches!(body, Node::Call(Callee::User(_) | Callee::Derivative(..), arguments) if arguments.is_empty()) || (system == Some(System::Spherical) && !triple)) {
+            return Err(MathError::new("error.unsupported", ""));
+        }
+        let u = (self.constant(from)?, self.constant(to)?);
+        if !u.0.is_finite() || !u.1.is_finite() {
             return Err(MathError::new("error.range", ""));
         }
-        let within = |analysis: &Self, node: &Node, axes: usize| analysis.compile(node, &move |name| INTEGRAL_AXES[..axes].contains(&name) || !is_reserved(name));
-        let y = (within(self, &bounds[0], 1)?, within(self, &bounds[1], 1)?);
+        let within = |analysis: &Self, node: &Node, axes: usize| analysis.compile(node, &move |name| names[..axes].contains(&name) || !is_reserved(name));
+        let v = (within(self, &bounds[0], 1)?, within(self, &bounds[1], 1)?);
         let body = within(self, body, if triple { 3 } else { 2 })?;
-        let (z, integrand) = if triple { ((within(self, &bounds[2], 2)?, within(self, &bounds[3], 2)?), body) } else { ((Expr::Num(0.0), body.clone()), body) };
+        let times = |left: Expr, right: Expr| Expr::Bin(BinOp::Mul, Box::new(left), Box::new(right));
+        let weighted = |body: Expr| match system {
+            None => body,
+            Some(System::Cylindrical) => times(body, Expr::Slot(R)),
+            Some(System::Spherical) => times(body, times(times(Expr::Slot(RHO), Expr::Slot(RHO)), Expr::Builtin(Builtin::Sin, vec![Expr::Slot(PHI)]))),
+        };
         let over = |body: Expr, slot: usize, (from, to): &(Expr, Expr)| Expr::Integral { body: Box::new(body), slot, from: Box::new(from.clone()), to: Box::new(to.clone()) };
-        let inner = if triple { over(integrand, Z, &z) } else { integrand };
-        let value = calculus::integrate(&over(inner, Y, &y), X, x.0, x.1, &mut self.env, &self.functions);
-        Ok(Outcome::Plotted(Plot::Volume { x, y, z, value, triple }))
+        let (w, inner) = if triple {
+            let w = (within(self, &bounds[2], 2)?, within(self, &bounds[3], 2)?);
+            let inner = over(weighted(body), slots[2], &w);
+            (w, inner)
+        } else {
+            ((Expr::Num(0.0), body.clone()), weighted(body))
+        };
+        let value = calculus::integrate(&over(inner, slots[1], &v), slots[0], u.0, u.1, &mut self.env, &self.functions);
+        Ok(Outcome::Plotted(Plot::Volume { u, v, w, slots, system, value, triple }))
     }
 
     /// `tangent(g, a)`: the slope g'(a) and the point (a, g(a)); refused where g is undefined or has no derivative.
@@ -2152,5 +2172,27 @@ mod tests {
         assert!(matches!(flat.rows[0].outcome, Outcome::Value(value) if (value - 0.125).abs() < 1e-9));
         assert!(matches!(&flat.rows[1].outcome, Outcome::Error(error) if error.key == "error.arity"));
         assert!(matches!(flat.rows[2].plot(), Some(Plot::Integral { .. })));
+    }
+
+    #[test]
+    fn integrals_in_cylindrical_and_spherical_coordinates_carry_the_volume_element() {
+        let value = |sheet: &Sheet, row: usize| match sheet.rows[row].plot() {
+            Some(Plot::Volume { value, .. }) => *value,
+            other => panic!("row {row} is no volume: {other:?}"),
+        };
+        // A cylinder, a cone under z = r, the cone between z = r and z = 2, and r² over the cylinder.
+        let cylindrical = sheet(Mode::Cylindrical, &["int(1, 0, 2, 0, 2π, 0, 3)", "int(r, 0, 2, 0, 2π)", "int(1, 0, 2, 0, 2π, r, 2)", "int(r^2, 0, 1, 0, 2π, 0, 1)", "int(1, 0, 2, 0, theta, 0, 3)"]);
+        assert!((value(&cylindrical, 0) - 12.0 * PI).abs() < 1e-8);
+        assert!((value(&cylindrical, 1) - 16.0 * PI / 3.0).abs() < 1e-8);
+        assert!((value(&cylindrical, 2) - 8.0 * PI / 3.0).abs() < 1e-8);
+        assert!((value(&cylindrical, 3) - PI / 2.0).abs() < 1e-8);
+        assert!(matches!(&cylindrical.rows[4].outcome, Outcome::Error(_)));
+        assert!(matches!(cylindrical.rows[0].plot(), Some(Plot::Volume { system: Some(System::Cylindrical), triple: true, .. })));
+        // The ball of radius 2, the ice-cream cone below φ = π/4, and no double integral on this sheet.
+        let spherical = sheet(Mode::Spherical, &["int(1, 0, 2, 0, 2π, 0, π)", "int(1, 0, 2, 0, 2π, 0, π/4)", "int(ρ, 0, 1, 0, 2π, 0, π)", "int(1, 0, 2, 0, 2π)"]);
+        assert!((value(&spherical, 0) - 32.0 * PI / 3.0).abs() < 1e-8);
+        assert!((value(&spherical, 1) - 16.0 * PI / 3.0 * (1.0 - (PI / 4.0).cos())).abs() < 1e-8);
+        assert!((value(&spherical, 2) - PI).abs() < 1e-8);
+        assert!(matches!(&spherical.rows[3].outcome, Outcome::Error(error) if error.key == "error.unsupported"));
     }
 }

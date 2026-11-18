@@ -293,6 +293,20 @@ describe('the plot kernel through api.wasm', () => {
       expect(records.filter((record) => record.kind === SPACE.polygon && record.row === row).length).toBeGreaterThanOrEqual(2 * 24 * 24)
       expect(records.filter((record) => record.kind === SPACE.segment && record.row === row).length).toBeGreaterThan(24)
     }
+    // The cylindrical and spherical sheets integrate over their own coordinates with the volume element.
+    const cylindrical = sheet('int(1, 0, 2, 0, 2π, 0, 3)', 'int(4 - r^2, 0, 2, 0, 2π)', 'int(1, 0, 2, 0, 2π, r, 2)')
+    const round = engine.analyze('cylindrical', cylindrical)
+    expect(round.map((row) => row.kind)).toEqual(['volume', 'volume', 'volume'])
+    expect(round[0].value).toBeCloseTo(12 * Math.PI, 8)
+    expect(round[1].value).toBeCloseTo(8 * Math.PI, 8)
+    expect(round[2].value).toBeCloseTo(8 * Math.PI / 3, 8)
+    expect(engine.space('cylindrical', cylindrical, 600, 400, { yaw: -0.6, pitch: 0.45, range: 4 }).filter((record) => record.kind === SPACE.polygon && record.row === 0).length).toBeGreaterThan(2000)
+    const spherical = sheet('int(1, 0, 2, 0, 2π, 0, π)', 'int(1, 0, 2, 0, 2π)')
+    const ball = engine.analyze('spherical', spherical)
+    expect(ball[0]).toMatchObject({ kind: 'volume', triple: true })
+    expect(ball[0].value).toBeCloseTo(32 * Math.PI / 3, 8)
+    expect(ball[1].error?.key).toBe('error.unsupported')
+    expect(engine.space('spherical', spherical, 600, 400, { yaw: -0.6, pitch: 0.45, range: 4 }).filter((record) => record.kind === SPACE.polygon && record.row === 0).length).toBeGreaterThan(1000)
     // On a flat sheet the same rows are plain values.
     const flat = engine.analyze('cartesian', sheet('int(x y, 0, 1, 0, 2)', '2 int(1, 0, 1, 0, 1, 0, 1)'))
     expect(flat.map((row) => row.kind)).toEqual(['value', 'value'])

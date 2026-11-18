@@ -61,8 +61,14 @@ export const REFERENCE: readonly Group[] = [
   ] },
   { id: 'polar', views: ['polar'], entries: [{ id: 'polar', syntax: 'r = f(θ)', examples: ['r = 2cos(3θ)'] }] },
   { id: 'parametric', views: ['parametric'], entries: [{ id: 'curve', syntax: '(x(t), y(t))', examples: ['(cos t, sin(2t))'] }] },
-  { id: 'cylindrical', views: ['cylindrical'], entries: [{ id: 'cylindrical', syntax: 'r, φ, z', examples: ['z = r^2', 'r = 1 + cos(φ)'] }] },
-  { id: 'spherical', views: ['spherical'], entries: [{ id: 'spherical', syntax: 'ρ, θ, φ', examples: ['ρ = 2', 'φ = π/4'] }] },
+  { id: 'cylindrical', views: ['cylindrical'], entries: [
+    { id: 'cylindrical', syntax: 'r, φ, z', examples: ['z = r^2', 'r = 1 + cos(φ)'] },
+    { id: 'volumeCylindrical', syntax: 'int(f, r₁, r₂, φ₁, φ₂, z₁, z₂)', examples: ['int(1, 0, 2, 0, 2π, r, 2)', 'int(4 - r^2, 0, 2, 0, 2π)'] }
+  ] },
+  { id: 'spherical', views: ['spherical'], entries: [
+    { id: 'spherical', syntax: 'ρ, θ, φ', examples: ['ρ = 2', 'φ = π/4'] },
+    { id: 'volumeSpherical', syntax: 'int(f, ρ₁, ρ₂, θ₁, θ₂, φ₁, φ₂)', examples: ['int(1, 0, 2, 0, 2π, 0, π)', 'int(1, 0, 2, 0, 2π, 0, π/4)'] }
+  ] },
   { id: 'complex', views: ['complex'], entries: [
     { id: 'number', syntax: 'a + bi, r e^(iφ)', examples: ['1 + 2i', '2e^(iπ/3)'] },
     { id: 'region', syntax: '|z - a| < r', examples: ['|z + 2| < 3', 'Re(z) > 1'] }

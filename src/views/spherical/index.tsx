@@ -2,7 +2,7 @@ import { React } from '../../runtime'
 import type { ReactElement } from 'react'
 import { Svg, type IconProps } from '../../icons'
 import type { SpaceView } from '../types'
-import { piecewise, prod, sum } from '../inserts'
+import { piecewise, prod, sum, volumeSpherical } from '../inserts'
 
 /** A sphere with its equator and a meridian. */
 const Icon = (p: IconProps): ReactElement => (
@@ -21,7 +21,7 @@ export const spherical: SpaceView = {
   icon: Icon,
   placeholder: 'ρ = 1 + cos(θ)',
   examples: [['ρ = 2', '', '', '0', 'π/4'], ['φ = π/4', '', '', '0', '2']],
-  inserts: [sum('ρ = 2 + sum(n, 1, 3, cos(n θ) / n)', 'cos(n θ) / n'), prod('ρ = prod(n, 1, 2, 1 + φ / n)', '1 + φ / n'), piecewise('ρ = {θ < π: 1, 2}', 'θ < π')],
+  inserts: [sum('ρ = 2 + sum(n, 1, 3, cos(n θ) / n)', 'cos(n θ) / n'), prod('ρ = prod(n, 1, 2, 1 + φ / n)', '1 + φ / n'), piecewise('ρ = {θ < π: 1, 2}', 'θ < π'), volumeSpherical],
   axisNames: ['x', 'y', 'z'],
   homeRange: 3,
   ranges: { θ: ['0', '2π'], φ: ['0', 'π'], ρ: ['0', '∞'] }

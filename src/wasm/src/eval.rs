@@ -110,6 +110,15 @@ pub struct Scope<'a> {
     pub allow: &'a dyn Fn(&str) -> bool,
 }
 
+/// The variables of a double or triple integral, outermost first.
+pub const INTEGRAL_AXES: [&str; 3] = ["x", "y", "z"];
+
+/// `node` compiled where the first `axes` variables of integration may be read besides what `scope` allows.
+pub fn compile_within(node: &Node, scope: &Scope, axes: usize) -> Result<Expr, MathError> {
+    let allow = |name: &str| INTEGRAL_AXES[..axes].contains(&name) || (scope.allow)(name);
+    compile(node, &Scope { slots: scope.slots, functions: scope.functions, allow: &allow })
+}
+
 pub fn compile(node: &Node, scope: &Scope) -> Result<Expr, MathError> {
     Ok(match node {
         Node::Num(value) => Expr::Num(*value),
@@ -145,6 +154,21 @@ pub fn compile(node: &Node, scope: &Scope) -> Result<Expr, MathError> {
                 // The integrand's x is its own variable of integration, whatever the row around it may read.
                 let inner = Scope { slots: scope.slots, functions: scope.functions, allow: &|name| name == "x" || (scope.allow)(name) };
                 Expr::Integral { body: Box::new(compile(body, &inner)?), slot, from: Box::new(compile(from, scope)?), to: Box::new(compile(to, scope)?) }
+            }
+            // `int(g, a, b, c, d)` and `int(g, a, b, c, d, e, f)`: x runs from a to b outermost, y from c to d (which
+            // may read x) inside it and z from e to f (which may read x and y) innermost.
+            [body, bounds @ ..] if bounds.len() == 4 || bounds.len() == 6 => {
+                let depth = bounds.len() / 2;
+                let mut slots = Vec::with_capacity(depth);
+                for axis in &INTEGRAL_AXES[..depth] {
+                    slots.push(scope.slots.get(*axis).copied().ok_or_else(|| MathError::new("error.unsupported", ""))?);
+                }
+                let mut expr = compile_within(body, scope, depth)?;
+                for level in (0..depth).rev() {
+                    let (from, to) = (compile_within(&bounds[2 * level], scope, level)?, compile_within(&bounds[2 * level + 1], scope, level)?);
+                    expr = Expr::Integral { body: Box::new(expr), slot: slots[level], from: Box::new(from), to: Box::new(to) };
+                }
+                expr
             }
             _ => return Err(MathError::new("error.arity", "int")),
         },

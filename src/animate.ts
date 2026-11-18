@@ -135,3 +135,27 @@ export class SliderAnimator {
     this.frameId = this.view.requestAnimationFrame(this.tick)
   }
 }
+
+/** Seconds one cycle of a flowing vector field takes: an arrow drifts from its lattice point for a cycle, then starts again. */
+export const FLOW_SECONDS = 4
+
+/**
+ * Calls `frame` with the time in cycles on `requestAnimationFrame` of the window that draws the graph, at most once per
+ * {@link FRAME_MS}; a hidden document gets no frames, so the flow rests with it. Returns the function that stops it.
+ */
+export function runFlow(view: Window, frame: (time: number) => void): () => void {
+  let id: number | null = null
+  let last = -Infinity
+  const tick = (now: number): void => {
+    if (now - last >= FRAME_MS - 1) {
+      last = now
+      frame(now / 1000 / FLOW_SECONDS)
+    }
+    id = view.requestAnimationFrame(tick)
+  }
+  id = view.requestAnimationFrame(tick)
+  return () => {
+    if (id !== null) view.cancelAnimationFrame(id)
+    id = null
+  }
+}

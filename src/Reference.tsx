@@ -37,7 +37,8 @@ export const REFERENCE: readonly Group[] = [
   ] },
   { id: 'fields', views: ['cartesian', 'space'], entries: [
     { id: 'field', syntax: 'F(x, y) = (P, Q)', examples: ['F(x, y) = (-y, x)'] },
-    { id: 'field3', syntax: 'F(x, y, z) = (P, Q, R)', examples: ['F(x, y, z) = (-y, x, 0)'] }
+    { id: 'field3', syntax: 'F(x, y, z) = (P, Q, R)', examples: ['F(x, y, z) = (-y, x, 0)'] },
+    { id: 'flow', syntax: 'F(x, y) = (P, Q)' }
   ] },
   { id: 'levels', views: ['cartesian', 'space'], entries: [
     { id: 'levels', syntax: 'f(x, y) = …', examples: ['g(x, y) = x^2 - y^2'] },
@@ -54,7 +55,9 @@ export const REFERENCE: readonly Group[] = [
     { id: 'psurface', syntax: '(x(u, v), y(u, v), z(u, v))', examples: ['(u cos v, u sin v, v)'] },
     { id: 'curve3', syntax: '(x(t), y(t), z(t))', examples: ['(6cos t, 6sin t, t / 2)'] },
     { id: 'point3', syntax: '(a, b, c)', examples: ['(1, 2, 3)'] },
-    { id: 'tplane', syntax: 'tangent(f, a, b)', examples: ['tangent((x^2 + y^2) / 5 - 6, 3, 2)'] }
+    { id: 'tplane', syntax: 'tangent(f, a, b)', examples: ['tangent((x^2 + y^2) / 5 - 6, 3, 2)'] },
+    { id: 'volume', syntax: 'int(f, a, b, c, d)', examples: ['int(6 - (x^2 + y^2) / 4, -3, 3, -3, 3)'] },
+    { id: 'volume3', syntax: 'int(f, a, b, c, d, e, g)', examples: ['int(1, -4, 4, -sqrt(16 - x^2), sqrt(16 - x^2), 0, 8 - (x^2 + y^2) / 2)'] }
   ] },
   { id: 'polar', views: ['polar'], entries: [{ id: 'polar', syntax: 'r = f(θ)', examples: ['r = 2cos(3θ)'] }] },
   { id: 'parametric', views: ['parametric'], entries: [{ id: 'curve', syntax: '(x(t), y(t))', examples: ['(cos t, sin(2t))'] }] },

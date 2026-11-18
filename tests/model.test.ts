@@ -85,6 +85,20 @@ describe('sheets', () => {
     expect(named('F(x, y) = (-y, x) + 1')).toBe(false)
   })
 
+  it('keeps a flowing vector field only where it was switched on', () => {
+    const document = normalizeDocument({ version: 1, sheets: { cartesian: [{ id: 'a', text: '(-y, x)', flow: true }, { id: 'b', text: '(y, x)', flow: false }, { id: 'c', text: '(1, x)', flow: 'yes' }] } })
+    expect(document.sheets.cartesian[0].flow).toBe(true)
+    expect('flow' in document.sheets.cartesian[1]).toBe(false)
+    expect('flow' in document.sheets.cartesian[2]).toBe(false)
+  })
+
+  it('typesets double and triple integrals with one sign and one differential per variable', () => {
+    expect(parseMath('int(x y, 0, 1, 0, x)')).toMatchObject({ k: 'integral', from: { k: 'num', text: '0' }, to: { k: 'num', text: '1' }, inner: [{ from: { k: 'num', text: '0' }, to: { k: 'var', text: 'x' } }] })
+    const triple = parseMath('∫(1, 0, 2, 0, 3, 0, 4)')
+    expect(triple).toMatchObject({ k: 'integral', inner: [{ to: { k: 'num', text: '3' } }, { to: { k: 'num', text: '4' } }] })
+    expect(parseMath('int(x, 0, 1, 2)')).toMatchObject({ k: 'fn', text: '∫' })
+  })
+
   it('keeps the normal-vector choice of a tangent plane only where it was made', () => {
     const document = normalizeDocument({ version: 1, sheets: { space: [{ id: 'a', text: 'tangent(f, a, b)', normal: false }, { id: 'b', text: 'tangent(f, 1, 2)', normal: 'off' }, { id: 'c', text: 'z = x y' }] } })
     expect(document.sheets.space[0].normal).toBe(false)

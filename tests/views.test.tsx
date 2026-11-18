@@ -211,6 +211,26 @@ describe('the graph tab', () => {
     fireEvent.click(shading)
     expect(within(field).getByRole('switch', { name: 'Shade by magnitude' }).getAttribute('aria-checked')).toBe('false')
     await waitFor(async () => expect(await mock.api.data.files.readText('graphs.json')).toContain('"magnitude": false'), { timeout: 2000 })
+    // The arrows flow once switched on, and a field switched back keeps no trace of it.
+    const flow = within(field).getByRole('switch', { name: 'Animate flow' })
+    expect(flow.getAttribute('aria-checked')).toBe('false')
+    fireEvent.click(flow)
+    expect(within(field).getByRole('switch', { name: 'Animate flow' }).getAttribute('aria-checked')).toBe('true')
+    await waitFor(async () => expect(await mock.api.data.files.readText('graphs.json')).toContain('"flow": true'), { timeout: 2000 })
+    fireEvent.click(within(field).getByRole('switch', { name: 'Animate flow' }))
+    await waitFor(async () => expect(await mock.api.data.files.readText('graphs.json')).not.toContain('"flow"'), { timeout: 2000 })
+  })
+
+  it('shows a double integral on the 3D sheet with its value and typesets both integral signs', async () => {
+    mount({ [FILE]: JSON.stringify({ version: 1, mode: 'space', sheets: { space: [{ id: 'a', text: 'int(4 - x^2 - y^2, -1, 1, -1, 1)' }, { id: 'b', text: 'int(1, 0, 2, 0, 3, 0, 4)' }] } }) })
+    render(<Sidebar />)
+    const rows = await screen.findAllByRole('listitem')
+    await waitFor(() => expect(rows[0].getAttribute('data-kind')).toBe('volume'))
+    expect(rows[0].querySelector('.grapher-value')?.textContent).toBe('= 13.33333333')
+    expect(rows[0].querySelectorAll('.gm-int-sign')).toHaveLength(2)
+    expect([...rows[0].querySelectorAll('.gm-dx')].map((node) => node.textContent)).toEqual(['dy', 'dx'])
+    expect(rows[1].querySelector('.grapher-value')?.textContent).toBe('= 24')
+    expect(rows[1].querySelectorAll('.gm-int-sign')).toHaveLength(3)
   })
 
   it('draws the level curves of f(x, y) with a level count, a step and labels, and floor curves under a 3D surface', async () => {

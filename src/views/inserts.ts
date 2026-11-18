@@ -16,4 +16,5 @@ export const levels: Insert = { id: 'levels', glyph: LevelsIcon, text: 'g(x, y) 
 export const psurface: Insert = { id: 'psurface', glyph: SurfaceIcon, text: '(u cos v, u sin v, v)', select: 'u cos v, u sin v, v' }
 export const implicit3: Insert = { id: 'implicit3', glyph: SphereIcon, text: 'x^2 + y^2 + z^2 = 4', select: 'x^2 + y^2 + z^2' }
 export const field3: Insert = { id: 'field3', glyph: FieldIcon, text: 'F(x, y, z) = (-y, x, 0)', select: '(-y, x, 0)' }
+export const volume: Insert = { id: 'volume', glyph: '∬', text: 'int(6 - (x^2 + y^2) / 4, -3, 3, -3, 3)', select: '6 - (x^2 + y^2) / 4' }
 export const tplane: Insert = { id: 'tplane', glyph: PlaneIcon, text: 'tangent((x^2 + y^2) / 5 - 6, 3, 2)', select: '(x^2 + y^2) / 5 - 6' }

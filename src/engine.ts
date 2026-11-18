@@ -11,7 +11,7 @@ const MODULE_ID = 'plot'
 const RECORD = '\u001e'
 const FIELD = '\u001f'
 const CELL = '\u001d'
-export type RowKind = 'empty' | 'error' | 'param' | 'value' | 'function' | 'definition' | 'polar' | 'curve' | 'point' | 'implicit' | 'surface' | 'curve3' | 'point3' | 'region' | 'cpoint' | 'csurface' | 'coords' | 'psurface' | 'implicit3' | 'field' | 'field3' | 'contour' | 'integral' | 'tangent' | 'tplane' | 'table'
+export type RowKind = 'empty' | 'error' | 'param' | 'value' | 'function' | 'definition' | 'polar' | 'curve' | 'point' | 'implicit' | 'surface' | 'curve3' | 'point3' | 'region' | 'cpoint' | 'csurface' | 'coords' | 'psurface' | 'implicit3' | 'field' | 'field3' | 'contour' | 'integral' | 'volume' | 'tangent' | 'tplane' | 'table'
 
 export interface RowError {
   key: string
@@ -42,6 +42,8 @@ export interface RowAnalysis {
   over?: [string, string]
   from2?: number
   to2?: number
+  /** `volume` rows (a double or triple integral drawn as a solid on the 3D sheet): whether it is a triple integral. */
+  triple?: boolean
   /** `tangent` rows: the line y = slope · x + intercept, touching at (x, y). */
   slope?: number
   intercept?: number
@@ -101,8 +103,9 @@ export const SPACE = { polygon: 0, segment: 1, point: 2, huePolygon: 3, arrow: 4
 
 export interface PlotEngine {
   analyze(mode: Mode, rows: readonly Row[]): RowAnalysis[]
-  space(mode: Mode, rows: readonly Row[], width: number, height: number, camera: Camera): SpaceRecord[]
-  sample(mode: Mode, rows: readonly Row[], width: number, height: number, view: Viewport): SamplePath[]
+  /** `time` (in cycles, see `FLOW_SECONDS`) places the arrows of flowing vector fields. */
+  space(mode: Mode, rows: readonly Row[], width: number, height: number, camera: Camera, time?: number): SpaceRecord[]
+  sample(mode: Mode, rows: readonly Row[], width: number, height: number, view: Viewport, time?: number): SamplePath[]
   /** `f(value)` of a function row, for tracing under the pointer. */
   evaluate(mode: Mode, rows: readonly Row[], row: number, value: number): number
   /** Zeros, extrema and intersections of a `y = f(x)` row in the viewport. */
@@ -118,16 +121,18 @@ interface PlotExports {
   plot_eval(row: number, value: number): number
   plot_space(width: number, height: number, yaw: number, pitch: number, range: number): number
   plot_markers(row: number, width: number, height: number, cx: number, cy: number, scale: number): number
+  plot_flow(time: number): void
 }
 
-const EXPORTS: (keyof PlotExports)[] = ['plot_input', 'plot_analyze', 'plot_text', 'plot_sample', 'plot_samples', 'plot_eval', 'plot_space', 'plot_markers']
+const EXPORTS: (keyof PlotExports)[] = ['plot_input', 'plot_analyze', 'plot_text', 'plot_sample', 'plot_samples', 'plot_eval', 'plot_space', 'plot_markers', 'plot_flow']
 const clean = (value: string): string => value.replace(/[\u001d\u001e\u001f]/g, ' ')
 
-/** One record per row; a table sends its cells (decimal commas read as points) instead of the text. */
+/** One record per row; a table sends its cells (decimal commas read as points) instead of the text. The last field marks a
+ * vector field whose arrows flow. */
 export function encodeRows(rows: readonly Row[]): string {
   return rows.map((row) => {
     const cells = row.table ? row.table.cells.flatMap(([x, y]) => [clean(cellText(x)), clean(cellText(y))]).join(CELL) : ''
-    return [row.table ? '' : clean(row.text), clean(row.from), clean(row.to), row.hidden ? '1' : '0', clean(row.from2), clean(row.to2), row.levels === undefined ? '' : String(row.levels), clean(row.step ?? ''), row.floor ? '1' : '0', row.normal === false ? '0' : '1', row.table ? '1' : '', cells, row.connect ? '1' : '0'].join(FIELD)
+    return [row.table ? '' : clean(row.text), clean(row.from), clean(row.to), row.hidden ? '1' : '0', clean(row.from2), clean(row.to2), row.levels === undefined ? '' : String(row.levels), clean(row.step ?? ''), row.floor ? '1' : '0', row.normal === false ? '0' : '1', row.table ? '1' : '', cells, row.connect ? '1' : '0', row.flow ? '1' : '0'].join(FIELD)
   }).join(RECORD)
 }
 
@@ -154,6 +159,7 @@ export function decodeOutcomes(text: string, count: number): RowAnalysis[] {
       case 'curve': return { kind, from: Number(a), to: Number(b) }
       case 'point': return { kind, x: Number(a), y: Number(b) }
       case 'integral': return { kind, value: Number(a), from: Number(b), to: Number(c) }
+      case 'volume': return { kind, value: Number(a), triple: b === '3' }
       case 'tangent': return { kind, slope: Number(a), intercept: Number(b), x: Number(c), y: Number(rest[0]) }
       case 'table': return { kind, count: Number(a), bad: b ? b.split(',').map(Number) : [], missing: c ? c.split(',') : [] }
       case 'tplane': return { kind, gradient: [Number(a), Number(b)], x: Number(c), y: Number(rest[0]), z: Number(rest[1]) }
@@ -234,14 +240,16 @@ export function createPlotEngine(exports: PlotExports, memory: WebAssembly.Memor
   }
   return {
     analyze: load,
-    sample(mode, rows, width, height, view) {
+    sample(mode, rows, width, height, view, time = 0) {
       load(mode, rows)
+      exports.plot_flow(time)
       const count = exports.plot_sample(width, height, view.cx, view.cy, view.scale)
       const at = exports.plot_samples()
       return decodePaths(new Float64Array(memory.buffer, at, count).slice())
     },
-    space(mode, rows, width, height, camera) {
+    space(mode, rows, width, height, camera, time = 0) {
       load(mode, rows)
+      exports.plot_flow(time)
       const count = exports.plot_space(width, height, camera.yaw, camera.pitch, camera.range)
       const at = exports.plot_samples()
       return decodeSpace(new Float64Array(memory.buffer, at, count).slice())

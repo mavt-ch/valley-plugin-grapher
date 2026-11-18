@@ -256,6 +256,50 @@ describe('the plot kernel through api.wasm', () => {
     expect(records.filter((record) => record.kind === SPACE.arrow && record.row === 1).every((record) => record.value === 1 && record.points.length === 4)).toBe(true)
   })
 
+  it('lets the arrows of a flowing field drift with the time and leaves a still field alone', () => {
+    const view = { cx: 0, cy: 0, scale: 20 }
+    const arrows = (flow: boolean, time: number): number[] => engine.sample('cartesian', sheet({ text: 'F(x, y) = (-y, x)', ...(flow ? { flow: true } : {}) }), 400, 300, view, time).filter((path) => path.kind === 'arrow').flatMap((path) => [...path.points])
+    expect(arrows(false, 0.4)).toEqual(arrows(false, 0))
+    const [early, late] = [arrows(true, 0.1), arrows(true, 0.35)]
+    expect(early.length).toBeGreaterThan(100 * 2 * STRIDE)
+    expect(late).not.toEqual(early)
+    // One cycle later every arrow is back where it was.
+    const again = arrows(true, 1.1)
+    expect(again).toHaveLength(early.length)
+    again.forEach((value, index) => expect(value).toBeCloseTo(early[index], 6))
+    const camera = { yaw: -0.6, pitch: 0.45, range: 10 }
+    const space = (flow: boolean, time: number): number[] => engine.space('space', sheet({ text: '(-y, x, 1)', ...(flow ? { flow: true } : {}) }), 600, 400, camera, time).filter((record) => record.kind === SPACE.arrow).flatMap((record) => [...record.points])
+    expect(space(false, 0.4)).toEqual(space(false, 0))
+    expect(space(true, 0.35)).not.toEqual(space(true, 0.1))
+    expect(space(true, 0.1).length).toBeGreaterThan(200 * 4)
+    // A time set for one sheet does not leak into a still field sampled next.
+    expect(arrows(false, 0)).toEqual(arrows(false, 0.4))
+  })
+
+  it('draws double and triple integrals as solids with their values', () => {
+    const rows = sheet('int(4 - x^2 - y^2, -1, 1, -1, 1)', 'int(1, 0, 2, 0, 3, 0, 4)', 'int(1, -2, 2, -sqrt(4 - x^2), sqrt(4 - x^2), -sqrt(4 - x^2 - y^2), sqrt(4 - x^2 - y^2))', 'int(1, 0, a, 0, 1)', 'int(x, 0, 1, 2, 3)', 'int(x y, 0, 1, 0, x)', 'int(x y, 0, 1, 0, 1, 0)')
+    const analyses = engine.analyze('space', rows)
+    expect(analyses.map((row) => row.kind)).toEqual(['volume', 'volume', 'volume', 'error', 'volume', 'volume', 'error'])
+    expect(analyses[0]).toMatchObject({ triple: false })
+    expect(analyses[0].value).toBeCloseTo(40 / 3, 9)
+    expect(analyses[1]).toMatchObject({ value: 24, triple: true })
+    expect(analyses[2].value).toBeCloseTo(32 * Math.PI / 3, 3)
+    expect(analyses[3].error).toEqual({ key: 'error.unknown', param: 'a', missing: ['a'] })
+    expect(analyses[4].value).toBeCloseTo(0.5, 9)
+    expect(analyses[5].value).toBeCloseTo(0.125, 9)
+    expect(analyses[6].error?.key).toBe('error.arity')
+    const records = engine.space('space', rows, 600, 400, { yaw: -0.6, pitch: 0.45, range: 10 })
+    for (const row of [0, 1, 2]) {
+      expect(records.filter((record) => record.kind === SPACE.polygon && record.row === row).length).toBeGreaterThanOrEqual(2 * 24 * 24)
+      expect(records.filter((record) => record.kind === SPACE.segment && record.row === row).length).toBeGreaterThan(24)
+    }
+    // On a flat sheet the same rows are plain values.
+    const flat = engine.analyze('cartesian', sheet('int(x y, 0, 1, 0, 2)', '2 int(1, 0, 1, 0, 1, 0, 1)'))
+    expect(flat.map((row) => row.kind)).toEqual(['value', 'value'])
+    expect(flat[0].value).toBeCloseTo(1, 12)
+    expect(flat[1].value).toBeCloseTo(2, 12)
+  })
+
   it('draws the level curves of f(x, y) with their levels and on the floor under a surface', () => {
     const rows = sheet('f(x, y) = x^2 + y^2', { text: 'g(x, y) = x', step: '2.5' }, { text: 'h(x, y) = y', step: '-1' }, { text: 'k(x, y) = x y', levels: 4 })
     const analyses = engine.analyze('cartesian', rows)
@@ -393,7 +437,7 @@ describe('the plot kernel through api.wasm', () => {
     const table = { head: ['x', 'y'] as [string, string], cells: [['0', '1'], ['1,5', 'a'], ['', ''], ['3', 'q'], ['4', '6']] as [string, string][] }
     const rows = sheet('a = 2', { table, connect: true }, '[(1, 2), (3, 4)]', { table: { head: ['x', 'y'], cells: [] } })
     const encoded = encodeRows(rows).split('\u001e')[1].split('\u001f')
-    expect(encoded.slice(10)).toEqual(['1', '0\u001d1\u001d1.5\u001da\u001d\u001d\u001d3\u001dq\u001d4\u001d6', '1'])
+    expect(encoded.slice(10)).toEqual(['1', '0\u001d1\u001d1.5\u001da\u001d\u001d\u001d3\u001dq\u001d4\u001d6', '1', '0'])
     const analyses = engine.analyze('cartesian', rows)
     expect(analyses[1]).toMatchObject({ kind: 'table', count: 3, bad: [7], missing: ['q'] })
     expect(analyses[2]).toMatchObject({ kind: 'table', count: 2, bad: [], missing: [] })

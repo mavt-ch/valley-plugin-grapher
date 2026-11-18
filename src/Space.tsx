@@ -7,6 +7,7 @@ import { uiText } from './localization'
 import type { Row } from './model'
 import { cameraKey, getStore } from './store'
 import { noteCanvas } from './details'
+import { runFlow } from './animate'
 import { registerExporter, renderPng } from './exporting'
 import { formatNumber, piTicks } from './ticks'
 import type { AxisUnits } from './model'
@@ -165,6 +166,8 @@ export const SpaceCanvas = ({ view, rows, engine, graph, units }: SpaceProps): R
   const cameraRef = React.useRef<Camera>(store.cameras[slot] ?? home)
   const dragRef = React.useRef<{ id: number; x: number; y: number; camera: Camera } | null>(null)
   const frameRef = React.useRef<number | null>(null)
+  /** The time flowing vector fields are drawn at, in cycles. */
+  const flowRef = React.useRef(0)
   const inputs = React.useRef({ view, slot, rows, engine, units })
   inputs.current = { view, slot, rows, engine, units }
 
@@ -174,7 +177,7 @@ export const SpaceCanvas = ({ view, rows, engine, graph, units }: SpaceProps): R
     const { view, rows, engine, units } = inputs.current
     let records: SpaceRecord[] = []
     try {
-      records = engine ? engine.space(view.id, rows, size.width, size.height, cameraRef.current) : []
+      records = engine ? engine.space(view.id, rows, size.width, size.height, cameraRef.current, flowRef.current) : []
     } catch {
       records = []
     }
@@ -226,6 +229,21 @@ export const SpaceCanvas = ({ view, rows, engine, graph, units }: SpaceProps): R
   }, [slot, store, home, invalidate])
 
   React.useEffect(() => { invalidate() }, [rows, engine, units, invalidate])
+
+  // A visible vector field set to flow redraws the frame with the time, for as long as one is shown.
+  const flowing = React.useMemo(() => {
+    if (!engine || !rows.some((row) => row.flow === true && !row.hidden)) return false
+    const analyses = engine.analyze(view.id, rows)
+    return rows.some((row, index) => row.flow === true && !row.hidden && analyses[index]?.kind === 'field3')
+  }, [engine, rows, view.id])
+  React.useEffect(() => {
+    const window = canvasRef.current?.ownerDocument.defaultView
+    if (!flowing || !window) return
+    return runFlow(window, (time) => {
+      flowRef.current = time
+      invalidate()
+    })
+  }, [flowing, invalidate])
 
   React.useEffect(() => {
     const wrap = wrapRef.current

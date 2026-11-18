@@ -11,7 +11,7 @@ use crate::builtins::Builtin;
 use crate::calculus;
 use crate::complex::{self, C64, CExpr, CUserFn};
 use crate::error::MathError;
-use crate::eval::{Expr, Scope, UserFn, compile, constant, eval, index_range};
+use crate::eval::{Expr, INTEGRAL_AXES, Scope, UserFn, compile, constant, eval, index_range};
 use crate::lexer::{Tok, tokenize};
 use crate::parser::{BinOp, Callee, Cond, Node, Relation, Statement, parse};
 
@@ -204,6 +204,8 @@ pub struct RowInput {
     pub table: Option<Vec<[String; 2]>>,
     /// Join a table's or a list's points with a line in the order given.
     pub connect: bool,
+    /// Vector fields: let the arrows drift along the field with the sheet's time (see `Sheet::time`).
+    pub flow: bool,
 }
 
 /// Which level curves to draw: at most `count` round levels across the values in view, or every multiple of `step`.
@@ -256,6 +258,11 @@ pub enum Plot {
     CoordSurface { expr: Expr, system: System, given: usize, u: Span, v: Span },
     /// `int(g, a, b)` on the Cartesian sheet: the area between g(x) and the x-axis from a to b, and its signed value.
     Integral { body: Expr, from: f64, to: f64, value: f64 },
+    /// A double or triple integral on the 3D sheet, drawn as a solid: x runs over `x`, y between the two `y` bounds (which
+    /// may read x) and z between the two `z` bounds (which may read x and y). `int(g, a, b, c, d)` is the solid between
+    /// the xy-plane and z = g(x, y), whose signed volume is the value; `int(g, a, b, c, d, e, f)` is the region the
+    /// triple integral runs over (`triple`), whose volume is the value when g is 1.
+    Volume { x: (f64, f64), y: (Expr, Expr), z: (Expr, Expr), value: f64, triple: bool },
     /// `tangent(g, a)`: the line y = slope · x + intercept touching g at (x, y).
     Tangent { slope: f64, intercept: f64, x: f64, y: f64 },
     /// `tangent(g, a, b)` on the 3D sheet: the plane z = c + gx (x − a) + gy (y − b) touching z = g(x, y) at `point`
@@ -331,6 +338,8 @@ pub enum Outcome {
 pub struct Row {
     pub outcome: Outcome,
     pub hidden: bool,
+    /// A vector field whose arrows drift along it.
+    pub flow: bool,
 }
 
 impl Row {
@@ -350,6 +359,8 @@ pub struct Sheet {
     pub rows: Vec<Row>,
     /// Implicit 3D surfaces already extracted, per row, for the cube they were extracted in (see `space`).
     pub meshes: HashMap<usize, Mesh>,
+    /// The time of flowing vector fields, in cycles: an arrow drifts from its lattice point for one cycle, then starts again.
+    pub time: f64,
 }
 
 /// One polygon in world coordinates with its normal.
@@ -403,6 +414,17 @@ fn collect(node: &Node, names: &mut BTreeSet<String>, calls: &mut BTreeSet<Strin
             }
             match (callee, args.split_first()) {
                 // The integrand of `int` and the function of `tangent` read x (and y in 3D) as their own variables.
+                // A double or triple integral binds x, y (and z): its integrand reads them all, the bounds of y read x and
+                // the bounds of z read x and y.
+                (Callee::Integral, Some((body, rest))) if rest.len() > 2 => {
+                    let depth = rest.len() / 2;
+                    for (index, arg) in std::iter::once(body).chain(rest).enumerate() {
+                        let bound = if index == 0 { depth } else { (index - 1) / 2 };
+                        let mut inner = BTreeSet::new();
+                        collect(arg, &mut inner, calls);
+                        names.extend(inner.into_iter().filter(|name| !INTEGRAL_AXES[..bound].contains(&name.as_str())));
+                    }
+                }
                 (Callee::Integral | Callee::Tangent, Some((body, rest))) => {
                     let mut inner = BTreeSet::new();
                     collect(body, &mut inner, calls);
@@ -893,7 +915,10 @@ impl Analysis<'_> {
         self.require(&nodes, own)?;
         if let (None, Node::Call(callee @ (Callee::Integral | Callee::Tangent), args)) = (&statement.left, &statement.right) {
             match (callee, mode) {
-                (Callee::Integral, Mode::Cartesian | Mode::Trig) => return self.integral(args),
+                (Callee::Integral, Mode::Cartesian | Mode::Trig) if args.len() == 3 => return self.integral(args),
+                (Callee::Integral, Mode::Space) if args.len() > 3 => return self.volume(args),
+                // Elsewhere a double or triple integral is its value, like any expression without variables.
+                (Callee::Integral, _) if args.len() > 3 => {}
                 (_, Mode::Cartesian | Mode::Trig) => return self.tangent(args),
                 (Callee::Tangent, Mode::Space) => return self.tangent_plane(args, input),
                 (Callee::Tangent, _) => return Err(MathError::new("error.unsupported", "")),
@@ -1001,6 +1026,25 @@ impl Analysis<'_> {
         }
         let value = calculus::integrate(&body, X, from, to, &mut self.env, &self.functions);
         Ok(Outcome::Plotted(Plot::Integral { body, from, to, value }))
+    }
+
+    /// `int(g, a, b, c, d)` or `int(g, a, b, c, d, e, f)` as a row of the 3D sheet: its value and the solid it runs over.
+    /// The bounds of x are numbers and finite, since they span the solid.
+    fn volume(&mut self, args: &[Node]) -> Result<Outcome, MathError> {
+        let [body, from, to, bounds @ ..] = args else { return Err(MathError::new("error.arity", "int")) };
+        let triple = bounds.len() == 4;
+        let x = (self.constant(from)?, self.constant(to)?);
+        if !x.0.is_finite() || !x.1.is_finite() {
+            return Err(MathError::new("error.range", ""));
+        }
+        let within = |analysis: &Self, node: &Node, axes: usize| analysis.compile(node, &move |name| INTEGRAL_AXES[..axes].contains(&name) || !is_reserved(name));
+        let y = (within(self, &bounds[0], 1)?, within(self, &bounds[1], 1)?);
+        let body = within(self, body, if triple { 3 } else { 2 })?;
+        let (z, integrand) = if triple { ((within(self, &bounds[2], 2)?, within(self, &bounds[3], 2)?), body) } else { ((Expr::Num(0.0), body.clone()), body) };
+        let over = |body: Expr, slot: usize, (from, to): &(Expr, Expr)| Expr::Integral { body: Box::new(body), slot, from: Box::new(from.clone()), to: Box::new(to.clone()) };
+        let inner = if triple { over(integrand, Z, &z) } else { integrand };
+        let value = calculus::integrate(&over(inner, Y, &y), X, x.0, x.1, &mut self.env, &self.functions);
+        Ok(Outcome::Plotted(Plot::Volume { x, y, z, value, triple }))
     }
 
     /// `tangent(g, a)`: the slope g'(a) and the point (a, g(a)); refused where g is undefined or has no derivative.
@@ -1372,7 +1416,7 @@ pub fn analyze(mode: Mode, inputs: &[RowInput]) -> Sheet {
     let mut rows = Vec::with_capacity(inputs.len());
     for (row, input) in inputs.iter().enumerate() {
         if let Some(cells) = &input.table {
-            rows.push(Row { outcome: analysis.table(mode, cells, input.connect), hidden: input.hidden });
+            rows.push(Row { outcome: analysis.table(mode, cells, input.connect), hidden: input.hidden, flow: false });
             continue;
         }
         let outcome = match (&statements[row], definition_rows.get(&row)) {
@@ -1423,9 +1467,9 @@ pub fn analyze(mode: Mode, inputs: &[RowInput]) -> Sheet {
             },
             (Some(Ok(_)), None) => analysis.plot(mode, row, input).unwrap_or_else(Outcome::Error),
         };
-        rows.push(Row { outcome, hidden: input.hidden });
+        rows.push(Row { outcome, hidden: input.hidden, flow: input.flow });
     }
-    Sheet { env: analysis.env, functions: analysis.functions, cenv: analysis.cenv, cfunctions: analysis.cfunctions, rows, meshes: HashMap::new() }
+    Sheet { env: analysis.env, functions: analysis.functions, cenv: analysis.cenv, cfunctions: analysis.cfunctions, rows, meshes: HashMap::new(), time: 0.0 }
 }
 
 #[cfg(test)]
@@ -2065,5 +2109,48 @@ mod tests {
         assert!(matches!(&cartesian.rows[4].outcome, Outcome::Parameter { name, .. } if name == "i"));
         let polar = sheet(Mode::Polar, &["r < 2"]);
         assert_eq!(error(&polar, 0).key, "error.unsupported");
+    }
+
+    #[test]
+    fn double_and_triple_integrals_have_values_and_solids() {
+        let value = |sheet: &Sheet, row: usize| match sheet.rows[row].plot() {
+            Some(Plot::Volume { value, .. }) => *value,
+            other => panic!("row {row} is no volume: {other:?}"),
+        };
+        let texts = [
+            "int(x y, 0, 1, 0, 2)",
+            "int(4 - x^2 - y^2, -1, 1, -1, 1)",
+            "int(1, 0, 1, 0, x)",
+            "int(1, 0, 2, 0, 3, 0, 4)",
+            "int(x y z, 0, 1, 0, 1, 0, 1)",
+            "int(1, -2, 2, -sqrt(4 - x^2), sqrt(4 - x^2), -sqrt(4 - x^2 - y^2), sqrt(4 - x^2 - y^2))",
+            "f(x, y) = x + y",
+            "int(f, 0, 1, 0, 1)",
+            "int(1, 0, a, 0, 1)",
+            "int(1, 0, inf, 0, 1)",
+            "2 int(x y, 0, 1, 0, 2)",
+        ];
+        let space = sheet(Mode::Space, &texts);
+        let sheet_3d = &space;
+        assert!((value(sheet_3d, 0) - 1.0).abs() < 1e-9);
+        assert!((value(sheet_3d, 1) - 40.0 / 3.0).abs() < 1e-9);
+        assert!((value(sheet_3d, 2) - 0.5).abs() < 1e-9);
+        assert!((value(sheet_3d, 3) - 24.0).abs() < 1e-9);
+        assert!((value(sheet_3d, 4) - 0.125).abs() < 1e-9);
+        // The ball of radius 2: the bounds meet the surface with vertical tangents, which the shared budget still resolves.
+        assert!((value(sheet_3d, 5) - 32.0 * PI / 3.0).abs() < 1e-3, "{}", value(sheet_3d, 5));
+        assert!((value(sheet_3d, 7) - 1.0).abs() < 1e-9);
+        assert!(matches!(space.rows[3].plot(), Some(Plot::Volume { triple: true, .. })) && matches!(space.rows[0].plot(), Some(Plot::Volume { triple: false, .. })));
+        match &space.rows[8].outcome {
+            Outcome::Error(error) => assert_eq!((error.key, error.missing.clone()), ("error.unknown", vec!["a".to_string()])),
+            _ => panic!("an undefined bound is an error"),
+        }
+        assert!(matches!(&space.rows[9].outcome, Outcome::Error(error) if error.key == "error.range"));
+        assert!(matches!(space.rows[10].outcome, Outcome::Value(value) if (value - 2.0).abs() < 1e-9));
+        // On the flat sheet they are values; four or six arguments are refused.
+        let flat = sheet(Mode::Cartesian, &["int(x y, 0, 1, 0, x)", "int(x, 0, 1, 2)", "int(x^2, 0, 3)"]);
+        assert!(matches!(flat.rows[0].outcome, Outcome::Value(value) if (value - 0.125).abs() < 1e-9));
+        assert!(matches!(&flat.rows[1].outcome, Outcome::Error(error) if error.key == "error.arity"));
+        assert!(matches!(flat.rows[2].plot(), Some(Plot::Integral { .. })));
     }
 }

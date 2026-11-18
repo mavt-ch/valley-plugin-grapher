@@ -22,6 +22,14 @@
 //! (whatever the slope, since its sides run along the plane), cut into cells, clipped to the cube and shaded like a
 //! surface; the point and the normal (−gx, −gy, 1), scaled to a fixed share of the cube, are drawn on it.
 //!
+//! A double or triple integral is drawn as the solid it runs over: x over its interval, y between its two bounds at that
+//! x and z between its two bounds at that (x, y), on a 24 × 24 grid. The top and the bottom are sampled surfaces and the
+//! four sides are strips between them; every face is clipped to the cube and shaded like a surface, so the solid is
+//! ordered back to front with whatever else the sheet draws. Its edges are drawn as curves so the faces read apart.
+//!
+//! A flowing vector field moves each arrow from its lattice point along the field for one cycle of the sheet's time and
+//! starts it again, each arrow at its own point of the cycle and growing from and shrinking to nothing at the ends.
+//!
 //! Records: `[kind, row or axis, shade or value, count]`, then `count` screen points `[x, y]`.
 
 use std::f64::consts::TAU;
@@ -30,7 +38,7 @@ use crate::complex::{self, C64, CExpr, CUserFn};
 use crate::eval::{Expr, UserFn, eval};
 use std::collections::HashMap;
 
-use crate::sample::{level_values, nice, percentile};
+use crate::sample::{FLOW_REACH, drift, flow_phase, flow_size, level_values, nice, percentile};
 use crate::sheet::{Axis3, Face, Height, Levels, Mesh, Plot, Sheet, Span, System, T, X, Y, Z};
 
 pub const POLYGON: f64 = 0.0;
@@ -65,6 +73,8 @@ const PATCH: f64 = 0.35;
 const NORMAL_LENGTH: f64 = 0.4;
 /// Cells per edge of the patch, so it interleaves with the surface it touches when ordered back to front.
 const PATCH_CELLS: usize = 12;
+/// Cells per side of the solid of a double or triple integral: 6 · 24² faces at most, about as many as one surface.
+const SOLID_CELLS: usize = 24;
 /// Light direction in camera space (right, up, toward the viewer), normalized at use.
 const LIGHT: [f64; 3] = [-0.35, 0.55, 1.0];
 
@@ -328,6 +338,7 @@ struct Scene<'a> {
     cenv: &'a mut [C64],
     cfunctions: &'a [CUserFn],
     meshes: &'a mut HashMap<usize, Mesh>,
+    time: f64,
     items: Vec<Item>,
 }
 
@@ -555,7 +566,7 @@ impl Scene<'_> {
     }
 
     /// `F(x, y, z) = (P, Q, R)`: one centred arrow per lattice cell, scaled to the field's magnitudes in the cube.
-    fn field(&mut self, row: f64, (p, q, r): (&Expr, &Expr, &Expr)) {
+    fn field(&mut self, row: f64, (p, q, r): (&Expr, &Expr, &Expr), flow: bool) {
         let range = self.camera.range;
         let edge = 2.0 * range / FIELD_CELLS as f64;
         let at = |i: usize| -range + edge * (i as f64 + 0.5);
@@ -575,11 +586,97 @@ impl Scene<'_> {
         }
         let mut magnitudes: Vec<f64> = arrows.iter().map(|arrow| arrow.2).collect();
         let Some(reference) = percentile(&mut magnitudes, 0.9) else { return };
-        for (point, unit, magnitude) in arrows {
+        let lattice = arrows;
+        let mut arrows = Vec::with_capacity(lattice.len());
+        for (index, (point, unit, magnitude)) in lattice.into_iter().enumerate() {
+            if !flow {
+                arrows.push((point, unit, magnitude, 1.0));
+                continue;
+            }
+            let phase = flow_phase(self.time, &[row as i64, index as i64]);
+            let value = |scene: &mut Self, at: Vec3| -> Option<(Vec3, f64)> {
+                (scene.env[X], scene.env[Y], scene.env[Z]) = (at[0], at[1], at[2]);
+                let value = [eval(p, scene.env, scene.functions), eval(q, scene.env, scene.functions), eval(r, scene.env, scene.functions)];
+                let size = dot(value, value).sqrt();
+                (size.is_finite() && size > 0.0).then_some((value, size))
+            };
+            // The reference magnitude crosses FLOW_REACH cells per cycle; stronger arrows are no faster.
+            let Some(at) = drift(point, phase, |at| value(self, at).map(|(value, size)| value.map(|v| v * FLOW_REACH * edge * (size / reference).min(1.0) / size))) else { continue };
+            if at.iter().any(|v| v.abs() > range) {
+                continue;
+            }
+            if let Some((value, size)) = value(self, at) {
+                arrows.push((at, value.map(|v| v / size), size, flow_size(phase)));
+            }
+        }
+        for (point, unit, magnitude, grown) in arrows {
             let relative = (magnitude / reference).min(1.0);
-            let half = 0.5 * FIELD_REACH * edge * relative;
+            let half = 0.5 * FIELD_REACH * edge * relative * grown;
             let reach = unit.map(|v| v * half);
             self.push(ARROW, row, relative, &[sub(point, reach), [point[0] + reach[0], point[1] + reach[1], point[2] + reach[2]]]);
+        }
+    }
+
+    /// The solid of a double or triple integral: x over `x`, y between `y` at that x, z between `z` at that (x, y).
+    fn solid(&mut self, row: f64, x: (f64, f64), y: (&Expr, &Expr), z: (&Expr, &Expr)) {
+        let range = self.camera.range;
+        let n = SOLID_CELLS;
+        let stride = n + 1;
+        let (mut bottom, mut top) = (Vec::with_capacity(stride * stride), Vec::with_capacity(stride * stride));
+        for i in 0..=n {
+            let px = x.0 + (x.1 - x.0) * i as f64 / n as f64;
+            self.env[X] = px;
+            let (from, to) = (eval(y.0, self.env, self.functions), eval(y.1, self.env, self.functions));
+            for j in 0..=n {
+                let py = from + (to - from) * j as f64 / n as f64;
+                self.env[X] = px;
+                self.env[Y] = py;
+                let low = eval(z.0, self.env, self.functions);
+                self.env[X] = px;
+                self.env[Y] = py;
+                let high = eval(z.1, self.env, self.functions);
+                // Where one bound has no value there is no solid: neither face is drawn.
+                let both = if low.is_finite() && high.is_finite() { 0.0 } else { f64::NAN };
+                bottom.push([px, py, low + both]);
+                top.push([px, py, high + both]);
+            }
+        }
+        let at = |i: usize, j: usize| i * stride + j;
+        let face = |scene: &mut Self, quad: [Vec3; 4]| {
+            if quad.iter().any(|p| p.iter().any(|value| !value.is_finite())) {
+                return;
+            }
+            let clipped = clip_cube(&quad, &[0, 1, 2], range);
+            if clipped.len() >= 3 {
+                let shade = scene.shade(normalize(cross(sub(quad[2], quad[0]), sub(quad[3], quad[1]))));
+                scene.push(POLYGON, row, shade, &clipped);
+            }
+        };
+        for i in 0..n {
+            for j in 0..n {
+                for grid in [&bottom, &top] {
+                    face(self, [grid[at(i, j)], grid[at(i + 1, j)], grid[at(i + 1, j + 1)], grid[at(i, j + 1)]]);
+                }
+            }
+        }
+        // The four sides, and the edges of the solid: around the top, around the bottom and up the corners.
+        let rim: Vec<(usize, usize)> = (0..n).map(|k| (k, 0)).chain((0..n).map(|k| (n, k))).chain((0..n).map(|k| (n - k, n))).chain((0..n).map(|k| (0, n - k))).collect();
+        let edge = |scene: &mut Self, a: Vec3, b: Vec3| {
+            if a.iter().chain(&b).all(|value| value.is_finite())
+                && let Some((a, b)) = clip_segment(a, b, range)
+            {
+                scene.push(SEGMENT, row, 1.0, &[a, b]);
+            }
+        };
+        for (k, first) in rim.iter().enumerate() {
+            let second = rim[(k + 1) % rim.len()];
+            let (a, b) = (at(first.0, first.1), at(second.0, second.1));
+            face(self, [bottom[a], bottom[b], top[b], top[a]]);
+            edge(self, top[a], top[b]);
+            edge(self, bottom[a], bottom[b]);
+            if k % n == 0 {
+                edge(self, bottom[a], top[a]);
+            }
         }
     }
 
@@ -692,7 +789,7 @@ pub fn render(sheet: &mut Sheet, camera: Camera) -> Vec<f64> {
     }
     let projector = Projector::new(&camera);
     frame(&mut out, &camera, &projector);
-    let Sheet { env, functions, cenv, cfunctions, rows, meshes } = sheet;
+    let Sheet { env, functions, cenv, cfunctions, rows, meshes, time } = sheet;
     let mut scene = Scene {
         camera,
         projector,
@@ -701,6 +798,7 @@ pub fn render(sheet: &mut Sheet, camera: Camera) -> Vec<f64> {
         cenv: cenv.as_mut_slice(),
         cfunctions: cfunctions.as_slice(),
         meshes,
+        time: *time,
         items: Vec::new(),
     };
     for (index, row) in rows.iter().enumerate() {
@@ -718,7 +816,8 @@ pub fn render(sheet: &mut Sheet, camera: Camera) -> Vec<f64> {
             Plot::ComplexPoint { re, im, .. } => scene.point(index, [*re, *im, 0.0]),
             Plot::CoordSurface { expr, system, given, u, v } => scene.coord_surface(index, expr, *system, *given, *u, *v),
             Plot::ParamSurface { x, y, z, u, v, slots } => scene.param_surface(index, (x, y, z), *u, *v, *slots),
-            Plot::Field3 { x, y, z } => scene.field(index, (x, y, z)),
+            Plot::Field3 { x, y, z } => scene.field(index, (x, y, z), row.flow),
+            Plot::Volume { x, y, z, .. } => scene.solid(index, *x, (&y.0, &y.1), (&z.0, &z.1)),
             Plot::TangentPlane { point, gradient, normal } => scene.tangent_plane(index, *point, *gradient, *normal),
             _ => {}
         }
@@ -1079,5 +1178,61 @@ mod tests {
             assert!(data[at] >= BOX, "a hidden row was drawn");
             at += 4 + 2 * data[at + 3] as usize;
         }
+    }
+
+    #[test]
+    fn a_double_integral_is_the_solid_under_its_surface() {
+        let solid = records(&["int(4 - x^2 - y^2, -1, 1, -1, 1)"], CAMERA);
+        let faces: Vec<&Record> = solid.iter().filter(|record| record.kind == POLYGON).collect();
+        // Top, bottom and four sides of a 24 × 24 grid, all inside the cube.
+        assert_eq!(faces.len(), 2 * SOLID_CELLS * SOLID_CELLS + 4 * SOLID_CELLS);
+        assert!(faces.iter().all(|record| record.row == 0.0 && record.points.len() >= 3));
+        assert_eq!(solid.iter().filter(|record| record.kind == SEGMENT).count(), 8 * SOLID_CELLS + 4);
+        // A solid reaching out of the cube is cut at its faces: nothing is drawn beyond the cube's outline on screen.
+        let frame: Vec<(f64, f64)> = solid.iter().filter(|record| record.kind == BOX).flat_map(|record| record.points.clone()).collect();
+        let tall = records(&["int(30, -1, 1, -1, 1)"], CAMERA);
+        let (low, high) = frame.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(low, high), p| (low.min(p.1), high.max(p.1)));
+        assert!(tall.iter().filter(|record| record.kind == POLYGON).all(|record| record.points.iter().all(|p| p.1 >= low - 1e-9 && p.1 <= high + 1e-9)));
+    }
+
+    #[test]
+    fn a_triple_integral_draws_the_region_between_its_bounds() {
+        // The ball of radius 3: y between ±√(9 − x²), z between ±√(9 − x² − y²).
+        let ball = records(&["int(1, -3, 3, -sqrt(9 - x^2), sqrt(9 - x^2), -sqrt(9 - x^2 - y^2), sqrt(9 - x^2 - y^2))"], CAMERA);
+        let faces = ball.iter().filter(|record| record.kind == POLYGON).count();
+        assert!(faces >= 2 * SOLID_CELLS * SOLID_CELLS, "{faces}");
+        // A hidden row and an undefined bound draw nothing.
+        let inputs = [RowInput { text: "int(1, 0, 1, 0, 1, 0, 1)".into(), hidden: true, ..RowInput::default() }];
+        let mut sheet = analyze(Mode::Space, &inputs);
+        let hidden = render(&mut sheet, CAMERA);
+        assert_eq!(hidden.len(), render(&mut analyze(Mode::Space, &[]), CAMERA).len());
+        assert!(records(&["int(1, 0, 1, 0, 1, ln(-1), 1)"], CAMERA).iter().all(|record| record.kind != POLYGON));
+    }
+
+    #[test]
+    fn flowing_arrows_drift_with_the_time_and_come_back_after_a_cycle() {
+        let arrows = |flow: bool, time: f64| -> Vec<Vec<(f64, f64)>> {
+            let inputs = [RowInput { text: "(-y, x, 1)".into(), flow, ..RowInput::default() }];
+            let mut sheet = analyze(Mode::Space, &inputs);
+            sheet.time = time;
+            let data = render(&mut sheet, CAMERA);
+            let mut out = Vec::new();
+            let mut at = 0;
+            while at < data.len() {
+                let count = data[at + 3] as usize;
+                if data[at] == ARROW {
+                    out.push((0..count).map(|i| (data[at + 4 + 2 * i], data[at + 5 + 2 * i])).collect());
+                }
+                at += 4 + 2 * count;
+            }
+            out
+        };
+        assert_eq!(arrows(false, 0.0), arrows(false, 0.37));
+        let (early, late) = (arrows(true, 0.1), arrows(true, 0.35));
+        assert!(early.len() > 200 && late.len() > 200, "{} {}", early.len(), late.len());
+        assert_ne!(early, late);
+        let again = arrows(true, 1.1);
+        assert_eq!(early.len(), again.len());
+        assert!(early.iter().flatten().zip(again.iter().flatten()).all(|(a, b)| (a.0 - b.0).abs() < 1e-6 && (a.1 - b.1).abs() < 1e-6));
     }
 }

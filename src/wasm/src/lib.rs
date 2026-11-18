@@ -3,7 +3,8 @@
 //! viewport, `plot_sample(width, height, cx, cy, scale)` fills the `f64` path stream at `plot_samples()` and
 //! `plot_eval(row, value)` traces a function under the pointer, and `plot_markers(row, …)` finds the zeros, extrema and
 //! intersections of a curve y = f(x) for the same viewport. A 3D or complex 3D sheet renders with
-//! `plot_space(width, height, yaw, pitch, range)` into the same `plot_samples()` buffer. Addresses point into the host-owned
+//! `plot_space(width, height, yaw, pitch, range)` into the same `plot_samples()` buffer; `plot_flow(time)` sets the time
+//! the arrows of flowing vector fields are drawn at. Addresses point into the host-owned
 //! `env.memory` and stay valid until the next call. The Valley ABI exports are present because the host
 //! requires them of every module; `valley_call` answers no method.
 
@@ -43,6 +44,7 @@ thread_local! {
     static TEXT: RefCell<Vec<u8>> = const { RefCell::new(Vec::new()) };
     static SAMPLES: RefCell<Vec<f64>> = const { RefCell::new(Vec::new()) };
     static SHEET: RefCell<Option<Sheet>> = const { RefCell::new(None) };
+    static TIME: std::cell::Cell<f64> = const { std::cell::Cell::new(0.0) };
 }
 
 fn address<T>(values: &[T]) -> u32 {
@@ -83,12 +85,21 @@ pub extern "C" fn plot_text() -> u32 {
     TEXT.with(|text| address(&text.borrow()))
 }
 
+/// Sets the time of flowing vector fields, in cycles, for the samples and frames that follow (see `Sheet::time`).
+#[unsafe(no_mangle)]
+pub extern "C" fn plot_flow(time: f64) {
+    TIME.with(|current| current.set(if time.is_finite() { time } else { 0.0 }));
+}
+
 /// Samples the analysed sheet for a viewport of `width` × `height` CSS pixels centred on (`cx`, `cy`) at
 /// `scale` pixels per unit; the number of `f64` values written.
 #[unsafe(no_mangle)]
 pub extern "C" fn plot_sample(width: f64, height: f64, cx: f64, cy: f64, scale: f64) -> u32 {
     let data = SHEET.with(|current| match current.borrow_mut().as_mut() {
-        Some(sheet) => sample::sample(sheet, View { width, height, cx, cy, scale }),
+        Some(sheet) => {
+            sheet.time = TIME.with(std::cell::Cell::get);
+            sample::sample(sheet, View { width, height, cx, cy, scale })
+        }
         None => Vec::new(),
     });
     let len = length(data.len());
@@ -100,7 +111,10 @@ pub extern "C" fn plot_sample(width: f64, height: f64, cx: f64, cy: f64, scale: 
 #[unsafe(no_mangle)]
 pub extern "C" fn plot_space(width: f64, height: f64, yaw: f64, pitch: f64, range: f64) -> u32 {
     let data = SHEET.with(|current| match current.borrow_mut().as_mut() {
-        Some(sheet) => space::render(sheet, space::Camera { width, height, yaw, pitch, range }),
+        Some(sheet) => {
+            sheet.time = TIME.with(std::cell::Cell::get);
+            space::render(sheet, space::Camera { width, height, yaw, pitch, range })
+        }
         None => Vec::new(),
     });
     let len = length(data.len());

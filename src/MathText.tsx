@@ -25,7 +25,8 @@ type MNode =
   | { k: 'group'; open: string; close: string; closed: boolean; body: MNode }
   | { k: 'root'; body: MNode; index?: MNode }
   | { k: 'post'; base: MNode; text: string }
-  | { k: 'integral'; body: MNode; from: MNode; to: MNode }
+  /** `inner`: the further integrals of a double or triple integral, over y and then z, each with its limits. */
+  | { k: 'integral'; body: MNode; from: MNode; to: MNode; inner?: { from: MNode; to: MNode }[] }
   | { k: 'series'; sign: 'Σ' | '∏'; index: MNode; from: MNode; to: MNode; body: MNode }
   | { k: 'cases'; branches: { condition?: MNode; value: MNode }[]; closed: boolean }
 
@@ -379,7 +380,13 @@ class Parser {
       case 'nthroot': if (args.length === 2) return { k: 'root', body: args[0], index: args[1] }; break
       case 'abs': if (inner) return { k: 'group', open: '|', close: '|', closed: inner.closed, body: inner.body }; break
       case 'int':
-      case 'integral': if (args.length === 3) return { k: 'integral', body: bracketSum(args[0]), from: args[1], to: args[2] }; break
+      case 'integral':
+        if (args.length === 3) return { k: 'integral', body: bracketSum(args[0]), from: args[1], to: args[2] }
+        if (args.length === 5 || args.length === 7) {
+          const inner = [{ from: args[3], to: args[4] }, ...(args.length === 7 ? [{ from: args[5], to: args[6] }] : [])]
+          return { k: 'integral', body: bracketSum(args[0]), from: args[1], to: args[2], inner }
+        }
+        break
       case 'sum':
       case 'prod':
       case 'product':
@@ -470,13 +477,20 @@ function render(node: MNode, key: string | number = 0): ReactNode {
     case 'integral':
       return (
         <span key={key} className="gm-int">
-          <span className="gm-int-sign">∫</span>
-          <span className="gm-int-limits">
-            <span className="gm-int-to">{render(node.to)}</span>
-            <span className="gm-int-from">{render(node.from)}</span>
-          </span>
+          {[{ from: node.from, to: node.to }, ...(node.inner ?? [])].map((limits, level) => (
+            <React.Fragment key={level}>
+              <span className="gm-int-sign">∫</span>
+              <span className="gm-int-limits">
+                <span className="gm-int-to">{render(limits.to)}</span>
+                <span className="gm-int-from">{render(limits.from)}</span>
+              </span>
+            </React.Fragment>
+          ))}
           <span className="gm-int-body">{render(node.body)}</span>
-          <span className="gm-dx"><span className="gm-fn">d</span><span className="gm-var">x</span></span>
+          {/* The innermost integral's variable comes first: ∫∫∫ f dz dy dx. */}
+          {['x', 'y', 'z'].slice(0, 1 + (node.inner?.length ?? 0)).reverse().map((name) => (
+            <span key={name} className="gm-dx"><span className="gm-fn">d</span><span className="gm-var">{name}</span></span>
+          ))}
         </span>
       )
     case 'series':

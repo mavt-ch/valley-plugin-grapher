@@ -27,7 +27,8 @@ pub enum Callee {
     User(String),
     /// `f'(x)`, `f''(x)`: the derivative of the given order of a user function of one variable.
     Derivative(String, usize),
-    /// `int(g, a, b)`: the integral of `g` (an expression in x, or a function) from a to b.
+    /// `int(g, a, b)`: the integral of `g` (an expression in x, or a function) from a to b. With two more bounds it is a
+    /// double integral over x and then y, with four more a triple integral over x, y and z.
     Integral,
     /// `tangent(g, a)`: the tangent line at x = a; `tangent(g, a, b)` the tangent plane at (a, b) in 3D.
     Tangent,
@@ -297,7 +298,7 @@ impl Parser<'_> {
             Tok::Num(value) => Ok(Node::Num(value)),
             Tok::Ident(name) => {
                 match name.as_str() {
-                    "int" | "integral" => return self.special(Callee::Integral, &name, 3, 3),
+                    "int" | "integral" => return self.special(Callee::Integral, &name, 3, 7),
                     "tangent" => return self.special(Callee::Tangent, &name, 2, 3),
                     "sum" => return self.series(Callee::Sum, &name),
                     "prod" | "product" => return self.series(Callee::Product, &name),
@@ -379,7 +380,8 @@ impl Parser<'_> {
         }
         self.close(')')?;
         self.bars = bars;
-        if args.len() < min || args.len() > max {
+        // An integral has one pair of bounds per variable: three, five or seven arguments.
+        if args.len() < min || args.len() > max || (callee == Callee::Integral && args.len() % 2 == 0) {
             return Err(MathError::new("error.arity", name));
         }
         Ok(Node::Call(callee, args))

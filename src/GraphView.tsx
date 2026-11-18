@@ -8,6 +8,7 @@ import { uiText } from './localization'
 import { MAIN_GRAPH, graphOf, profileOf, unitsOf, type AxisUnits, type Row } from './model'
 import { cameraKey, getStore, useGrapher } from './store'
 import { noteCanvas } from './details'
+import { runFlow } from './animate'
 import { SpaceCanvas } from './Space'
 import { viewOf, type PlaneView } from './views'
 
@@ -77,6 +78,8 @@ export const GraphCanvas = ({ view: plane, units, rows, analyses, engine, graph 
   const sizeRef = React.useRef<Size>({ width: 0, height: 0 })
   const viewRef = React.useRef<Viewport | null>(store.viewports[slot] ?? null)
   const pathsRef = React.useRef<SamplePath[]>([])
+  /** The time flowing vector fields are sampled at, in cycles. */
+  const flowRef = React.useRef(0)
   const pointerRef = React.useRef<{ x: number; y: number } | null>(null)
   const dragRef = React.useRef<{ id: number; x: number; y: number; view: Viewport } | null>(null)
   const frameRef = React.useRef<{ id: number | null; resample: boolean }>({ id: null, resample: true })
@@ -210,7 +213,7 @@ export const GraphCanvas = ({ view: plane, units, rows, analyses, engine, graph 
     frame.resample = false
     generationRef.current += 1
     try {
-      pathsRef.current = engine ? engine.sample(mode, rows, size.width, size.height, view) : []
+      pathsRef.current = engine ? engine.sample(mode, rows, size.width, size.height, view, flowRef.current) : []
     } catch {
       pathsRef.current = []
     }
@@ -271,6 +274,17 @@ export const GraphCanvas = ({ view: plane, units, rows, analyses, engine, graph 
 
   React.useEffect(() => { invalidate(true) }, [rows, engine, invalidate])
   React.useEffect(() => { invalidate(false) }, [units, invalidate])
+
+  // A visible vector field set to flow resamples the graph with the time, for as long as one is shown.
+  const flowing = rows.some((row, index) => row.flow === true && !row.hidden && analyses[index]?.kind === 'field')
+  React.useEffect(() => {
+    const view = canvasRef.current?.ownerDocument.defaultView
+    if (!flowing || !view) return
+    return runFlow(view, (time) => {
+      flowRef.current = time
+      invalidate(true)
+    })
+  }, [flowing, invalidate])
 
   React.useEffect(() => {
     const wrap = wrapRef.current

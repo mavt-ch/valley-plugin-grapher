@@ -385,7 +385,9 @@ impl Graph<'_> {
 
     // ---- vector fields F(x, y) = (P, Q) ----
 
-    fn field(&mut self, p: &Expr, q: &Expr) {
+    /// With `flow` (the sheet's time and the row), every arrow drifts from its lattice point along the field for one
+    /// cycle and starts again, each at its own point of the cycle (see `flow_phase`).
+    fn field(&mut self, p: &Expr, q: &Expr, flow: Option<(f64, usize)>) {
         let view = self.view;
         let mut step = nice_near(view.width / (ARROWS_ACROSS * view.scale));
         let span = |lo: f64, hi: f64, step: f64| ((lo / step).ceil() as i64, (hi / step).floor() as i64);
@@ -412,8 +414,36 @@ impl Graph<'_> {
         let Some(reference) = percentile(&mut magnitudes, 0.9) else { return };
         let cell = step * view.scale;
         for (wx, wy, ux, uy, magnitude) in arrows {
+            let mut grown = 1.0;
+            let (mut wx, mut wy, mut ux, mut uy, mut magnitude) = (wx, wy, ux, uy, magnitude);
+            if let Some((time, row)) = flow {
+                let phase = flow_phase(time, &[row as i64, (wx / step).round() as i64, (wy / step).round() as i64]);
+                grown = flow_size(phase);
+                // The reference magnitude crosses FLOW_REACH cells per cycle; stronger arrows are no faster, so none
+                // overtakes the lattice.
+                let velocity = |graph: &mut Self, x: f64, y: f64| -> Option<[f64; 2]> {
+                    graph.env[X] = x;
+                    graph.env[Y] = y;
+                    let (fx, fy) = (eval(p, graph.env, graph.functions), eval(q, graph.env, graph.functions));
+                    let size = fx.hypot(fy);
+                    (size.is_finite() && size > 0.0).then(|| {
+                        let pace = FLOW_REACH * step * (size / reference).min(1.0) / size;
+                        [fx * pace, fy * pace]
+                    })
+                };
+                let Some(at) = drift([wx, wy], phase, |point| velocity(self, point[0], point[1])) else { continue };
+                (wx, wy) = (at[0], at[1]);
+                self.env[X] = wx;
+                self.env[Y] = wy;
+                let (fx, fy) = (eval(p, self.env, self.functions), eval(q, self.env, self.functions));
+                magnitude = fx.hypot(fy);
+                if !(magnitude.is_finite() && magnitude > 0.0) {
+                    continue;
+                }
+                (ux, uy) = (fx / magnitude, fy / magnitude);
+            }
             let relative = (magnitude / reference).min(1.0);
-            let half = 0.5 * ARROW_REACH * cell * relative;
+            let half = 0.5 * ARROW_REACH * cell * relative * grown;
             if half < 1.0 {
                 continue;
             }
@@ -633,6 +663,43 @@ pub fn nice_near(raw: f64) -> f64 {
 }
 
 /// The value below which `share` of the finite `values` lie; `None` when there are none. Reorders `values`.
+/// Lattice cells an arrow of the reference magnitude drifts in one cycle of a flowing field.
+pub const FLOW_REACH: f64 = 1.5;
+/// Midpoint steps of one drift.
+const FLOW_STEPS: usize = 6;
+
+/// Where in its cycle (0–1) the arrow with these lattice indices is at `time` cycles: each arrow starts at its own
+/// moment, fixed by its indices, so the lattice never jumps back as a whole.
+pub fn flow_phase(time: f64, key: &[i64]) -> f64 {
+    let mut hash: u64 = 0x9e37_79b9_7f4a_7c15;
+    for value in key {
+        hash = (hash ^ *value as u64).wrapping_mul(0xff51_afd7_ed55_8ccd);
+        hash ^= hash >> 33;
+    }
+    (time + (hash >> 11) as f64 / (1_u64 << 53) as f64).rem_euclid(1.0)
+}
+
+/// An arrow's size along its cycle: it grows over the first fifth and shrinks over the last, so its jump back to the
+/// lattice point happens at size zero.
+pub fn flow_size(phase: f64) -> f64 {
+    let edge = (phase.min(1.0 - phase) / 0.2).clamp(0.0, 1.0);
+    edge * edge * (3.0 - 2.0 * edge)
+}
+
+/// The point reached from `start` after `phase` of a cycle along `velocity` (displacement per cycle), by the midpoint
+/// rule; `None` where the field has no direction on the way.
+pub fn drift<const N: usize>(start: [f64; N], phase: f64, mut velocity: impl FnMut([f64; N]) -> Option<[f64; N]>) -> Option<[f64; N]> {
+    let h = phase / FLOW_STEPS as f64;
+    let mut at = start;
+    for _ in 0..FLOW_STEPS {
+        let first = velocity(at)?;
+        let middle: [f64; N] = std::array::from_fn(|k| at[k] + 0.5 * h * first[k]);
+        let second = velocity(middle)?;
+        at = std::array::from_fn(|k| at[k] + h * second[k]);
+    }
+    Some(at)
+}
+
 pub fn percentile(values: &mut [f64], share: f64) -> Option<f64> {
     if values.is_empty() {
         return None;
@@ -686,7 +753,8 @@ pub fn sample(sheet: &mut Sheet, view: View) -> Vec<f64> {
     if !view.valid() {
         return out.data;
     }
-    let Sheet { env, functions, cenv, cfunctions, rows, .. } = sheet;
+    let Sheet { env, functions, cenv, cfunctions, rows, time, .. } = sheet;
+    let time = *time;
     for (index, row) in rows.iter().enumerate() {
         let Some(plot) = row.plot().filter(|_| !row.hidden) else { continue };
         out.row = index as f64;
@@ -710,13 +778,13 @@ pub fn sample(sheet: &mut Sheet, view: View) -> Vec<f64> {
                 graph.out.end();
             }
             Plot::Implicit(field) => graph.implicit(field),
-            Plot::Field { x, y } => graph.field(x, y),
+            Plot::Field { x, y } => graph.field(x, y, row.flow.then_some((time, index))),
             Plot::Contour { field, levels, .. } => graph.contours(field, *levels),
             Plot::Region { field, relation } => graph.region(field, *relation),
             Plot::Integral { body, from, to, .. } => graph.area(body, *from, *to),
             Plot::Tangent { slope, intercept, x, y } => graph.tangent(*slope, *intercept, (*x, *y)),
             Plot::Table { points, connect, .. } => graph.table(points, *connect),
-            Plot::Surface { .. } | Plot::Curve3 { .. } | Plot::Point3 { .. } | Plot::ComplexSurface { .. } | Plot::CoordSurface { .. } | Plot::ParamSurface { .. } | Plot::Implicit3(_) | Plot::Field3 { .. } | Plot::TangentPlane { .. } => {}
+            Plot::Surface { .. } | Plot::Curve3 { .. } | Plot::Point3 { .. } | Plot::ComplexSurface { .. } | Plot::CoordSurface { .. } | Plot::ParamSurface { .. } | Plot::Implicit3(_) | Plot::Field3 { .. } | Plot::TangentPlane { .. } | Plot::Volume { .. } => {}
         }
     }
     out.data

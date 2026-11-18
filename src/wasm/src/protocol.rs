@@ -1,17 +1,18 @@
 //! The text the JavaScript side exchanges with the module. Rows are separated by U+001E and fields by U+001F,
 //! which an expression never contains (the plugin strips both before encoding).
 //!
-//! In: `text, from, to, hidden, from2, to2, levels, step, floor, normal, table, cells, connect` per row (the fields after
-//! `hidden` are optional; `normal` is `0` when a tangent plane leaves out its normal vector; `table` is `1` for a table of
-//! points, whose `cells` are its x and y texts in turn, separated by U+001D; `connect` is `1` to join its points with a
-//! line). Out, per row, a kind and its fields:
+//! In: `text, from, to, hidden, from2, to2, levels, step, floor, normal, table, cells, connect, flow` per row (the fields
+//! after `hidden` are optional; `normal` is `0` when a tangent plane leaves out its normal vector; `table` is `1` for a
+//! table of points, whose `cells` are its x and y texts in turn, separated by U+001D; `connect` is `1` to join its points
+//! with a line; `flow` is `1` for a vector field whose arrows drift along it). Out, per row, a kind and its fields:
 //! `empty` · `error key param missing,names` · `param name value slider` · `value number` · `function x|y` ·
 //! `definition name` · `polar from to` · `curve from to` · `point x y` · `implicit` · `surface x|y|z` ·
 //! `curve3 from to` · `point3 x y z` · `region strict|loose` · `cpoint re im name` · `csurface modulus|real` ·
 //! `coords given u v ufrom uto vfrom vto` (a surface in curvilinear coordinates; the names are its coordinates) ·
 //! `psurface ufrom uto vfrom vto` (a parametric surface in u and v) · `implicit3` (a surface F(x, y, z) = 0) ·
 //! `field` and `field3` (vector fields in the plane and in space) · `contour name` (the level curves of `name(x, y)`) ·
-//! `integral value from to` (the area under a curve and its signed value) · `tangent slope intercept x y` (a tangent line
+//! `integral value from to` (the area under a curve and its signed value) · `volume value 2|3` (a double or triple
+//! integral drawn as a solid on the 3D sheet, with its value) · `tangent slope intercept x y` (a tangent line
 //! and its point of contact) · `tplane gx gy a b c` (a tangent plane at (a, b, c) with the surface's partial derivatives) ·
 //! `table count bad missing` (a table or list of points: how many it draws, the cells that did not evaluate as
 //! `2 · row + column` and the undefined names they read, both comma-separated).
@@ -32,12 +33,12 @@ pub fn read_rows(text: &str) -> Vec<RowInput> {
             let mut next = || fields.next().unwrap_or_default().to_string();
             let (text, from, to, hidden, from2, to2) = (next(), next(), next(), next(), next(), next());
             let (levels, step, floor, normal) = (next(), next(), next(), next());
-            let (table, cells, connect) = (next(), next(), next());
+            let (table, cells, connect, flow) = (next(), next(), next(), next());
             let table = (table == "1").then(|| {
                 let cells: Vec<&str> = if cells.is_empty() { Vec::new() } else { cells.split(CELL).collect() };
                 cells.chunks(2).take(MAX_TABLE_ROWS).map(|pair| [pair[0].to_string(), pair.get(1).copied().unwrap_or_default().to_string()]).collect()
             });
-            RowInput { text, from, to, hidden: hidden == "1", from2, to2, levels, step, floor: floor == "1", hide_normal: normal == "0", table, connect: connect == "1" }
+            RowInput { text, from, to, hidden: hidden == "1", from2, to2, levels, step, floor: floor == "1", hide_normal: normal == "0", table, connect: connect == "1", flow: flow == "1" }
         })
         .collect()
 }
@@ -81,6 +82,7 @@ pub fn write_outcomes(sheet: &Sheet) -> String {
                 Outcome::Plotted(Plot::Field3 { .. }) => vec!["field3".into()],
                 Outcome::Plotted(Plot::Contour { name, .. }) => vec!["contour".into(), name.clone()],
                 Outcome::Plotted(Plot::Integral { value, from, to, .. }) => vec!["integral".into(), number(*value), number(*from), number(*to)],
+                Outcome::Plotted(Plot::Volume { value, triple, .. }) => vec!["volume".into(), number(*value), if *triple { "3" } else { "2" }.into()],
                 Outcome::Plotted(Plot::Tangent { slope, intercept, x, y }) => vec!["tangent".into(), number(*slope), number(*intercept), number(*x), number(*y)],
                 Outcome::Plotted(Plot::TangentPlane { point, gradient, .. }) => {
                     vec!["tplane".into(), number(gradient[0]), number(gradient[1]), number(point[0]), number(point[1]), number(point[2])]

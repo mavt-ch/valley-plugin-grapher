@@ -43,6 +43,8 @@ export interface Row {
   slider: Slider
   /** Vector fields: shade each arrow by its magnitude (added later: absent means on). */
   magnitude?: boolean
+  /** Vector fields: let the arrows drift along the field (added later: absent means still). */
+  flow?: boolean
   /** Level curves (added later, each absent until set): the most levels in view (absent means 10), the step between them
    * (absent or empty means automatic), their value labels (absent means on) and, for a surface z = f(x, y), the curves on the floor. */
   levels?: number
@@ -262,6 +264,7 @@ function normalizeRow(value: unknown, rows: readonly Row[]): Row | null {
     to2: text(record.to2),
     slider: min < max && step > 0 ? { min, max, step } : { ...DEFAULT_SLIDER },
     ...(typeof record.magnitude === 'boolean' ? { magnitude: record.magnitude } : {}),
+    ...(record.flow === true ? { flow: true } : {}),
     ...(typeof record.levels === 'number' && Number.isInteger(record.levels) && record.levels >= 1 && record.levels <= MAX_LEVELS ? { levels: record.levels } : {}),
     ...(typeof record.step === 'string' && record.step ? { step: text(record.step) } : {}),
     ...(typeof record.labels === 'boolean' ? { labels: record.labels } : {}),

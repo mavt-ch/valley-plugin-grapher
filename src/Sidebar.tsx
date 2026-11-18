@@ -19,7 +19,7 @@ import { viewOf, type Insert } from './views'
 /** The reference's Properties segment id (`src/Reference.tsx` imports this module, so it is spelled out here). */
 const REFERENCE_SEGMENT = 'grapher.reference'
 
-const DRAWN = new Set(['function', 'polar', 'curve', 'point', 'implicit', 'surface', 'curve3', 'point3', 'region', 'cpoint', 'csurface', 'coords', 'psurface', 'implicit3', 'field', 'field3', 'contour', 'integral', 'tangent', 'tplane', 'table'])
+const DRAWN = new Set(['function', 'polar', 'curve', 'point', 'implicit', 'surface', 'curve3', 'point3', 'region', 'cpoint', 'csurface', 'coords', 'psurface', 'implicit3', 'field', 'field3', 'contour', 'integral', 'volume', 'tangent', 'tplane', 'table'])
 
 /** The row whose input takes focus on its next render (after Enter adds a row or Backspace removes one). */
 let pendingFocus: string | null = null
@@ -648,6 +648,12 @@ const RangeControl = ({ mode, row, analysis, edit }: Pick<RowProps, 'mode' | 'ro
 }
 
 /** A row option that is on or off, as a compact chip under the row. */
+/** The row with its arrows flowing or still; a still field carries no `flow` at all, like a row of an older file. */
+function withFlow(row: Row, flow: boolean): Row {
+  const { flow: _, ...rest } = row
+  return flow ? { ...rest, flow: true } : rest
+}
+
 const OptionToggle = ({ label, checked, onChange }: { label: string; checked: boolean; onChange: (checked: boolean) => void }): ReactElement => (
   <button type="button" role="switch" aria-checked={checked} className="grapher-option" onClick={() => onChange(!checked)}>
     <span className="grapher-option-box">{checked ? <Check /> : null}</span>
@@ -717,6 +723,7 @@ const Details = (props: RowProps): ReactElement | null => {
     }
     case 'value':
     case 'integral':
+    case 'volume':
       return <div className="grapher-value">= {formatNumber(analysis.value ?? Number.NaN, 8)}</div>
     case 'tangent':
       return <div className="grapher-value">y = {formatLinear([[analysis.slope ?? Number.NaN, 'x']], analysis.intercept ?? Number.NaN)}</div>
@@ -776,6 +783,7 @@ const Details = (props: RowProps): ReactElement | null => {
       return (
         <div className="grapher-options">
           <OptionToggle label={uiText('row.magnitude')} checked={row.magnitude !== false} onChange={(checked) => props.edit((current) => ({ ...current, magnitude: checked }))} />
+          <OptionToggle label={uiText('row.flow')} checked={row.flow === true} onChange={(checked) => props.edit((current) => withFlow(current, checked))} />
         </div>
       )
     default:

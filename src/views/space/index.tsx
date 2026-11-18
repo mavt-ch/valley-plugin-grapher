@@ -2,7 +2,7 @@ import { React } from '../../runtime'
 import type { ReactElement } from 'react'
 import { Svg, type IconProps } from '../../icons'
 import type { SpaceView } from '../types'
-import { field3, implicit3, piecewise, prod, psurface, sum, tplane } from '../inserts'
+import { field3, implicit3, piecewise, prod, psurface, sum, tplane, volume } from '../inserts'
 
 /** A cube in perspective. */
 const Icon = (p: IconProps): ReactElement => (
@@ -21,6 +21,6 @@ export const space: SpaceView = {
   icon: Icon,
   placeholder: 'tangent((x^2 + y^2) / 5 - 6, 3, 2)',
   examples: [{ text: 'z = (x^2 + y^2) / 5 - 6', floor: true }, ['(6cos t, 6sin t, t / 2)', '0', '6π']],
-  inserts: [sum('sum(n, 1, 3, (x + y)^n / 20)', '(x + y)^n / 20'), prod('prod(n, 1, 2, x - n)', 'x - n'), psurface, implicit3, field3, tplane, piecewise('{x < 0: -x, x^2 / 5}', 'x < 0')],
+  inserts: [sum('sum(n, 1, 3, (x + y)^n / 20)', '(x + y)^n / 20'), prod('prod(n, 1, 2, x - n)', 'x - n'), psurface, implicit3, field3, tplane, volume, piecewise('{x < 0: -x, x^2 / 5}', 'x < 0')],
   axisNames: ['x', 'y', 'z']
 }

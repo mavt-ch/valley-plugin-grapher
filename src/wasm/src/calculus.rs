@@ -595,8 +595,32 @@ impl Ord for Piece {
     }
 }
 
+thread_local! {
+    /// How many integrals are being evaluated around the current one, and the halvings the integrals inside the outermost
+    /// one may still spend between them.
+    static NESTING: std::cell::Cell<(u32, usize)> = const { std::cell::Cell::new((0, 0)) };
+}
+
+/// The halvings all integrals inside one outermost integral share. A double or triple integral multiplies the work of
+/// its levels, so without a common bound an integrand with a kink (a region cut by a square root, a piecewise density)
+/// would refine every inner integral to the limit. Each halving of a middle integral costs at most 2 · 15 inner integrals
+/// of at least 15 evaluations, which bounds one row at about 10⁷ evaluations.
+const NESTED_HALVINGS: usize = 30_000;
+/// Inner integrals stop at a looser tolerance: their errors are averaged by the integrals around them.
+const NESTED_RELATIVE_TOLERANCE: f64 = 1e-8;
+const NESTED_ABSOLUTE_TOLERANCE: f64 = 1e-10;
+
 /// ∫ₐᵇ g over a finite interval: the piece with the largest error is halved until the errors add up to the tolerance.
-fn adaptive(mut g: impl FnMut(f64) -> f64, a: f64, b: f64) -> f64 {
+fn adaptive(g: impl FnMut(f64) -> f64, a: f64, b: f64) -> f64 {
+    let (depth, left) = NESTING.get();
+    NESTING.set((depth + 1, if depth == 0 { NESTED_HALVINGS } else { left }));
+    let value = refine(g, a, b, depth > 0);
+    NESTING.set((depth, NESTING.get().1));
+    value
+}
+
+fn refine(mut g: impl FnMut(f64) -> f64, a: f64, b: f64, nested: bool) -> f64 {
+    let (absolute, relative) = if nested { (NESTED_ABSOLUTE_TOLERANCE, NESTED_RELATIVE_TOLERANCE) } else { (ABSOLUTE_TOLERANCE, RELATIVE_TOLERANCE) };
     let (whole, error) = kronrod(&mut g, a, b);
     if !whole.is_finite() {
         return f64::NAN;
@@ -604,7 +628,7 @@ fn adaptive(mut g: impl FnMut(f64) -> f64, a: f64, b: f64) -> f64 {
     let mut pieces = std::collections::BinaryHeap::from([Piece { lo: a, hi: b, value: whole, error, depth: 0 }]);
     let (mut estimate, mut total_error, mut settled) = (whole, error, 0.0);
     let mut intervals = 1;
-    while total_error > ABSOLUTE_TOLERANCE.max(RELATIVE_TOLERANCE * estimate.abs()) && intervals < MAX_INTERVALS {
+    while total_error > absolute.max(relative * estimate.abs()) && intervals < MAX_INTERVALS && NESTING.get().1 > 0 {
         let Some(piece) = pieces.pop() else { break };
         if piece.depth >= MAX_DEPTH {
             settled += piece.value;
@@ -614,6 +638,10 @@ fn adaptive(mut g: impl FnMut(f64) -> f64, a: f64, b: f64) -> f64 {
         let middle = 0.5 * (piece.lo + piece.hi);
         let (left, left_error) = kronrod(&mut g, piece.lo, middle);
         let (right, right_error) = kronrod(&mut g, middle, piece.hi);
+        if nested {
+            let (depth, left) = NESTING.get();
+            NESTING.set((depth, left.saturating_sub(1)));
+        }
         if !left.is_finite() || !right.is_finite() {
             return f64::NAN;
         }

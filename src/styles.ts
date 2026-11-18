@@ -241,6 +241,27 @@ button.grapher-handle:hover { color:var(--text-color); }
 .gm-cases-value, .gm-cases-condition { display:inline-flex; align-items:center; }
 .gm-cases-otherwise { font-style:normal; }
 .grapher-delete, .grapher-row-spacer { width:28px; height:36px; }
+/* The empty last row: add a folder, and (where the view takes them) a table of points. */
+.grapher-row[data-trailing] { grid-template-columns:46px minmax(0, 1fr) auto; }
+.grapher-trailing-actions { display:inline-flex; }
+
+/* Folders, one level deep: a folder row with a chevron, its name and an eye; its rows are indented behind a thin line. */
+.grapher-folder-main { display:flex; align-items:center; gap:6px; min-width:0; height:36px; }
+.grapher-folder-icon { flex:0 0 auto; width:14px; height:14px; color:var(--text-secondary); }
+.grapher-folder-name { flex:1 1 auto; font-family:inherit; font-weight:600; }
+.grapher-folder-count { flex:0 0 auto; font-size:0.6875rem; font-variant-numeric:tabular-nums; color:var(--text-tertiary); }
+.grapher-folder-toggle, .grapher-folder-eye { display:inline-flex; align-items:center; justify-content:center; flex:0 0 auto; width:22px; height:22px;
+  padding:0; border:0; border-radius:var(--radius-sm); background:transparent; color:var(--text-secondary); cursor:pointer; }
+.grapher-folder-toggle svg, .grapher-folder-eye svg { width:13px; height:13px; }
+.grapher-folder-toggle svg { transition:transform var(--duration-fast) var(--ease-out); }
+.grapher-folder-toggle[aria-expanded='false'] svg { transform:rotate(-90deg); }
+.grapher-folder-toggle:hover, .grapher-folder-eye:hover { background:var(--hover-bg); color:var(--text-color); }
+.grapher-folder-toggle:focus-visible, .grapher-folder-eye:focus-visible { outline:2px solid var(--accent-color); outline-offset:-2px; }
+.grapher-folder[data-hidden] .grapher-folder-name, .grapher-folder[data-hidden] .grapher-folder-icon { color:var(--text-secondary); }
+.grapher-row[data-in-folder] { grid-template-columns:58px minmax(0, 1fr) 28px;
+  background-image:linear-gradient(var(--border-medium), var(--border-medium)); background-size:1px 100%; background-position:12px 0; background-repeat:no-repeat; }
+.grapher-row[data-in-folder] .grapher-gutter { padding-left:16px; }
+.grapher-drop-marker[data-in-folder] { left:58px; }
 .grapher-delete { display:inline-flex; align-items:center; justify-content:center; padding:0; border:none; background:none;
   color:var(--text-tertiary); cursor:pointer; opacity:0; transition:opacity var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out); }
 .grapher-delete svg { width:14px; height:14px; }
@@ -276,7 +297,17 @@ button.grapher-handle:hover { color:var(--text-color); }
   border-radius:50%; background:var(--accent-color); }
 .grapher-range:focus-visible { outline:2px solid var(--accent-color); outline-offset:2px; border-radius:var(--radius-sm); }
 
-.grapher-slider-block { display:flex; flex-direction:column; gap:6px; min-width:0; }
+.grapher-slider-block { display:flex; flex-direction:column; gap:2px; min-width:0; }
+/* A slider row has no swatch, so the bar reaches back under the gutter's swatch column and out under the delete button. */
+.grapher-row[data-kind='param'] .grapher-slider-block { margin:0 -26px 0 -24px; }
+/* The bounds sit under the ends of the bar as small numbers; they show a field only on hover or while typed into. */
+.grapher-slider-bounds { display:flex; justify-content:space-between; gap:8px; padding:0 28px; }
+.grapher-slider-bound { box-sizing:border-box; width:72px; height:20px; margin:0 -5px; padding:0 4px; border:1px solid transparent;
+  border-radius:var(--radius-sm); background:transparent; color:var(--text-tertiary); font-family:var(--mono-font); font-size:0.6875rem; }
+.grapher-slider-bound-end { text-align:right; }
+.grapher-slider-bound:hover { border-color:var(--border-light); color:var(--text-secondary); }
+.grapher-panel .grapher-slider-bound:is(:focus, :focus-visible) { outline:none; box-shadow:none; border-color:var(--accent-color); color:var(--text-color); }
+.grapher-panel .grapher-slider-bound[aria-invalid='true'] { border-color:var(--danger-tint-text); }
 .grapher-play, .grapher-play-options { display:inline-flex; align-items:center; justify-content:center; flex:0 0 auto; width:22px; height:22px;
   padding:0; border:0; border-radius:var(--radius-sm); background:transparent; color:var(--text-secondary); cursor:pointer; }
 .grapher-play svg { width:12px; height:12px; }
@@ -343,7 +374,7 @@ button.grapher-handle:hover { color:var(--text-color); }
 .grapher-zoom-button:focus-visible { outline:2px solid var(--accent-color); outline-offset:2px; }
 
 @media (prefers-reduced-motion: reduce) {
-  .grapher-view-picker, .grapher-view-option, .grapher-unit, .grapher-insert, .grapher-profile-action, .grapher-profile-row, .grapher-ref-all, .grapher-ref-heading, .grapher-ref-chevron, .grapher-ref-example, .grapher-swatch, .grapher-delete, .grapher-grip-icon, .grapher-handle .grapher-index, .grapher-zoom-button, .grapher-play-options svg { transition:none; }
+  .grapher-view-picker, .grapher-view-option, .grapher-unit, .grapher-insert, .grapher-profile-action, .grapher-profile-row, .grapher-ref-all, .grapher-ref-heading, .grapher-ref-chevron, .grapher-ref-example, .grapher-swatch, .grapher-delete, .grapher-grip-icon, .grapher-folder-toggle svg, .grapher-handle .grapher-index, .grapher-zoom-button, .grapher-play-options svg { transition:none; }
 }
 `
 

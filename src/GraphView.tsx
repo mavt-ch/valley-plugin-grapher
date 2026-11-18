@@ -5,7 +5,7 @@ import { NOTICE_SECONDS, onExportNotice, registerExporter, renderPng, renderSvg,
 import { MARKER, type Marker, type PlotEngine, type RowAnalysis, type SamplePath, type Viewport } from './engine'
 import { Fit, Minus, Plus } from './icons'
 import { uiText } from './localization'
-import { MAIN_GRAPH, graphOf, profileOf, unitsOf, type AxisUnits, type Row } from './model'
+import { MAIN_GRAPH, drawnRows, graphOf, profileOf, unitsOf, type AxisUnits, type Row } from './model'
 import { cameraKey, getStore, useGrapher } from './store'
 import { noteCanvas } from './details'
 import { runFlow } from './animate'
@@ -455,7 +455,8 @@ export const GraphTab = ({ instanceId }: { instanceId?: string }): ReactElement 
   const graph = graphOf(document, id)
   const mode = graph.mode
   const view = viewOf(mode)
-  const rows = graph.sheets[mode]
+  const sheet = graph.sheets[mode]
+  const rows = React.useMemo(() => drawnRows(sheet), [sheet])
   const analyses = React.useMemo(() => (engine ? engine.analyze(mode, rows) : []), [engine, mode, rows])
   const engineProblem = problems.find((problem) => problem.key === 'problem.engine')
   const tabRef = React.useRef<HTMLDivElement>(null)

@@ -59,10 +59,104 @@ export interface Row {
   connect?: boolean
   /** Slider rows: how the play button animates the value (added later: absent means forward, 1×, looping). */
   animation?: Animation
+  /** A folder row (added later): its text is the folder's name, never an expression; `hidden` hides every row in it. */
+  folder?: { collapsed: boolean }
+  /** The folder row this row sits in (added later). Folders hold expressions only, one level deep, and a folder's rows
+   * follow it without a gap. */
+  parent?: string
 }
 
-/** A row with something in it: text, or a table (even an empty one). */
-export const filled = (row: Row): boolean => row.table !== undefined || row.text.trim() !== ''
+/** A row with something in it: text, a table (even an empty one), or a folder (even an unnamed one). */
+export const filled = (row: Row): boolean => row.folder !== undefined || row.table !== undefined || row.text.trim() !== ''
+
+/** Keeps folders one level deep and contiguous: a folder never sits in a folder, and a row only stays in the folder
+ * directly above it (or above its siblings); every other `parent` is dropped. */
+export function withFolders(rows: readonly Row[]): Row[] {
+  let open: string | null = null
+  let changed = false
+  const next = rows.map((row) => {
+    if (row.folder) {
+      open = row.id
+      if (row.parent === undefined) return row
+      changed = true
+      const { parent: _, ...rest } = row
+      return rest
+    }
+    if (row.parent !== undefined && row.parent === open) return row
+    open = null
+    if (row.parent === undefined) return row
+    changed = true
+    const { parent: _, ...rest } = row
+    return rest
+  })
+  return changed ? next : [...rows]
+}
+
+/** What the kernel and the canvas draw: rows in a hidden folder are hidden too. */
+export function drawnRows(rows: readonly Row[]): Row[] {
+  const hidden = new Set(rows.filter((row) => row.folder && row.hidden).map((row) => row.id))
+  return hidden.size ? rows.map((row) => (row.parent !== undefined && hidden.has(row.parent) && !row.hidden ? { ...row, hidden: true } : row)) : rows as Row[]
+}
+
+/** The index after the last row of the folder at `index` (or `index + 1` for any other row). */
+export function blockEnd(rows: readonly Row[], index: number): number {
+  const row = rows[index]
+  let end = index + 1
+  if (row?.folder) while (end < rows.length && rows[end].parent === row.id) end++
+  return end
+}
+
+/**
+ * Moves the row at `from` (a folder with all its rows) into the gap before row `to`, into `folder` or onto the top
+ * level. A folder only lands on the top level, never between another folder's rows.
+ */
+export function moveIntoGap(rows: readonly Row[], from: number, to: number, folder?: string): Row[] {
+  const moving = rows[from]
+  if (!moving) return [...rows]
+  const end = blockEnd(rows, from)
+  if (moving.folder && folder !== undefined) return [...rows]
+  if (to >= from && to <= end && (moving.folder || moving.parent === folder)) return [...rows]
+  if (to > from && to < end) return [...rows]
+  const block = rows.slice(from, end).map((row, at) => (at > 0 || row.folder ? row : folder === undefined ? withoutParent(row) : { ...row, parent: folder }))
+  const rest = [...rows.slice(0, from), ...rows.slice(end)]
+  const at = to > from ? to - (end - from) : to
+  return withFolders([...rest.slice(0, at), ...block, ...rest.slice(at)])
+}
+
+function withoutParent(row: Row): Row {
+  const { parent: _, ...rest } = row
+  return rest
+}
+
+/** Takes the folder at `index` away: its rows move to the top level, or go with it when `withRows`. */
+export function removeFolder(rows: readonly Row[], index: number, withRows: boolean): Row[] {
+  if (!rows[index]?.folder) return [...rows]
+  const end = blockEnd(rows, index)
+  return [...rows.slice(0, index), ...(withRows ? [] : rows.slice(index + 1, end).map(withoutParent)), ...rows.slice(end)]
+}
+
+/** Puts the top-level expression at `index` into a new folder in its place. */
+export function intoNewFolder(rows: readonly Row[], index: number): { rows: Row[]; folder: Row } {
+  const folder = createFolder(rows)
+  const row = rows[index]
+  if (!row || row.folder || row.parent !== undefined) return { rows: [...rows], folder }
+  return { rows: [...rows.slice(0, index), folder, { ...row, parent: folder.id }, ...rows.slice(index + 1)], folder }
+}
+
+/** Moves a row of a folder out to the top level, just after the folder's last row. */
+export function leaveFolder(rows: readonly Row[], index: number): Row[] {
+  const row = rows[index]
+  if (row?.parent === undefined) return [...rows]
+  const folder = rows.findIndex((candidate) => candidate.id === row.parent)
+  if (folder < 0) return withFolders(rows.map((candidate, at) => (at === index ? withoutParent(candidate) : candidate)))
+  const end = blockEnd(rows, folder)
+  return moveIntoGap(rows, index, end)
+}
+
+/** A new, open folder row. */
+export function createFolder(rows: readonly Row[], name = ''): Row {
+  return { ...createRow(rows, name), folder: { collapsed: false } }
+}
 
 /** A fresh table: columns x and y and three rows to fill. */
 export function createTable(): Table {
@@ -129,9 +223,10 @@ export function createRow(rows: readonly Row[], text = '', range: Partial<Pick<R
 
 /** Every sheet ends in one empty row to type into, like a fresh line on paper. */
 export function withTrailingRow(rows: readonly Row[]): Row[] {
-  const next = [...rows]
-  while (next.length > 1 && !filled(next[next.length - 1]) && !filled(next[next.length - 2])) next.pop()
-  if (!next.length || filled(next[next.length - 1])) next.push(createRow(next))
+  const next = withFolders(rows)
+  const loose = (row: Row | undefined): boolean => row !== undefined && !filled(row) && row.parent === undefined
+  while (next.length > 1 && loose(next[next.length - 1]) && loose(next[next.length - 2])) next.pop()
+  if (!loose(next[next.length - 1])) next.push(createRow(next))
   return next
 }
 
@@ -272,7 +367,9 @@ function normalizeRow(value: unknown, rows: readonly Row[]): Row | null {
     ...(typeof record.normal === 'boolean' ? { normal: record.normal } : {}),
     ...readTable(record.table),
     ...(typeof record.connect === 'boolean' ? { connect: record.connect } : {}),
-    ...readAnimation(record.animation)
+    ...readAnimation(record.animation),
+    ...(record.folder && typeof record.folder === 'object' ? { folder: { collapsed: (record.folder as Record<string, unknown>).collapsed === true } } : {}),
+    ...(typeof record.parent === 'string' && record.parent ? { parent: record.parent.slice(0, 128) } : {})
   }
 }
 

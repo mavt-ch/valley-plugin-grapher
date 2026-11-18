@@ -1,13 +1,13 @@
 import { React, api } from './runtime'
-import type { ChangeEvent, ClipboardEvent, KeyboardEvent, MouseEvent, PointerEvent, ReactElement } from 'react'
+import type { ClipboardEvent, KeyboardEvent, MouseEvent, PointerEvent, ReactElement } from 'react'
 import { paletteCssValue, paletteRef } from '@valley/plugin-sdk/palette'
 import type { UiMenuItem } from '@valley/plugin-sdk'
 import type { RowAnalysis } from './engine'
-import { Check, ChevronDown, Copy, Eye, EyeOff, Grip, More, Pause, Pencil, Play, Plus, Slider, Smile, TableIcon, Trash, Warning, X } from './icons'
+import { Check, ChevronDown, Copy, Eye, EyeOff, FolderIcon, FolderPlus, Grip, More, Pause, Pencil, Play, Plus, Slider, Smile, TableIcon, Trash, Warning, X } from './icons'
 import { SliderAnimator, snap, startMotion } from './animate'
 import { uiText } from './localization'
 import { MathText } from './MathText'
-import { ANIMATION_SPEEDS, COLORS, DEFAULT_ANIMATION, DEFAULT_LEVELS, MAIN_GRAPH, MAX_LEVELS, MAX_NAME, MODES, profileIds, createRow, createTable, filled, graphOf, moveRow, rangeVariable, unitsOf, type Animation, type AxisUnits, type Mode, type Row, type Table } from './model'
+import { ANIMATION_SPEEDS, COLORS, DEFAULT_ANIMATION, DEFAULT_LEVELS, MAIN_GRAPH, MAX_LEVELS, MAX_NAME, MODES, profileIds, blockEnd, createRow, createTable, filled, graphOf, intoNewFolder, leaveFolder, moveIntoGap, rangeVariable, removeFolder, unitsOf, type Animation, type AxisUnits, type Mode, type Row, type Table } from './model'
 import { getStore, useGrapher } from './store'
 import { notePlaying } from './details'
 import { PROFILE_ICON_FOLDER, profileIconElement, profileIconSource, profileIconSvgs, refreshProfileIcons, subscribeProfileIcons } from './profileIcons'
@@ -454,6 +454,20 @@ interface RowProps {
   addSlider: (name: string) => void
   dragging: boolean
   startDrag: (event: PointerEvent<HTMLButtonElement>) => void
+  /** Rows in a folder are indented, and dimmed while the folder is hidden. */
+  inFolder: boolean
+  folderHidden: boolean
+  leaveFolder: () => void
+  intoNewFolder: () => void
+}
+
+/** Focuses the input of the rendered row `delta` places away (rows in a closed folder are not rendered). */
+function focusNeighbour(from: HTMLElement, delta: number): boolean {
+  const row = from.closest<HTMLElement>('[data-row-index]')
+  const rows = Array.from(row?.closest('.grapher-list')?.querySelectorAll<HTMLElement>('[data-row-index]') ?? [])
+  const target = rows[rows.indexOf(row!) + delta]?.querySelector<HTMLInputElement>(':is(input[data-row-input], input[data-folder-input], input[data-cell])')
+  target?.focus()
+  return Boolean(target)
 }
 
 const SliderControl = (props: Pick<RowProps, 'mode' | 'row' | 'analysis' | 'edit'>): ReactElement | null => {
@@ -534,11 +548,13 @@ const SliderBody = ({ mode, row, edit, name, value }: Pick<RowProps, 'mode' | 'r
   React.useEffect(() => { if (run.current && run.current.graph !== active) stop() }, [active, stop])
   React.useEffect(() => stop, [stop])
 
-  const bound = (key: 'min' | 'max') => (event: ChangeEvent<HTMLInputElement>): void => {
-    const next = Number(event.target.value)
-    if (event.target.value.trim() === '' || !Number.isFinite(next)) return
-    const slider = { ...row.slider, [key]: next }
-    if (slider.min < slider.max) edit((current) => ({ ...current, slider }))
+  // A bound that leaves the value outside the range pulls the value in, so the bar shows what was typed.
+  const setBound = (key: 'min' | 'max') => (next: number): boolean => {
+    const slider = { ...row.slider, min, max, [key]: next }
+    if (!(slider.min < slider.max)) return false
+    const clamped = Math.min(slider.max, Math.max(slider.min, value))
+    edit((current) => ({ ...current, slider, ...(clamped !== value ? { text: sliderText(name, clamped, step) } : {}) }))
+    return true
   }
   const setAnimation = (patch: Partial<Animation>): void => edit((current) => ({ ...current, animation: { ...(current.animation ?? DEFAULT_ANIMATION), ...patch } }))
   return (
@@ -554,7 +570,6 @@ const SliderBody = ({ mode, row, edit, name, value }: Pick<RowProps, 'mode' | 'r
         >
           {playing ? <Pause /> : <Play />}
         </button>
-        <input className="grapher-bound" type="number" step="any" value={formatBound(min)} onChange={bound('min')} aria-label={uiText('slider.min', { name })} />
         <input
           className="grapher-range"
           type="range"
@@ -569,7 +584,6 @@ const SliderBody = ({ mode, row, edit, name, value }: Pick<RowProps, 'mode' | 'r
             edit((current) => ({ ...current, text: sliderText(name, next, step) }))
           }}
         />
-        <input className="grapher-bound" type="number" step="any" value={formatBound(max)} onChange={bound('max')} aria-label={uiText('slider.max', { name })} />
         <button
           type="button"
           className="grapher-play-options"
@@ -580,6 +594,10 @@ const SliderBody = ({ mode, row, edit, name, value }: Pick<RowProps, 'mode' | 'r
         >
           <ChevronDown />
         </button>
+      </div>
+      <div className="grapher-slider-bounds">
+        <BoundField value={min} align="start" label={uiText('slider.min', { name })} commit={setBound('min')} />
+        <BoundField value={max} align="end" label={uiText('slider.max', { name })} commit={setBound('max')} />
       </div>
       {options ? (
         <div className="grapher-animation">
@@ -605,6 +623,61 @@ const SliderBody = ({ mode, row, edit, name, value }: Pick<RowProps, 'mode' | 'r
 }
 
 const formatBound = (value: number): string => String(Number(value.toPrecision(8)))
+
+/** A typed bound: a plain decimal number, with a decimal comma or a typographic minus accepted. */
+export function parseBound(text: string): number | null {
+  const clean = text.trim().replace(/\u2212/g, '-').replace(',', '.')
+  if (!/^[-+]?(\d+\.?\d*|\.\d+)(e[-+]?\d+)?$/i.test(clean)) return null
+  const value = Number(clean)
+  return Number.isFinite(value) ? value : null
+}
+
+/**
+ * One end of a slider, under the bar's end. While focused it keeps the typed text, so the field can be emptied or start
+ * with a minus or a point; each complete number that keeps min below max applies at once, Enter or leaving the field
+ * shows the bound again and Escape puts back the bound it had when focused.
+ */
+const BoundField = ({ value, align, label, commit }: { value: number; align: 'start' | 'end'; label: string; commit: (next: number) => boolean }): ReactElement => {
+  const [draft, setDraft] = React.useState<string | null>(null)
+  const [bad, setBad] = React.useState(false)
+  const initial = React.useRef(value)
+  return (
+    <input
+      className={`grapher-slider-bound grapher-slider-bound-${align}`}
+      type="text"
+      inputMode="decimal"
+      spellCheck={false}
+      autoComplete="off"
+      value={draft ?? formatBound(value)}
+      aria-label={label}
+      aria-invalid={bad || undefined}
+      onFocus={(event) => {
+        initial.current = value
+        setDraft(formatBound(value))
+        event.currentTarget.select()
+      }}
+      onChange={(event) => {
+        const text = event.target.value
+        setDraft(text)
+        const next = parseBound(text)
+        setBad(text.trim() !== '' && next !== null && !commit(next))
+      }}
+      onBlur={() => {
+        setDraft(null)
+        setBad(false)
+      }}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter') event.currentTarget.blur()
+        else if (event.key === 'Escape') {
+          event.preventDefault()
+          event.stopPropagation()
+          commit(initial.current)
+          event.currentTarget.blur()
+        }
+      }}
+    />
+  )
+}
 
 /** One range row, `from ≤ variable ≤ to`, editing the row's first (`from`, `to`) or second (`from2`, `to2`) range. */
 const Domain = ({ row, edit, keys, variable, placeholders }: Pick<RowProps, 'row' | 'edit'> & { keys: readonly ['from', 'to'] | readonly ['from2', 'to2']; variable: string; placeholders: readonly [string, string] }): ReactElement => {
@@ -945,22 +1018,29 @@ const ExpressionRow = (props: RowProps): ReactElement => {
         icon: <span className="grapher-menu-swatch" style={{ background: paletteCssValue(paletteRef(id)) }} />,
         onSelect: () => edit((current) => ({ ...current, color: paletteRef(id) }))
       })),
-      ...(trailing ? [] : [{ type: 'separator' } as UiMenuItem, { id: 'delete', label: uiText('row.delete'), icon: <Trash />, danger: true, onSelect: () => props.remove('next') }])
+      ...(trailing ? [] : [
+        { type: 'separator' } as UiMenuItem,
+        props.inFolder
+          ? { id: 'leave-folder', label: uiText('row.leaveFolder'), icon: <FolderIcon />, onSelect: props.leaveFolder }
+          : { id: 'new-folder', label: uiText('row.newFolder'), icon: <FolderPlus />, onSelect: props.intoNewFolder },
+        { type: 'separator' } as UiMenuItem,
+        { id: 'delete', label: uiText('row.delete'), icon: <Trash />, danger: true, onSelect: () => props.remove('next') }
+      ])
     ]
     void api.ui.openMenu(items, { x: event.clientX, y: event.clientY })
   }
   const onKeyDown = (event: KeyboardEvent<HTMLInputElement>): void => {
-    const list = event.currentTarget.closest('.grapher-list')
     const move = (delta: number): void => {
-      const target = list?.querySelector<HTMLInputElement>(`[data-row-index="${index + delta}"] :is(input[data-row-input], input[data-cell])`)
-      if (!target) return
-      event.preventDefault()
-      target.focus()
+      if (focusNeighbour(event.currentTarget, delta)) event.preventDefault()
     }
-    if (event.key === 'Enter' && takesTables(mode) && event.currentTarget.value.trim().toLowerCase() === 'table') {
+    const typed = event.currentTarget.value.trim().toLowerCase()
+    if (event.key === 'Enter' && takesTables(mode) && typed === 'table') {
       event.preventDefault()
       pendingFocus = row.id
       edit((current) => ({ ...current, text: '', table: createTable() }))
+    } else if (event.key === 'Enter' && typed === 'folder' && !props.inFolder) {
+      event.preventDefault()
+      addFolder()
     } else if (event.key === 'Enter' && !trailing) {
       event.preventDefault()
       props.insertAfter()
@@ -984,8 +1064,12 @@ const ExpressionRow = (props: RowProps): ReactElement => {
     pendingFocus = row.id
     edit((current) => ({ ...current, text: '', table: createTable() }))
   }
+  const addFolder = (): void => {
+    pendingFocus = row.id
+    edit((current) => ({ ...current, text: '', folder: { collapsed: false } }))
+  }
   return (
-    <div className="grapher-row" role="listitem" data-row-index={index} data-row-id={row.id} data-kind={analysis?.kind ?? 'empty'} data-hidden={row.hidden || undefined} data-dragging={props.dragging || undefined}>
+    <div className="grapher-row" role="listitem" data-row-index={index} data-row-id={row.id} data-kind={analysis?.kind ?? 'empty'} data-hidden={row.hidden || props.folderHidden || undefined} data-in-folder={props.inFolder || undefined} data-trailing={trailing || undefined} data-dragging={props.dragging || undefined}>
       <div className="grapher-gutter">
         {trailing ? <span className="grapher-handle"><span className="grapher-index">{index + 1}</span></span> : (
           <button
@@ -1045,17 +1129,117 @@ const ExpressionRow = (props: RowProps): ReactElement => {
         <Details {...props} />
         </>)}
       </div>
-      {trailing ? (takesTables(mode) ? (
-        <button type="button" className="grapher-delete grapher-add-table" aria-label={uiText('table.add')} {...api.ui.tooltip(uiText('table.add'))} onClick={addTable}>
-          <TableIcon />
-        </button>
-      ) : <span className="grapher-row-spacer" />) : (
+      {trailing ? (
+        <span className="grapher-trailing-actions">
+          <button type="button" className="grapher-delete grapher-add-table" aria-label={uiText('folder.add')} {...api.ui.tooltip(uiText('folder.add'))} onClick={addFolder}>
+            <FolderPlus />
+          </button>
+          {takesTables(mode) ? (
+            <button type="button" className="grapher-delete grapher-add-table" aria-label={uiText('table.add')} {...api.ui.tooltip(uiText('table.add'))} onClick={addTable}>
+              <TableIcon />
+            </button>
+          ) : null}
+        </span>
+      ) : (
         <button type="button" className="grapher-delete" aria-label={uiText('row.delete')} title={uiText('row.delete')} onClick={() => props.remove('next')}>
           <X />
         </button>
       )}
     </div>
   )
+}
+
+interface FolderProps {
+  row: Row
+  index: number
+  /** How many rows the folder holds. */
+  count: number
+  edit: (change: (row: Row) => Row) => void
+  /** Adds an empty first row inside the folder (opening it) and focuses it. */
+  insertInside: () => void
+  remove: (withRows: boolean) => void
+  dragging: boolean
+  startDrag: (event: PointerEvent<HTMLButtonElement>) => void
+}
+
+/**
+ * A folder row: grip, a chevron that opens or closes it, its name and an eye that hides or shows every row in it.
+ * Folders hold expressions only, one level deep: a folder is never dropped into another one.
+ */
+const FolderRow = ({ row, index, count, edit, insertInside, remove, dragging, startDrag }: FolderProps): ReactElement => {
+  const inputRef = React.useRef<HTMLInputElement>(null)
+  React.useEffect(() => {
+    if (pendingFocus !== row.id) return
+    pendingFocus = null
+    inputRef.current?.focus()
+  })
+  const collapsed = row.folder?.collapsed === true
+  const toggle = (): void => edit((current) => ({ ...current, folder: { collapsed: !current.folder?.collapsed } }))
+  const toggleHidden = (): void => edit((current) => ({ ...current, hidden: !current.hidden }))
+  const openMenu = (event: MouseEvent<HTMLElement>): void => {
+    event.preventDefault()
+    const items: UiMenuItem[] = [
+      { id: 'visibility', label: uiText(row.hidden ? 'folder.show' : 'folder.hide'), icon: row.hidden ? <Eye /> : <EyeOff />, onSelect: toggleHidden },
+      { type: 'separator' },
+      { id: 'ungroup', label: uiText('folder.delete'), icon: <FolderIcon />, onSelect: () => remove(false) },
+      { id: 'delete', label: uiText('folder.deleteAll'), icon: <Trash />, danger: true, onSelect: () => remove(true) }
+    ]
+    void api.ui.openMenu(items, { x: event.clientX, y: event.clientY })
+  }
+  return (
+    <div className="grapher-row grapher-folder" role="listitem" data-row-index={index} data-row-id={row.id} data-kind="folder" data-hidden={row.hidden || undefined} data-dragging={dragging || undefined} onContextMenu={openMenu}>
+      <div className="grapher-gutter">
+        <button type="button" className="grapher-handle" tabIndex={-1} aria-label={uiText('row.drag')} title={uiText('row.drag')} onPointerDown={startDrag}>
+          <span className="grapher-index">{index + 1}</span>
+          <Grip className="grapher-grip-icon" />
+        </button>
+        <span className="grapher-mark">
+          <button type="button" className="grapher-folder-toggle" aria-expanded={!collapsed} aria-label={uiText(collapsed ? 'folder.expand' : 'folder.collapse')} title={uiText(collapsed ? 'folder.expand' : 'folder.collapse')} onClick={toggle}>
+            <ChevronDown />
+          </button>
+        </span>
+      </div>
+      <div className="grapher-folder-main">
+        <FolderIcon className="grapher-folder-icon" />
+        <input
+          ref={inputRef}
+          data-folder-input=""
+          className="grapher-input grapher-folder-name"
+          value={row.text}
+          placeholder={uiText('folder.name')}
+          spellCheck={false}
+          autoComplete="off"
+          aria-label={uiText('folder.input', { index: index + 1 })}
+          onChange={(event) => {
+            const text = event.target.value
+            edit((current) => ({ ...current, text }))
+          }}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') {
+              event.preventDefault()
+              insertInside()
+            } else if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
+              if (focusNeighbour(event.currentTarget, event.key === 'ArrowUp' ? -1 : 1)) event.preventDefault()
+            }
+          }}
+        />
+        {collapsed && count ? <span className="grapher-folder-count">{count}</span> : null}
+        <button type="button" className="grapher-folder-eye" aria-pressed={!row.hidden} aria-label={uiText(row.hidden ? 'folder.show' : 'folder.hide')} title={uiText(row.hidden ? 'folder.show' : 'folder.hide')} onClick={toggleHidden}>
+          {row.hidden ? <EyeOff /> : <Eye />}
+        </button>
+      </div>
+      <button type="button" className="grapher-delete" aria-label={uiText('folder.delete')} title={uiText('folder.delete')} onClick={() => remove(false)}>
+        <X />
+      </button>
+    </div>
+  )
+}
+
+/** Where a dragged row lands: the gap before row `gap`, in `folder` or on the top level, and the marker's y. */
+interface DropGap {
+  gap: number
+  folder?: string
+  marker: number
 }
 
 /** Left sidebar: the focused graph's view button, axis labels and open button in the 38px header, then its expressions. */
@@ -1074,11 +1258,14 @@ export const Sidebar = (): ReactElement => {
   const editRow = (id: string) => (change: (row: Row) => Row): void => {
     store.updateRows(active, mode, (current) => current.map((row) => (row.id === id ? change(row) : row)))
   }
+  // A row added after a folder row opens the folder and becomes its first row; one added after a folder's row joins it.
   const insertAfter = (index: number) => (): void => {
     store.updateRows(active, mode, (current) => {
+      const at = current[index]
       const row = createRow(current)
       pendingFocus = row.id
-      return [...current.slice(0, index + 1), row, ...current.slice(index + 1)]
+      if (at?.folder) return [...current.slice(0, index), { ...at, folder: { collapsed: false } }, { ...row, parent: at.id }, ...current.slice(index + 1)]
+      return [...current.slice(0, index + 1), at?.parent !== undefined ? { ...row, parent: at.parent } : row, ...current.slice(index + 1)]
     })
   }
   const remove = (index: number) => (focus: 'previous' | 'next'): void => {
@@ -1089,29 +1276,42 @@ export const Sidebar = (): ReactElement => {
     })
   }
   const listRef = React.useRef<HTMLDivElement>(null)
-  const dragRef = React.useRef<{ pointer: number; from: number; to: number } | null>(null)
-  const [drag, setDrag] = React.useState<{ from: number; to: number; marker: number } | null>(null)
-  /** The gap (0 … typed rows) nearest the pointer, and the y of its separator line inside the list. */
-  const gapAt = (clientY: number): { gap: number; marker: number } | null => {
+  const dragRef = React.useRef<{ pointer: number; from: number; gap: DropGap | null } | null>(null)
+  const [drag, setDrag] = React.useState<{ from: number; gap: DropGap | null } | null>(null)
+  /**
+   * The gap nearest the pointer among the rendered typed rows, and whether a dropped row lands in a folder there: between
+   * a folder's rows always; right under an open folder's last row (or an empty open folder) when the pointer is right
+   * of the gutter. A folder only lands on the top level, so a gap inside another folder takes none.
+   */
+  const gapAt = (clientX: number, clientY: number, from: number): DropGap | null => {
     const list = listRef.current
-    if (!list) return null
-    const elements = Array.from(list.querySelectorAll<HTMLElement>('[data-row-index]')).slice(0, rows.length - 1)
+    const moving = rows[from]
+    if (!list || !moving) return null
+    const elements = Array.from(list.querySelectorAll<HTMLElement>('[data-row-index]')).filter((element) => Number(element.dataset.rowIndex) < rows.length - 1)
     if (!elements.length) return null
-    let gap = 0
+    let after = -1
     elements.forEach((element, at) => {
       const rect = element.getBoundingClientRect()
-      if (clientY > rect.top + rect.height / 2) gap = at + 1
+      if (clientY > rect.top + rect.height / 2) after = at
     })
-    const marker = gap < elements.length ? elements[gap].offsetTop : elements[gap - 1].offsetTop + elements[gap - 1].offsetHeight
-    return { gap, marker }
+    if (after < 0) return { gap: Number(elements[0].dataset.rowIndex), marker: elements[0].offsetTop }
+    const element = elements[after]
+    const marker = element.offsetTop + element.offsetHeight
+    const index = Number(element.dataset.rowIndex)
+    const above = rows[index]
+    const owner = above.folder ? (above.folder.collapsed ? undefined : above.id) : above.parent
+    if (owner === undefined) return { gap: above.folder ? blockEnd(rows, index) : index + 1, marker }
+    const inside = rows[index + 1]?.parent === owner
+    if (inside) return moving.folder ? null : { gap: index + 1, folder: owner, marker }
+    const right = clientX > list.getBoundingClientRect().left + 46
+    return { gap: index + 1, ...(right && !moving.folder ? { folder: owner } : {}), marker }
   }
   const startDrag = (index: number) => (event: PointerEvent<HTMLButtonElement>): void => {
     if (event.button !== 0) return
     event.preventDefault()
     event.currentTarget.setPointerCapture(event.pointerId)
-    const found = gapAt(event.clientY)
-    dragRef.current = { pointer: event.pointerId, from: index, to: index }
-    setDrag({ from: index, to: index, marker: found?.marker ?? 0 })
+    dragRef.current = { pointer: event.pointerId, from: index, gap: null }
+    setDrag({ from: index, gap: null })
   }
   const moveDrag = (event: PointerEvent<HTMLDivElement>): void => {
     const current = dragRef.current
@@ -1120,19 +1320,30 @@ export const Sidebar = (): ReactElement => {
     const bounds = list.getBoundingClientRect()
     if (event.clientY < bounds.top + 24) list.scrollTop -= 8
     else if (event.clientY > bounds.bottom - 24) list.scrollTop += 8
-    const found = gapAt(event.clientY)
-    if (!found) return
-    current.to = found.gap
-    setDrag({ from: current.from, to: found.gap, marker: found.marker })
+    current.gap = gapAt(event.clientX, event.clientY, current.from)
+    setDrag({ from: current.from, gap: current.gap })
   }
   const endDrag = (commit: boolean) => (event: PointerEvent<HTMLDivElement>): void => {
     const current = dragRef.current
     if (!current || current.pointer !== event.pointerId) return
     dragRef.current = null
     setDrag(null)
-    if (commit && current.to !== current.from && current.to !== current.from + 1) store.updateRows(active, mode, (all) => moveRow(all, current.from, Math.min(current.to, all.length - 1)))
+    const gap = current.gap
+    if (commit && gap) store.updateRows(active, mode, (all) => moveIntoGap(all, current.from, Math.min(gap.gap, all.length - 1), gap.folder))
   }
-  const showMarker = drag !== null && drag.to !== drag.from && drag.to !== drag.from + 1
+  const moves = (from: number, gap: DropGap): boolean => {
+    const moving = rows[from]
+    return !(gap.gap >= from && gap.gap <= blockEnd(rows, from) && (moving.folder || moving.parent === gap.folder))
+  }
+  const marker = drag?.gap && moves(drag.from, drag.gap) ? drag.gap : null
+  const folders = new Map(rows.filter((row) => row.folder).map((row) => [row.id, row]))
+  const removeFolderAt = (index: number) => (withRows: boolean): void => store.updateRows(active, mode, (current) => removeFolder(current, index, withRows))
+  const leaveFolderAt = (index: number) => (): void => store.updateRows(active, mode, (current) => leaveFolder(current, index))
+  const intoNewFolderAt = (index: number) => (): void => store.updateRows(active, mode, (current) => {
+    const result = intoNewFolder(current, index)
+    pendingFocus = result.folder.id
+    return result.rows
+  })
   const addSlider = (name: string): void => {
     store.updateRows(active, mode, (current) => {
       const kept = current.filter(filled)
@@ -1175,23 +1386,47 @@ export const Sidebar = (): ReactElement => {
           onPointerUp={endDrag(true)}
           onPointerCancel={endDrag(false)}
         >
-          {rows.map((row, index) => (
-            <ExpressionRow
-              key={row.id}
-              mode={mode}
-              row={row}
-              index={index}
-              trailing={index === rows.length - 1 && !filled(row)}
-              analysis={analyses[index]}
-              edit={editRow(row.id)}
-              insertAfter={insertAfter(index)}
-              remove={remove(index)}
-              addSlider={addSlider}
-              dragging={drag?.from === index}
-              startDrag={startDrag(index)}
-            />
-          ))}
-          {showMarker ? <div className="grapher-drop-marker" style={{ top: drag.marker }} aria-hidden /> : null}
+          {rows.map((row, index) => {
+            const folder = row.parent !== undefined ? folders.get(row.parent) : undefined
+            if (folder?.folder?.collapsed) return null
+            const dragging = drag !== null && (drag.from === index || (rows[drag.from]?.folder !== undefined && row.parent === rows[drag.from].id))
+            if (row.folder) {
+              return (
+                <FolderRow
+                  key={row.id}
+                  row={row}
+                  index={index}
+                  count={blockEnd(rows, index) - index - 1}
+                  edit={editRow(row.id)}
+                  insertInside={insertAfter(index)}
+                  remove={removeFolderAt(index)}
+                  dragging={dragging}
+                  startDrag={startDrag(index)}
+                />
+              )
+            }
+            return (
+              <ExpressionRow
+                key={row.id}
+                mode={mode}
+                row={row}
+                index={index}
+                trailing={index === rows.length - 1 && !filled(row)}
+                analysis={analyses[index]}
+                edit={editRow(row.id)}
+                insertAfter={insertAfter(index)}
+                remove={remove(index)}
+                addSlider={addSlider}
+                dragging={dragging}
+                startDrag={startDrag(index)}
+                inFolder={folder !== undefined}
+                folderHidden={folder?.hidden === true}
+                leaveFolder={leaveFolderAt(index)}
+                intoNewFolder={intoNewFolderAt(index)}
+              />
+            )
+          })}
+          {marker ? <div className="grapher-drop-marker" data-in-folder={marker.folder !== undefined || undefined} style={{ top: marker.marker }} aria-hidden /> : null}
           <p className="grapher-hint">
             {uiText('hint.short')}{' '}
             <button type="button" className="grapher-hint-link" onClick={() => api.workspace.showProperties(tab === MAIN_GRAPH ? store.tabFor(active) : tab, { segmentId: REFERENCE_SEGMENT })}>{uiText('hint.open')}</button>

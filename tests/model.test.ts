@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { createRow, defaultDocument, moveRow, normalizeDocument, unitsOf, withTrailingRow, type Row } from '../src/model'
+import { createFolder, createRow, defaultDocument, drawnRows, leaveFolder, moveIntoGap, moveRow, normalizeDocument, removeFolder, unitsOf, withFolders, withTrailingRow, type Row } from '../src/model'
 import { parseMath, tokenizeMath } from '../src/MathText'
 import { MODES, viewOf } from '../src/views'
-import { sliderText } from '../src/Sidebar'
+import { parseBound, sliderText } from '../src/Sidebar'
 import { rgb, shaded } from '../src/Space'
 
 describe('sheets', () => {
@@ -190,3 +190,59 @@ describe('sheets', () => {
   })
 })
 
+
+describe('folders', () => {
+  const row = (text: string, parent?: string): Row => ({ ...createRow([]), text, ...(parent ? { parent } : {}) })
+  const folder = (name: string): Row => createFolder([], name)
+  const shape = (rows: readonly Row[]): string[] => rows.map((entry) => (entry.folder ? `[${entry.text}]` : entry.parent ? `  ${entry.text}` : entry.text))
+
+  it('stay one level deep and keep their rows together', () => {
+    const a = folder('A')
+    const b = folder('B')
+    const nested = { ...b, parent: a.id }
+    expect(shape(withFolders([a, row('x', a.id), nested, row('y', a.id), row('z', b.id)]))).toEqual(['[A]', '  x', '[B]', 'y', 'z'])
+    expect(shape(withFolders([row('x', 'missing'), a, row('w'), row('v', a.id)]))).toEqual(['x', '[A]', 'w', 'v'])
+  })
+
+  it('move rows in and out, and a folder only to the top level with its rows', () => {
+    const a = folder('A')
+    const b = folder('B')
+    const rows = [a, row('x', a.id), row('y', a.id), row('z'), b, row('w', b.id), row('')]
+    expect(shape(moveIntoGap(rows, 3, 2, a.id))).toEqual(['[A]', '  x', '  z', '  y', '[B]', '  w', ''])
+    expect(shape(moveIntoGap(rows, 1, 4))).toEqual(['[A]', '  y', 'z', 'x', '[B]', '  w', ''])
+    expect(shape(moveIntoGap(rows, 4, 0))).toEqual(['[B]', '  w', '[A]', '  x', '  y', 'z', ''])
+    expect(moveIntoGap(rows, 4, 2, a.id)).toEqual(rows)
+    expect(shape(leaveFolder(rows, 1))).toEqual(['[A]', '  y', 'x', 'z', '[B]', '  w', ''])
+  })
+
+  it('come away with or without their rows', () => {
+    const a = folder('A')
+    const rows = [a, row('x', a.id), row('y')]
+    expect(shape(removeFolder(rows, 0, false))).toEqual(['x', 'y'])
+    expect(shape(removeFolder(rows, 0, true))).toEqual(['y'])
+  })
+
+  it('hide their rows, never send their name to the kernel and keep the empty last row outside', () => {
+    const a = { ...folder('a = 1'), hidden: true }
+    const drawn = drawnRows([a, row('x', a.id), row('y')])
+    expect(drawn.map((entry) => entry.hidden)).toEqual([true, true, false])
+    expect(shape(withTrailingRow([a, row('x', a.id)]))).toEqual(['[a = 1]', '  x', ''])
+    expect(withTrailingRow([a, row('', a.id)]).at(-1)?.parent).toBeUndefined()
+  })
+
+  it('survive a save and reload', () => {
+    const document = defaultDocument()
+    const a = folder('A')
+    document.sheets.cartesian = [{ ...a, folder: { collapsed: true } }, row('x', a.id), row('')]
+    const back = normalizeDocument(JSON.parse(JSON.stringify(document)))
+    expect(back.sheets.cartesian[0].folder).toEqual({ collapsed: true })
+    expect(back.sheets.cartesian[1].parent).toBe(a.id)
+  })
+})
+
+describe('slider bounds', () => {
+  it('accept partial typing only once it is a number', () => {
+    expect(['', '-', '.', '0.', '-.', 'e'].map(parseBound)).toEqual([null, null, null, 0, null, null])
+    expect(['0.5', '-3', '−2', '1,5', '.25', '1e3'].map(parseBound)).toEqual([0.5, -3, -2, 1.5, 0.25, 1000])
+  })
+})

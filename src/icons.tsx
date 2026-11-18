@@ -159,3 +159,11 @@ export const More = (p: IconProps): ReactElement => (
 export const Smile = (p: IconProps): ReactElement => (
   <Svg {...p}><circle cx="12" cy="12" r="9" /><path d="M8.5 14.5c2 2 5 2 7 0M9 9.5h.01M15 9.5h.01" /></Svg>
 )
+
+export const FolderIcon = (p: IconProps): ReactElement => (
+  <Svg {...p}><path d="M3.5 7a1.5 1.5 0 0 1 1.5-1.5h4l2 2.5h8a1.5 1.5 0 0 1 1.5 1.5v8A1.5 1.5 0 0 1 19 19H5a1.5 1.5 0 0 1-1.5-1.5z" /></Svg>
+)
+
+export const FolderPlus = (p: IconProps): ReactElement => (
+  <Svg {...p}><path d="M3.5 7a1.5 1.5 0 0 1 1.5-1.5h4l2 2.5h8a1.5 1.5 0 0 1 1.5 1.5v8A1.5 1.5 0 0 1 19 19H5a1.5 1.5 0 0 1-1.5-1.5z" /><path d="M12 10.5v6M9 13.5h6" /></Svg>
+)

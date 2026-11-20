@@ -65,27 +65,30 @@ interface CanvasProps {
   graph: string
   /** The camera slot (`graph:mode`, or the bookmark view's own). */
   slot: string
+  /** A ```grapher``` block in a note: its camera is never saved, it offers no export, the plain wheel scrolls the note
+   * (a pinch zooms) and the view opens on `home` when given. */
+  embedded?: { home?: (size: Size) => Viewport }
 }
 
 /**
  * The graph: drag to pan, scroll or pinch to zoom about the pointer, hover a graph to trace it. Sampling runs
  * in the Rust kernel whenever the view or the rows change; drawing reads colours from the theme each frame.
  */
-export const GraphCanvas = ({ view: plane, units, rows, analyses, engine, graph, slot }: CanvasProps): ReactElement => {
+export const GraphCanvas = ({ view: plane, units, rows, analyses, engine, graph, slot, embedded }: CanvasProps): ReactElement => {
   const mode = plane.id
   const store = getStore()
   const wrapRef = React.useRef<HTMLDivElement>(null)
   const canvasRef = React.useRef<HTMLCanvasElement>(null)
   const sizeRef = React.useRef<Size>({ width: 0, height: 0 })
-  const viewRef = React.useRef<Viewport | null>(store.viewports[slot] ?? null)
+  const viewRef = React.useRef<Viewport | null>(embedded ? null : store.viewports[slot] ?? null)
   const pathsRef = React.useRef<SamplePath[]>([])
   /** The time flowing vector fields are sampled at, in cycles. */
   const flowRef = React.useRef(0)
   const pointerRef = React.useRef<{ x: number; y: number } | null>(null)
   const dragRef = React.useRef<{ id: number; x: number; y: number; view: Viewport } | null>(null)
   const frameRef = React.useRef<{ id: number | null; resample: boolean }>({ id: null, resample: true })
-  const inputs = React.useRef({ plane, units, mode, slot, rows, analyses, engine })
-  inputs.current = { plane, units, mode, slot, rows, analyses, engine }
+  const inputs = React.useRef({ plane, units, mode, slot, rows, analyses, engine, embedded })
+  inputs.current = { plane, units, mode, slot, rows, analyses, engine, embedded }
   /** Markers: computed per row on demand and kept until the next resample (pan, zoom, any row or slider change). */
   const generationRef = React.useRef(0)
   const markersRef = React.useRef<{ generation: number; rows: Map<number, Marker[]> }>({ generation: -1, rows: new Map() })
@@ -207,9 +210,9 @@ export const GraphCanvas = ({ view: plane, units, rows, analyses, engine, graph,
   const prepare = React.useCallback((): void => {
     const frame = frameRef.current
     const size = sizeRef.current
-    const { plane, mode, rows, engine } = inputs.current
-    const view = viewRef.current ?? (viewRef.current = homeView(plane, size))
-    noteCanvas(inputs.current.slot, { size, view, pins: pinsRef.current.length })
+    const { plane, mode, rows, engine, embedded } = inputs.current
+    const view = viewRef.current ?? (viewRef.current = embedded?.home?.(size) ?? homeView(plane, size))
+    if (!embedded) noteCanvas(inputs.current.slot, { size, view, pins: pinsRef.current.length })
     if (!frame.resample) return
     frame.resample = false
     generationRef.current += 1
@@ -242,13 +245,16 @@ export const GraphCanvas = ({ view: plane, units, rows, analyses, engine, graph,
 
   const setView = React.useCallback((next: Viewport): void => {
     viewRef.current = next
-    store.viewports[inputs.current.slot] = next
-    store.noteCamera()
+    if (!inputs.current.embedded) {
+      store.viewports[inputs.current.slot] = next
+      store.noteCamera()
+    }
     invalidate(true)
   }, [invalidate, store])
 
   // The tab's menu exports this frame: the paths sampled last, at the canvas's size, in the theme's colours.
-  React.useEffect(() => registerExporter(graph, {
+  const exporting = !embedded
+  React.useEffect(() => exporting ? registerExporter(graph, {
     mode: () => inputs.current.mode,
     formats: ['png', 'svg'],
     render: async (format) => {
@@ -263,11 +269,11 @@ export const GraphCanvas = ({ view: plane, units, rows, analyses, engine, graph,
         invalidate(false)
       }
     }
-  }), [graph, paint, prepare, invalidate])
+  }) : undefined, [exporting, graph, paint, prepare, invalidate])
 
   // A new sheet brings its own camera, and leaves the other sheet's selection and pins behind.
   React.useEffect(() => {
-    viewRef.current = store.viewports[slot] ?? null
+    viewRef.current = inputs.current.embedded ? null : store.viewports[slot] ?? null
     selectedRef.current = null
     pinsRef.current = []
     invalidate(true)
@@ -311,6 +317,8 @@ export const GraphCanvas = ({ view: plane, units, rows, analyses, engine, graph,
     const theme = new view.MutationObserver(() => invalidate(false))
     theme.observe(canvas.ownerDocument.documentElement, { attributes: true, attributeFilter: ['style', 'class', 'data-theme'] })
     const onWheel = (event: WheelEvent): void => {
+      // In a note only a pinch (the wheel with Control) zooms; the plain wheel scrolls the note past the graph.
+      if (inputs.current.embedded && !event.ctrlKey) return
       event.preventDefault()
       const current = viewRef.current
       if (!current) return
@@ -393,8 +401,9 @@ export const GraphCanvas = ({ view: plane, units, rows, analyses, engine, graph,
   }
 
   const reset = (): void => {
-    delete store.viewports[inputs.current.slot]
-    setView(homeView(inputs.current.plane, sizeRef.current))
+    const { embedded, plane, slot } = inputs.current
+    if (!embedded) delete store.viewports[slot]
+    setView(embedded?.home?.(sizeRef.current) ?? homeView(plane, sizeRef.current))
   }
 
   const onKeyDown = (event: KeyboardEvent<HTMLCanvasElement>): void => {
@@ -429,7 +438,7 @@ export const GraphCanvas = ({ view: plane, units, rows, analyses, engine, graph,
         ref={canvasRef}
         className="grapher-canvas"
         tabIndex={0}
-        aria-label={uiText('graph.canvas', { mode: uiText(`mode.${mode}`) })}
+        aria-label={uiText(embedded ? 'graph.canvasEmbedded' : 'graph.canvas', { mode: uiText(`mode.${mode}`) })}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={endDrag}

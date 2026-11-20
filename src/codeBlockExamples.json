@@ -1,0 +1,14 @@
+{
+  "grapher": [
+    { "id": "functions", "label": "Functions", "labelKey": "fence.example.functions", "code": "y = sin(x)\ny = x^2 / 4 - 2" },
+    { "id": "sliders", "label": "Sliders", "labelKey": "fence.example.sliders", "code": "y = a sin(k x)\na = 2 ; slider 0 .. 4\nk = 1 ; slider 0.5 .. 3 ; step 0.5" },
+    { "id": "trigonometry", "label": "Axes in π", "labelKey": "fence.example.trigonometry", "code": "units: pi\ny = sin(x)\ny = cos(x) ; blue" },
+    { "id": "calculus", "label": "Derivative and integral", "labelKey": "fence.example.calculus", "code": "f(x) = x^3 / 3 - x\nf'(x) ; orange\nint(f(x), -1, 1)\ntangent(f(x), 1.5)" },
+    { "id": "regions", "label": "Equations and inequalities", "labelKey": "fence.example.regions", "code": "x^2 + y^2 = 9\ny > x^2 - 4 ; green" },
+    { "id": "polar", "label": "Polar", "labelKey": "fence.example.polar", "code": "view: polar\nr = 2 sin(3θ)\nr = 1 + cos(θ) ; 0 .. 2π" },
+    { "id": "parametric", "label": "Parametric", "labelKey": "fence.example.parametric", "code": "view: parametric\nspan: 10\n(0.2t cos t, 0.2t sin t) ; t = 0 .. 6π" },
+    { "id": "field", "label": "Vector field", "labelKey": "fence.example.field", "code": "span: 8\nF(x, y) = (-y, x) ; flow" },
+    { "id": "surface", "label": "3D surface", "labelKey": "fence.example.surface", "code": "view: 3d\nheight: 380\nz = (x^2 + y^2) / 5 - 6 ; floor\n(6cos t, 6sin t, t / 2) ; 0 .. 6π" },
+    { "id": "complex", "label": "Complex plane", "labelKey": "fence.example.complex", "code": "view: complex\nw = 2e^(iπ/3)\n|z + 2| < 3" }
+  ]
+}

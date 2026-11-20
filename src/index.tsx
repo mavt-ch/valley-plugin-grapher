@@ -4,6 +4,7 @@
  *     sheet's expressions with sliders, ranges and errors.
  *   - `grapher.graph` (main_workspace): one tab per graph; each tab keeps its own view and sheets, and the sidebar
  *     edits the focused one.
+ *   - ```grapher``` code blocks: a live graph with its sliders in a note (`src/fence.tsx`).
  *   - Properties segment `grapher.reference` on graph tabs: every feature with its syntax and examples, searchable.
  * Parsing, analysis and sampling run in the Rust kernel (`src/wasm`, module `plot`); both views share one store.
  */
@@ -20,6 +21,7 @@ import { COLOR_ORDER_SETTING, SettingsView } from './Settings'
 import { setColorOrder } from './model'
 import { provideGraphSurface } from './exporting'
 import { provideGraphDetails } from './details'
+import { registerGrapherFence } from './fence'
 
 export function register(api: ValleyPluginApi): () => Promise<void> {
   initLocalization(api)
@@ -38,6 +40,8 @@ export function register(api: ValleyPluginApi): () => Promise<void> {
   const offSurface = provideGraphSurface(api, store)
   // Info rows of the focused graph tab in Properties.
   const offDetails = provideGraphDetails(api, store)
+  // ```grapher``` blocks draw a live graph in notes.
+  const offFence = registerGrapherFence()
   // Beside it, the graph's Markdown notes.
   const offNotes = api.interop.extensions.provide(METADATA_PANEL_SEGMENT_V1, {
     id: NOTES_SEGMENT, label: 'Notes', labelKey: 'notes.tab', icon: EDIT_NOTE_ICON, pluginSurfaces: ['main_workspace'],
@@ -55,6 +59,7 @@ export function register(api: ValleyPluginApi): () => Promise<void> {
     offSurface()
     offReference()
     offDetails()
+    offFence()
     offNotes()
     offColors()
     disposal = store.flush().catch(() => {}).finally(() => {

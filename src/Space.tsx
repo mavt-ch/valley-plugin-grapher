@@ -155,22 +155,25 @@ interface SpaceProps {
   /** The camera slot (`graph:mode`, or the bookmark view's own). */
   slot: string
   units: AxisUnits
+  /** A ```grapher``` block in a note: its camera is never saved, it offers no export and the plain wheel scrolls the note
+   * (a pinch zooms). */
+  embedded?: boolean
 }
 
 /** The 3D graph: drag to orbit, scroll or pinch to zoom; the kernel projects and orders everything per frame. */
-export const SpaceCanvas = ({ view, rows, engine, graph, slot, units }: SpaceProps): ReactElement => {
+export const SpaceCanvas = ({ view, rows, engine, graph, slot, units, embedded = false }: SpaceProps): ReactElement => {
   const store = getStore()
   const wrapRef = React.useRef<HTMLDivElement>(null)
   const canvasRef = React.useRef<HTMLCanvasElement>(null)
   const sizeRef = React.useRef<Size>({ width: 0, height: 0 })
   const home = React.useMemo((): Camera => ({ ...HOME_CAMERA, range: view.homeRange ?? HOME_CAMERA.range }), [view.homeRange])
-  const cameraRef = React.useRef<Camera>(store.cameras[slot] ?? home)
+  const cameraRef = React.useRef<Camera>((embedded ? undefined : store.cameras[slot]) ?? home)
   const dragRef = React.useRef<{ id: number; x: number; y: number; camera: Camera } | null>(null)
   const frameRef = React.useRef<number | null>(null)
   /** The time flowing vector fields are drawn at, in cycles. */
   const flowRef = React.useRef(0)
-  const inputs = React.useRef({ view, slot, rows, engine, units })
-  inputs.current = { view, slot, rows, engine, units }
+  const inputs = React.useRef({ view, slot, rows, engine, units, embedded })
+  inputs.current = { view, slot, rows, engine, units, embedded }
 
   /** Projects and paints the current frame for the camera at the canvas's size (on screen, or into an export). */
   const paint = React.useCallback((ctx: CanvasRenderingContext2D, theme: Theme): void => {
@@ -191,7 +194,7 @@ export const SpaceCanvas = ({ view, rows, engine, graph, slot, units }: SpacePro
     const ctx = canvas?.getContext('2d')
     const size = sizeRef.current
     if (!canvas || !ctx || size.width <= 0 || size.height <= 0) return
-    noteCanvas(inputs.current.slot, { size, camera: cameraRef.current })
+    if (!inputs.current.embedded) noteCanvas(inputs.current.slot, { size, camera: cameraRef.current })
     const dpr = canvas.ownerDocument.defaultView?.devicePixelRatio || 1
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
     paint(ctx, readTheme(canvas))
@@ -203,7 +206,7 @@ export const SpaceCanvas = ({ view, rows, engine, graph, slot, units }: SpacePro
   }, [draw])
 
   // 3D exports as PNG only: its surfaces are thousands of depth-sorted polygons, which an SVG would carry as seams.
-  React.useEffect(() => registerExporter(graph, {
+  React.useEffect(() => embedded ? undefined : registerExporter(graph, {
     mode: () => inputs.current.view.id,
     formats: ['png'],
     render: async () => {
@@ -213,19 +216,21 @@ export const SpaceCanvas = ({ view, rows, engine, graph, slot, units }: SpacePro
       const theme = readTheme(canvas)
       return renderPng(canvas.ownerDocument, size, (ctx) => paint(ctx, theme))
     }
-  }), [graph, paint])
+  }), [embedded, graph, paint])
 
   const setCamera = React.useCallback((next: Camera): void => {
     const camera = { yaw: next.yaw, pitch: Math.max(-MAX_PITCH, Math.min(MAX_PITCH, next.pitch)), range: Math.max(MIN_RANGE, Math.min(MAX_RANGE, next.range)) }
     cameraRef.current = camera
-    store.cameras[inputs.current.slot] = camera
-    store.noteCamera()
+    if (!inputs.current.embedded) {
+      store.cameras[inputs.current.slot] = camera
+      store.noteCamera()
+    }
     invalidate()
   }, [invalidate, store])
 
   // Each 3D sheet keeps its own camera.
   React.useEffect(() => {
-    cameraRef.current = store.cameras[slot] ?? home
+    cameraRef.current = (inputs.current.embedded ? undefined : store.cameras[slot]) ?? home
     invalidate()
   }, [slot, store, home, invalidate])
 
@@ -268,6 +273,8 @@ export const SpaceCanvas = ({ view, rows, engine, graph, slot, units }: SpacePro
     const theme = new view.MutationObserver(invalidate)
     theme.observe(canvas.ownerDocument.documentElement, { attributes: true, attributeFilter: ['style', 'class', 'data-theme'] })
     const onWheel = (event: WheelEvent): void => {
+      // In a note only a pinch (the wheel with Control) zooms; the plain wheel scrolls the note past the graph.
+      if (inputs.current.embedded && !event.ctrlKey) return
       event.preventDefault()
       const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? sizeRef.current.height : 1
       const delta = Math.max(-300, Math.min(300, event.deltaY * unit))
@@ -330,7 +337,7 @@ export const SpaceCanvas = ({ view, rows, engine, graph, slot, units }: SpacePro
         ref={canvasRef}
         className="grapher-canvas grapher-canvas-space"
         tabIndex={0}
-        aria-label={uiText('graph.canvas3d', { mode: uiText(`mode.${view.id}`) })}
+        aria-label={uiText(embedded ? 'graph.canvas3dEmbedded' : 'graph.canvas3d', { mode: uiText(`mode.${view.id}`) })}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={endDrag}

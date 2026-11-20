@@ -63,6 +63,33 @@ The open-page button in the header opens the graph in the workspace: drag to pan
 
 The three-dot menu of a graph tab exports what the tab shows: **Export as PNG** on every view and **Export as SVG** on the flat ones (Cartesian, Polar, Parametric, Complex). The file holds the current frame at the tab's size: grid, axes and their labels, curves, shaded regions, vector-field arrows, points and table points, level curves with their labels and pinned markers with their labels; the pointer's readout and the hover or selection markers are left out. The background is the theme's graph colour painted solid, so the file reads outside Valley. A PNG has 2 pixels per screen pixel whatever the display; an SVG is drawn by the same painters into real paths and text (CSS pixels, colours resolved to `#rrggbb` with an opacity, fonts ending in `system-ui, …, sans-serif`). 3D views export as PNG only: their surfaces are thousands of depth-sorted polygons, which an SVG would carry as hairline seams. Files are named after the view and the local time, `grapher-cartesian-20261113-004105.svg`, and go to the download folder set in General settings (Files and links) through the SDK's `files.downloadFile`; a PNG is handed over as bytes, which the host writes as they are (the vendored SDK 8.1.0 types declare text only, the host and the current SDK accept text or bytes). A short notice at the bottom of the tab says where the file went, or why it failed, and fades after six seconds. The sidebar has no export entry: it edits the focused graph, while the export is of the tab's canvas at its size and camera, and its menu is where the host keeps the tab's own actions.
 
+## Code blocks
+
+A ` ```grapher ` code block draws a live graph in a note. Each line is one expression, written as in the sidebar; a few setting lines, each `key: value`, may come anywhere:
+
+````markdown
+```grapher
+view: polar
+height: 360
+r = 2 sin(3θ)
+r = a + cos(θ) ; 0 .. 2π ; blue
+a = 1 ; slider 0 .. 3 ; step 0.25
+```
+````
+
+| Setting | Values | Default |
+| --- | --- | --- |
+| `view` | `cartesian`, `polar`, `parametric`, `3d` (or `space`), `cylindrical`, `spherical`, `complex`, `complex-3d` | `cartesian` |
+| `units` | `decimal` or `pi` (axis labels in multiples of π) | the view's own |
+| `height` | pixels, 160 to 800 | 320 |
+| `center` | flat views: the point in the middle, `x, y` | `0, 0` |
+| `span` | flat views: the units across the width | the view's own |
+| `range` | 3D views: half the edge of the cube | the view's own |
+
+Options follow an expression after `;`: a range `0 .. 4π` (optionally named, `t = 0 .. 4π`; a second range for a surface over two coordinates), a palette colour (`blue`, `orange`, `teal` …) or `#rrggbb`, `slider min .. max` and `step n` for a slider row, and the flags `hidden`, `floor` (level curves of a surface on the floor), `flow` (a vector field drifting along its arrows) and `connect` (points joined in order). Anything the block does not understand is named under the graph, with its line; so are the expressions' own errors.
+
+The graph pans by dragging (3D views orbit), zooms with a pinch, the zoom buttons or `+`, `−` and `0` while focused; the plain wheel scrolls the note past it. Every slider row shows a slider with its play button under the graph. Moving it changes the block only: nothing in a block is saved, and the camera starts where the block says each time the note is shown. **Open in Grapher** copies the block's expressions into a new graph tab, where they are edited and saved like any other graph. The block picker lists ten examples (functions, sliders, axes in π, derivative and integral, equations and inequalities, polar, parametric, a vector field, a 3D surface and the complex plane).
+
 ## Settings
 
 Settings → Grapher → Colours sets the order new expressions take their colours in: a list of palette colours (drag or the grip with the arrow keys to reorder, × to take one out while more than one is left, the add row for another palette colour, Reset to defaults for red, blue, green, purple, orange, magenta, cyan). A new row takes the first colour of the list no row of its sheet uses yet; the expression menu lists the same colours in the same order. Saved as the plugin setting `colors` (palette ids).

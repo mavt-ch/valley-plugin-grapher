@@ -392,8 +392,24 @@ button.grapher-bookmark-chevron:hover { color:var(--text-color); }
 .grapher-zoom-button:hover { background:var(--hover-bg); color:var(--text-color); }
 .grapher-zoom-button:focus-visible { outline:2px solid var(--accent-color); outline-offset:2px; }
 
+/* A \`\`\`grapher\`\`\` block in a note: the graph at its height, its sliders and messages, then the view and Open in Grapher. */
+.grapher-fence { display:flex; flex-direction:column; margin:0.75em 0; border:1px solid var(--border-light); border-radius:var(--radius); background:var(--container-color); overflow:hidden; }
+.grapher-fence-stage { position:relative; display:flex; flex:0 0 auto; min-height:0; border-bottom:1px solid var(--border-light); }
+.grapher-fence-slider { display:flex; align-items:center; gap:8px; min-width:0; padding:4px 10px 0 6px; }
+.grapher-fence-slider-name { flex:0 0 auto; min-width:1.2em; color:var(--text-color); font-family:'Times New Roman', 'STIX Two Math', serif; font-style:italic; font-size:0.9375rem; }
+.grapher-fence-slider-value { flex:0 0 auto; min-width:3.5em; text-align:right; font-variant-numeric:tabular-nums; font-size:var(--small-font-size); color:var(--text-secondary); }
+.grapher-fence-message { margin:0; padding:6px 12px 0; font-size:var(--small-font-size); color:var(--danger-tint-text); }
+.grapher-fence-foot { display:flex; align-items:center; justify-content:space-between; gap:8px; min-height:32px; padding:4px 6px 4px 12px; }
+.grapher-fence-view { display:inline-flex; align-items:center; gap:6px; min-width:0; font-size:var(--small-font-size); color:var(--text-secondary); }
+.grapher-fence-view-icon { width:14px; height:14px; flex:0 0 auto; color:var(--accent-tint-text); }
+.grapher-fence-open { flex:0 0 auto; height:24px; padding:0 8px; border:none; border-radius:var(--radius-sm); background:transparent; color:var(--text-secondary);
+  font:inherit; font-size:var(--small-font-size); cursor:pointer; transition:background-color var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out); }
+.grapher-fence-open:hover:not(:disabled) { background:var(--hover-bg); color:var(--text-color); }
+.grapher-fence-open:disabled { opacity:0.5; cursor:default; }
+.grapher-fence-open:focus-visible { outline:2px solid var(--accent-color); outline-offset:-2px; }
+
 @media (prefers-reduced-motion: reduce) {
-  .grapher-view-picker, .grapher-view-option, .grapher-unit, .grapher-insert, .grapher-notes-action, .grapher-ref-all, .grapher-ref-heading, .grapher-ref-chevron, .grapher-ref-example, .grapher-swatch, .grapher-delete, .grapher-grip-icon, .grapher-bookmark-slot svg, .grapher-bookmarks-toggle, .grapher-bookmark-row, .grapher-bookmark-more, .grapher-handle .grapher-index, .grapher-zoom-button, .grapher-play-options svg { transition:none; }
+  .grapher-view-picker, .grapher-view-option, .grapher-unit, .grapher-insert, .grapher-notes-action, .grapher-ref-all, .grapher-ref-heading, .grapher-ref-chevron, .grapher-ref-example, .grapher-swatch, .grapher-delete, .grapher-grip-icon, .grapher-bookmark-slot svg, .grapher-bookmarks-toggle, .grapher-bookmark-row, .grapher-bookmark-more, .grapher-handle .grapher-index, .grapher-zoom-button, .grapher-play-options svg, .grapher-fence-open { transition:none; }
 }
 `
 

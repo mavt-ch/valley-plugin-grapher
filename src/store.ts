@@ -229,6 +229,12 @@ export class GrapherStore {
     return this.addGraph(defaultGraph(mode))
   }
 
+  /** A new graph on `mode` holding `rows` (a ```grapher``` block opened in Grapher); its other views keep their examples. */
+  createGraphWith(mode: Mode, rows: readonly Row[], units: AxisUnits): string {
+    const graph = defaultGraph(mode)
+    return this.addGraph({ ...graph, sheets: { ...graph.sheets, [mode]: withTrailingRow(rows.map((row) => ({ ...row, id: rowId() }))) }, units: { [mode]: units } })
+  }
+
   /** Stores a graph for a new tab. At `MAX_GRAPHS` the graphs of tabs that are no longer open make room, oldest first. */
   private addGraph(graph: Graph): string {
     const id = `g-${rowId()}`

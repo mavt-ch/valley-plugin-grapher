@@ -216,9 +216,11 @@ describe('the graph tab', () => {
     expect(flow.getAttribute('aria-checked')).toBe('false')
     fireEvent.click(flow)
     expect(within(field).getByRole('switch', { name: 'Animate flow' }).getAttribute('aria-checked')).toBe('true')
-    await waitFor(async () => expect(await mock.api.data.files.readText('graphs.json')).toContain('"flow": true'), { timeout: 2000 })
+    // (The example bookmarks carry flowing fields of their own, so only the sheets are looked at.)
+    const sheets = async (): Promise<string> => JSON.stringify(JSON.parse((await mock.api.data.files.readText('graphs.json')) ?? '{}').sheets)
+    await waitFor(async () => expect(await sheets()).toContain('"flow":true'), { timeout: 2000 })
     fireEvent.click(within(field).getByRole('switch', { name: 'Animate flow' }))
-    await waitFor(async () => expect(await mock.api.data.files.readText('graphs.json')).not.toContain('"flow"'), { timeout: 2000 })
+    await waitFor(async () => expect(await sheets()).not.toContain('"flow"'), { timeout: 2000 })
   })
 
   it('shows a double integral on the 3D sheet with its value and typesets both integral signs', async () => {
@@ -377,19 +379,20 @@ describe('the graph tab', () => {
     expect(await screen.findByDisplayValue('r = 1 + cos(θ)')).toBeTruthy()
     expect(await screen.findByLabelText(/^Polar graph/)).toBeTruthy()
     expect(screen.getByLabelText(/^Cartesian graph/)).toBeTruthy()
-    // A tab without an instance id is re-keyed in place to a tab that shows the main profile (Graph 1).
+    // A tab without an instance id is re-keyed in place to a tab with its own copy of the main graph.
     act(() => { mock.emitState({ activePluginTab: { pluginId: mock.api.pluginId } }) })
     expect(await screen.findByDisplayValue('y = x^2 - 2')).toBeTruthy()
     const open = mock.api.workspace.openMainTab as unknown as { mock: { calls: [{ instanceId?: string; newTab?: boolean; title?: string }][] } }
     const adopted = open.mock.calls[open.mock.calls.length - 1][0]
-    expect(adopted.instanceId).toMatch(/^t-/)
+    expect(adopted.instanceId).toMatch(/^g-/)
     expect(adopted.newTab).toBeUndefined()
-    expect(adopted.title).toBe('Graph 1')
+    expect(adopted.title).toBe('Grapher')
     await waitFor(async () => {
       const saved = JSON.parse(await mock.api.data.files.readText('graphs.json') ?? '{}') as { mode: string; graphs: Record<string, { mode: string }>; tabs: Record<string, string> }
       expect(saved.mode).toBe('cartesian')
       expect(saved.graphs.second.mode).toBe('polar')
-      expect(saved.tabs[adopted.instanceId!]).toBe('main')
+      expect(saved.graphs[adopted.instanceId!].mode).toBe('cartesian')
+      expect(saved.tabs).toBeUndefined()
     }, { timeout: 2000 })
   })
 

@@ -265,7 +265,7 @@ describe('the view list and tab icon', () => {
     }
   })
 
-  it('gives a graph tab without a profile icon the icon of the view it shows', async () => {
+  it('gives a graph tab the icon of the view it shows and the title Grapher', async () => {
     const mock = createMockValleyApi({ manifest: declared, wasm: { modules: [module] } })
     const provide = vi.spyOn(mock.api.interop.extensions, 'provide')
     disposers.push(plugin.register(mock.api))
@@ -274,8 +274,7 @@ describe('the view list and tab icon', () => {
     const surface = provide.mock.calls.map(([, value]) => value as { id?: string; getSnapshot?: (id?: string) => { visual?: { kind: string; src?: string } } }).find((value) => value.id === 'grapher.main_workspace')!
     const svg = (): string => decodeURIComponent(surface.getSnapshot!(undefined).visual!.src!.slice('data:image/svg+xml,'.length))
     expect(surface.getSnapshot!(undefined).visual?.kind).toBe('icon')
-    // A profile shows its object icon; only one whose icon is missing shows the icon of its view.
-    act(() => getStore().setProfileIcon('main', 'gone'))
+    expect(surface.getSnapshot!(undefined)).toHaveProperty('title', 'Grapher')
     expect(svg()).toContain('<path d="M7.5 5c1.5 6 3.3 9 5.2 9s3.7-3 5.3-9"/>')
     act(() => getStore().setMode('main', 'space'))
     expect(svg()).toContain('<path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/>')

@@ -1,6 +1,6 @@
 import type { ValleyPluginApi } from '@valley/plugin-sdk'
 import { STRIDE } from './draw'
-import { drawnRows, type Row } from './model'
+import type { Row } from './model'
 import { cellText } from './table'
 import { viewOf, type Mode } from './views'
 
@@ -127,11 +127,10 @@ interface PlotExports {
 const EXPORTS: (keyof PlotExports)[] = ['plot_input', 'plot_analyze', 'plot_text', 'plot_sample', 'plot_samples', 'plot_eval', 'plot_space', 'plot_markers', 'plot_flow']
 const clean = (value: string): string => value.replace(/[\u001d\u001e\u001f]/g, ' ')
 
-/** One record per row; a table sends its cells (decimal commas read as points) instead of the text, a folder row is empty
- * and the rows of a hidden folder are hidden. The last field marks a vector field whose arrows flow. */
+/** One record per row; a table sends its cells (decimal commas read as points) instead of the text. The last field marks a
+ * vector field whose arrows flow. */
 export function encodeRows(rows: readonly Row[]): string {
-  return drawnRows(rows).map((row) => {
-    if (row.folder) return ['', '', '', '1', '', '', '', '', '0', '1', '', '', '0', '0'].join(FIELD)
+  return rows.map((row) => {
     const cells = row.table ? row.table.cells.flatMap(([x, y]) => [clean(cellText(x)), clean(cellText(y))]).join(CELL) : ''
     return [row.table ? '' : clean(row.text), clean(row.from), clean(row.to), row.hidden ? '1' : '0', clean(row.from2), clean(row.to2), row.levels === undefined ? '' : String(row.levels), clean(row.step ?? ''), row.floor ? '1' : '0', row.normal === false ? '0' : '1', row.table ? '1' : '', cells, row.connect ? '1' : '0', row.flow ? '1' : '0'].join(FIELD)
   }).join(RECORD)

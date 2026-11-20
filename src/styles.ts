@@ -85,52 +85,12 @@ const CSS = `
 .grapher-ref-example:disabled { color:var(--text-tertiary); cursor:default; }
 .grapher-ref-example:focus-visible { outline:2px solid var(--accent-color); outline-offset:-2px; }
 
-/* The profile bar under the view header: one 38px row, then the profile list in place of the rows when open. */
-.grapher-profile-bar { display:flex; align-items:center; gap:2px; flex:0 0 var(--app-bar-height); height:var(--app-bar-height);
-  box-sizing:border-box; padding:0 var(--space-2); border-bottom:1px solid var(--border-light); }
-.grapher-profile-action { display:inline-flex; align-items:center; justify-content:center; flex:0 0 26px; width:26px; height:26px; padding:0;
+/* The Notes tab in Properties: the view's icon and name, then the note. */
+.grapher-notes-action { display:inline-flex; align-items:center; justify-content:center; flex:0 0 26px; width:26px; height:26px; padding:0;
   border:none; border-radius:var(--radius-sm); background:transparent; color:var(--text-secondary); cursor:pointer;
   transition:background-color var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out); }
-.grapher-profile-action svg { width:15px; height:15px; }
-.grapher-profile-action:hover:not(:disabled) { background:var(--hover-bg); color:var(--text-color); }
-.grapher-profile-action:disabled { opacity:0.4; cursor:default; }
-.grapher-profile-glyph { display:inline-block; flex:0 0 auto; background:currentColor; mask-size:100% 100%; mask-repeat:no-repeat; -webkit-mask-size:100% 100%; -webkit-mask-repeat:no-repeat; }
-.grapher-profile-picker .grapher-profile-glyph { width:16px; height:16px; }
-.grapher-icon-grid { display:grid; grid-template-columns:repeat(auto-fill, 30px); gap:2px; padding:calc(var(--space-3) / 2) calc(var(--space-3) / 2) calc(var(--space-3) / 2) 18px; }
-.grapher-icon-choice { display:inline-flex; align-items:center; justify-content:center; width:30px; height:30px; padding:0; border:none;
-  border-radius:var(--radius-sm); background:transparent; color:var(--text-secondary); cursor:pointer; }
-.grapher-icon-choice svg, .grapher-icon-choice .grapher-profile-glyph { width:18px; height:18px; }
-.grapher-icon-choice:hover { background:var(--hover-bg); color:var(--text-color); }
-.grapher-icon-choice[aria-pressed='true'] { background:var(--accent-tint-bg); color:var(--accent-color); }
-/* The profile list: one 32px row per profile; hover and the active tint cover the whole row, dots included. */
-.grapher-profiles { position:relative; gap:1px; }
-.grapher-profiles[data-dragging] { cursor:grabbing; user-select:none; }
-.grapher-profile-row[data-dragging] { opacity:0.45; }
-.grapher-profile-grip { display:inline-flex; align-items:center; justify-content:center; flex:0 0 14px; width:14px; height:100%; margin-left:2px; padding:0;
-  border:none; background:none; color:var(--text-tertiary); cursor:grab; touch-action:none; opacity:0; transition:opacity var(--duration-fast) var(--ease-out); }
-.grapher-profile-grip svg { width:12px; height:12px; }
-.grapher-profile-row:hover .grapher-profile-grip, .grapher-profiles[data-dragging] .grapher-profile-grip { opacity:1; }
-.grapher-profile-row { display:flex; align-items:center; height:32px; min-width:0; border-radius:var(--radius-sm); color:var(--text-color);
-  transition:background-color var(--duration-fast) var(--ease-out); }
-.grapher-profile-row:hover { background:var(--hover-bg); }
-.grapher-profile-row.active { background:var(--container-color-light); }
-.grapher-profile-item { display:flex; align-items:center; gap:8px; flex:1 1 auto; min-width:0; height:100%; padding:0 4px 0 2px; border:none;
-  background:transparent; color:inherit; font:inherit; font-size:var(--smaller-font-size); text-align:left; cursor:pointer; }
-.grapher-profile-item:focus-visible { outline:2px solid var(--accent-color); outline-offset:-2px; border-radius:var(--radius-sm); }
-.grapher-profile-item-icon { width:16px; height:16px; flex:0 0 16px; color:var(--text-secondary); }
-.grapher-profile-icon { display:inline-flex; align-items:center; justify-content:center; flex:0 0 24px; width:24px; height:24px; margin-left:2px; padding:0;
-  border:none; border-radius:var(--radius-sm); background:transparent; color:inherit; cursor:pointer; }
-.grapher-profile-icon:hover, .grapher-profile-icon[aria-expanded='true'] { background:var(--hover-bg); }
-.grapher-profile-row.active .grapher-profile-item-icon { color:var(--accent-tint-text); }
-.grapher-profile-item-name { flex:0 1 auto; min-width:0; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; font-weight:500; }
-.grapher-profile-item-check { width:14px; height:14px; flex:0 0 14px; margin-left:auto; color:var(--accent-tint-text); }
-.grapher-profile-more { display:inline-flex; align-items:center; justify-content:center; flex:0 0 26px; width:26px; height:26px; margin-right:3px;
-  padding:0; border:none; border-radius:var(--radius-sm); background:transparent; color:var(--text-tertiary); cursor:pointer; }
-.grapher-profile-more svg { width:15px; height:15px; }
-.grapher-profile-more:hover { background:var(--hover-bg); color:var(--text-color); }
-.grapher-profile-name-field { flex:1 1 auto; min-width:0; height:24px; padding:0 4px; box-sizing:border-box; border:none; border-radius:var(--radius-sm);
-  background:transparent; color:var(--text-color); font:inherit; font-weight:500; outline:none; box-shadow:none; }
-
+.grapher-notes-action svg { width:15px; height:15px; }
+.grapher-notes-action:hover { background:var(--hover-bg); color:var(--text-color); }
 .grapher-notes-bar { display:flex; align-items:center; gap:6px; flex:0 0 var(--app-bar-height); height:var(--app-bar-height);
   box-sizing:border-box; padding:0 var(--space-2) 0 var(--space-3); border-bottom:1px solid var(--border-light); }
 .grapher-notes-icon { width:15px; height:15px; flex:0 0 15px; color:var(--text-secondary); }
@@ -241,32 +201,69 @@ button.grapher-handle:hover { color:var(--text-color); }
 .gm-cases-value, .gm-cases-condition { display:inline-flex; align-items:center; }
 .gm-cases-otherwise { font-style:normal; }
 .grapher-delete, .grapher-row-spacer { width:28px; height:36px; }
-/* The empty last row: add a folder, and (where the view takes them) a table of points. */
+/* The empty last row: a table of points where the view takes them. */
 .grapher-row[data-trailing] { grid-template-columns:46px minmax(0, 1fr) auto; }
-.grapher-trailing-actions { display:inline-flex; }
-
-/* Folders, one level deep: a folder row with a chevron, its name and an eye; its rows are indented behind a thin line. */
-.grapher-folder-main { display:flex; align-items:center; gap:6px; min-width:0; height:36px; }
-.grapher-folder-icon { flex:0 0 auto; width:14px; height:14px; color:var(--text-secondary); }
-.grapher-folder-name { flex:1 1 auto; font-family:inherit; font-weight:600; }
-.grapher-folder-count { flex:0 0 auto; font-size:0.6875rem; font-variant-numeric:tabular-nums; color:var(--text-tertiary); }
-.grapher-folder-toggle, .grapher-folder-eye { display:inline-flex; align-items:center; justify-content:center; flex:0 0 auto; width:22px; height:22px;
-  padding:0; border:0; border-radius:var(--radius-sm); background:transparent; color:var(--text-secondary); cursor:pointer; }
-.grapher-folder-toggle svg, .grapher-folder-eye svg { width:13px; height:13px; }
-.grapher-folder-toggle svg { transition:transform var(--duration-fast) var(--ease-out); }
-.grapher-folder-toggle[aria-expanded='false'] svg { transform:rotate(-90deg); }
-.grapher-folder-toggle:hover, .grapher-folder-eye:hover { background:var(--hover-bg); color:var(--text-color); }
-.grapher-folder-toggle:focus-visible, .grapher-folder-eye:focus-visible { outline:2px solid var(--accent-color); outline-offset:-2px; }
-.grapher-folder[data-hidden] .grapher-folder-name, .grapher-folder[data-hidden] .grapher-folder-icon { color:var(--text-secondary); }
-.grapher-row[data-in-folder] { grid-template-columns:58px minmax(0, 1fr) 28px;
-  background-image:linear-gradient(var(--border-medium), var(--border-medium)); background-size:1px 100%; background-position:12px 0; background-repeat:no-repeat; }
-.grapher-row[data-in-folder] .grapher-gutter { padding-left:16px; }
-.grapher-drop-marker[data-in-folder] { left:58px; }
 .grapher-delete { display:inline-flex; align-items:center; justify-content:center; padding:0; border:none; background:none;
   color:var(--text-tertiary); cursor:pointer; opacity:0; transition:opacity var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out); }
 .grapher-delete svg { width:14px; height:14px; }
 .grapher-row:hover .grapher-delete, .grapher-row:focus-within .grapher-delete, .grapher-delete:focus-visible { opacity:1; }
 .grapher-delete:hover { color:var(--text-color); }
+.grapher-row-menu svg { width:13px; height:13px; }
+
+/* The header's bookmark toggle beside ℝ | π: outlined while closed, filled in the accent tint while the list is open. */
+.grapher-bookmarks-toggle { display:inline-flex; align-items:center; justify-content:center; flex:0 0 26px; width:26px; height:26px; padding:0;
+  border:none; border-radius:var(--radius-sm); background:transparent; color:var(--text-secondary); cursor:pointer; -webkit-app-region:no-drag;
+  transition:background-color var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out); }
+.grapher-bookmarks-toggle svg { width:14px; height:14px; }
+.grapher-bookmarks-toggle:hover { background:var(--hover-bg); color:var(--text-color); }
+.grapher-bookmarks-toggle[aria-pressed='true'] { color:var(--accent-tint-text); }
+.grapher-bookmarks-toggle:focus-visible { outline:2px solid var(--accent-color); outline-offset:-2px; }
+
+/* The bookmark list (Map's Favorites): a 38px bar, then groups with one level of subgroups and their bookmarks. */
+.grapher-bookmarks { display:flex; flex-direction:column; flex:1 1 auto; min-height:0; }
+.grapher-bookmarks-bar { display:flex; align-items:center; gap:6px; flex:0 0 var(--app-bar-height); height:var(--app-bar-height); box-sizing:border-box;
+  padding:0 var(--space-2) 0 10px; border-bottom:1px solid var(--border-light); }
+.grapher-bookmarks-title { flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.grapher-bookmarks-bar .panel-tool-btn svg { width:16px; height:16px; }
+.grapher-bookmarks-empty { margin:0; padding:var(--space-3); font-size:0.75rem; line-height:1.45; color:var(--text-tertiary); }
+.grapher-bookmark-tree { position:relative; flex:1 1 auto; min-height:40px; overflow-y:auto; padding:4px 0 24px; }
+.grapher-bookmark-row { position:relative; display:flex; align-items:center; gap:8px; min-width:0; min-height:32px; box-sizing:border-box;
+  padding:2px 6px 2px calc(8px + var(--bookmark-depth, 0) * 16px); cursor:pointer; color:var(--text-color);
+  transition:background-color var(--duration-fast) var(--ease-out); }
+.grapher-bookmark-row:hover { background:var(--hover-bg); }
+.grapher-bookmark-row:focus-visible { outline:2px solid var(--accent-color); outline-offset:-2px; }
+.grapher-bookmark-slot { display:inline-flex; align-items:center; justify-content:center; flex:0 0 14px; width:14px; height:14px; margin-right:-4px; color:var(--text-tertiary); }
+.grapher-bookmark-slot svg { width:12px; height:12px; transform:rotate(-90deg); transition:transform var(--duration-fast) var(--ease-out); }
+.grapher-bookmark-chevron[data-open] svg { transform:none; }
+.grapher-bookmark-folder { flex:0 0 15px; width:15px; height:15px; color:var(--text-secondary); }
+.grapher-bookmark-name { flex:1 1 auto; min-width:0; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; font-size:0.8125rem; font-weight:500; }
+.grapher-bookmark-name-field, .grapher-bookmark-name-field:is(:focus, :focus-visible) { flex:1 1 auto; min-width:0; height:24px; padding:0; border:none; outline:none;
+  box-shadow:none; background:transparent; color:var(--text-color); font:inherit; font-size:0.8125rem; font-weight:500; }
+.grapher-bookmark-count { flex:0 0 auto; font-size:0.6875rem; font-variant-numeric:tabular-nums; color:var(--text-tertiary); }
+.grapher-bookmark-swatch { flex:0 0 10px; width:10px; height:10px; box-sizing:border-box; border-radius:50%; border:2px solid var(--swatch); background:transparent; }
+/* A bookmark the focused graph holds: filled swatch, accent tint across the row and a tick. */
+.grapher-bookmark-row.selected { background:var(--accent-tint-bg); }
+.grapher-bookmark-row.selected:hover { background:color-mix(in srgb, var(--accent-tint-bg) 80%, var(--hover-bg)); }
+.grapher-bookmark-row.selected .grapher-bookmark-swatch { background:var(--swatch); }
+.grapher-bookmark-check { flex:0 0 14px; width:14px; height:14px; color:var(--accent-tint-text); }
+.grapher-bookmark-math { flex:1 1 auto; min-width:0; overflow:hidden; display:flex; align-items:center; }
+.grapher-bookmark-math .gm-math { font-size:0.9375rem; }
+.grapher-bookmark-table { display:inline-flex; align-items:center; gap:6px; font-size:0.8125rem; color:var(--text-secondary); }
+.grapher-bookmark-table svg { width:14px; height:14px; }
+.grapher-bookmark-view { display:inline-flex; flex:0 0 auto; color:var(--text-tertiary); }
+.grapher-bookmark-view svg { width:14px; height:14px; }
+.grapher-bookmark-more { display:inline-flex; align-items:center; justify-content:center; flex:0 0 24px; width:24px; height:24px; padding:0;
+  border:none; border-radius:var(--radius-sm); background:transparent; color:var(--text-tertiary); cursor:pointer; opacity:0;
+  transition:opacity var(--duration-fast) var(--ease-out); }
+.grapher-bookmark-more svg { width:15px; height:15px; }
+.grapher-bookmark-row:hover .grapher-bookmark-more, .grapher-bookmark-row:focus-within .grapher-bookmark-more, .grapher-bookmark-more:focus-visible { opacity:1; }
+.grapher-bookmark-more:hover { background:var(--container-color-alt); color:var(--text-color); }
+.grapher-bookmark-row.drop-before::before, .grapher-bookmark-row.drop-after::before { content:''; position:absolute; z-index:2; height:2px; right:0;
+  left:calc(8px + var(--bookmark-depth, 0) * 16px); background:var(--accent-color); pointer-events:none; }
+.grapher-bookmark-row.drop-before::before { top:0; transform:translateY(-50%); }
+.grapher-bookmark-row.drop-after::before { bottom:0; transform:translateY(50%); }
+.grapher-bookmark-row.drop-inside, .grapher-bookmark-row.drop-inside:hover { background:var(--accent-tint-bg); box-shadow:inset 0 0 0 1px var(--accent-color); }
+.grapher-bookmark-tree.drop-root::after { content:''; position:absolute; left:8px; right:0; bottom:24px; height:2px; background:var(--accent-color); pointer-events:none; }
 
 .grapher-error { display:flex; flex-direction:column; gap:4px; font-size:var(--smaller-font-size); color:var(--danger-tint-text); }
 .grapher-chips { display:flex; flex-wrap:wrap; gap:4px; }
@@ -374,7 +371,7 @@ button.grapher-handle:hover { color:var(--text-color); }
 .grapher-zoom-button:focus-visible { outline:2px solid var(--accent-color); outline-offset:2px; }
 
 @media (prefers-reduced-motion: reduce) {
-  .grapher-view-picker, .grapher-view-option, .grapher-unit, .grapher-insert, .grapher-profile-action, .grapher-profile-row, .grapher-ref-all, .grapher-ref-heading, .grapher-ref-chevron, .grapher-ref-example, .grapher-swatch, .grapher-delete, .grapher-grip-icon, .grapher-folder-toggle svg, .grapher-handle .grapher-index, .grapher-zoom-button, .grapher-play-options svg { transition:none; }
+  .grapher-view-picker, .grapher-view-option, .grapher-unit, .grapher-insert, .grapher-notes-action, .grapher-ref-all, .grapher-ref-heading, .grapher-ref-chevron, .grapher-ref-example, .grapher-swatch, .grapher-delete, .grapher-grip-icon, .grapher-bookmark-slot svg, .grapher-bookmarks-toggle, .grapher-bookmark-row, .grapher-bookmark-more, .grapher-handle .grapher-index, .grapher-zoom-button, .grapher-play-options svg { transition:none; }
 }
 `
 

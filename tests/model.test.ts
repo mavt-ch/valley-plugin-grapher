@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { createFolder, createRow, defaultDocument, drawnRows, leaveFolder, moveIntoGap, moveRow, normalizeDocument, removeFolder, unitsOf, withFolders, withTrailingRow, type Row } from '../src/model'
+import { createRow, defaultDocument, moveRow, normalizeDocument, unitsOf, withTrailingRow, type Bookmarks, type Row } from '../src/model'
+import { deleteGroup, filedIn, groupCount, moveBookmark, moveGroup, sameExpression } from '../src/bookmarks'
 import { parseMath, tokenizeMath } from '../src/MathText'
 import { MODES, viewOf } from '../src/views'
 import { parseBound, sliderText } from '../src/Sidebar'
@@ -191,52 +192,75 @@ describe('sheets', () => {
 })
 
 
-describe('folders', () => {
-  const row = (text: string, parent?: string): Row => ({ ...createRow([]), text, ...(parent ? { parent } : {}) })
-  const folder = (name: string): Row => createFolder([], name)
-  const shape = (rows: readonly Row[]): string[] => rows.map((entry) => (entry.folder ? `[${entry.text}]` : entry.parent ? `  ${entry.text}` : entry.text))
-
-  it('stay one level deep and keep their rows together', () => {
-    const a = folder('A')
-    const b = folder('B')
-    const nested = { ...b, parent: a.id }
-    expect(shape(withFolders([a, row('x', a.id), nested, row('y', a.id), row('z', b.id)]))).toEqual(['[A]', '  x', '[B]', 'y', 'z'])
-    expect(shape(withFolders([row('x', 'missing'), a, row('w'), row('v', a.id)]))).toEqual(['x', '[A]', 'w', 'v'])
-  })
-
-  it('move rows in and out, and a folder only to the top level with its rows', () => {
-    const a = folder('A')
-    const b = folder('B')
-    const rows = [a, row('x', a.id), row('y', a.id), row('z'), b, row('w', b.id), row('')]
-    expect(shape(moveIntoGap(rows, 3, 2, a.id))).toEqual(['[A]', '  x', '  z', '  y', '[B]', '  w', ''])
-    expect(shape(moveIntoGap(rows, 1, 4))).toEqual(['[A]', '  y', 'z', 'x', '[B]', '  w', ''])
-    expect(shape(moveIntoGap(rows, 4, 0))).toEqual(['[B]', '  w', '[A]', '  x', '  y', 'z', ''])
-    expect(moveIntoGap(rows, 4, 2, a.id)).toEqual(rows)
-    expect(shape(leaveFolder(rows, 1))).toEqual(['[A]', '  y', 'x', 'z', '[B]', '  w', ''])
-  })
-
-  it('come away with or without their rows', () => {
-    const a = folder('A')
-    const rows = [a, row('x', a.id), row('y')]
-    expect(shape(removeFolder(rows, 0, false))).toEqual(['x', 'y'])
-    expect(shape(removeFolder(rows, 0, true))).toEqual(['y'])
-  })
-
-  it('hide their rows, never send their name to the kernel and keep the empty last row outside', () => {
-    const a = { ...folder('a = 1'), hidden: true }
-    const drawn = drawnRows([a, row('x', a.id), row('y')])
-    expect(drawn.map((entry) => entry.hidden)).toEqual([true, true, false])
-    expect(shape(withTrailingRow([a, row('x', a.id)]))).toEqual(['[a = 1]', '  x', ''])
-    expect(withTrailingRow([a, row('', a.id)]).at(-1)?.parent).toBeUndefined()
-  })
-
-  it('survive a save and reload', () => {
+describe('expression folders of older files', () => {
+  it('leave every expression in place on the top level, hidden with a hidden folder, and drop the folder rows', () => {
     const document = defaultDocument()
-    const a = folder('A')
-    document.sheets.cartesian = [{ ...a, folder: { collapsed: true } }, row('x', a.id), row('')]
-    const back = normalizeDocument(JSON.parse(JSON.stringify(document)))
-    expect(back.sheets.cartesian[0].folder).toEqual({ collapsed: true })
-    expect(back.sheets.cartesian[1].parent).toBe(a.id)
+    const stored = JSON.parse(JSON.stringify(document))
+    stored.sheets.cartesian = [
+      { id: 'f1', text: 'Trig', folder: { collapsed: true }, hidden: true },
+      { id: 'a', text: 'sin(x)', parent: 'f1' },
+      { id: 'f2', text: 'Other', folder: { collapsed: false } },
+      { id: 'b', text: 'x^2', parent: 'f2' },
+      { id: 'c', text: 'x^3' }
+    ]
+    const rows = normalizeDocument(stored).sheets.cartesian
+    expect(rows.map((row) => row.text)).toEqual(['sin(x)', 'x^2', 'x^3', ''])
+    expect(rows.map((row) => row.hidden)).toEqual([true, false, false, false])
+    expect(rows.some((row) => 'folder' in row || 'parent' in row)).toBe(false)
+  })
+})
+
+describe('bookmarks', () => {
+  const row = (text: string): Row => ({ ...createRow([]), text })
+  const tree = (): Bookmarks => ({
+    groups: [{ id: 'g1', name: 'Calculus' }, { id: 's1', name: 'Integrals', parent: 'g1' }, { id: 'g2', name: 'Trig' }],
+    items: [
+      { id: 'b1', mode: 'cartesian', row: row('x^2'), group: 'g1' },
+      { id: 'b2', mode: 'cartesian', row: row('int(x, 0, 1)'), group: 's1' },
+      { id: 'b3', mode: 'polar', row: row('r = 1 + cos(θ)') }
+    ]
+  })
+
+  it('survive a save and reload, keep groups two levels deep and drop what does not fit', () => {
+    const document = defaultDocument()
+    const stored = JSON.parse(JSON.stringify({ ...document, bookmarks: tree() }))
+    stored.bookmarks.groups.push({ id: 'deep', name: 'Too deep', parent: 's1' }, { id: 'g2', name: 'Duplicate' })
+    stored.bookmarks.items.push({ id: 'lost', mode: 'cartesian', row: row('x'), group: 'missing' }, { id: 'bad', mode: 'nowhere', row: row('x') }, { id: 'empty', mode: 'cartesian', row: row('  ') })
+    const back = normalizeDocument(stored).bookmarks!
+    expect(back.groups.map((group) => [group.id, group.parent ?? null])).toEqual([['g1', null], ['s1', 'g1'], ['g2', null], ['deep', null]])
+    expect(back.items.map((item) => [item.id, item.group ?? null])).toEqual([['b1', 'g1'], ['b2', 's1'], ['b3', null], ['lost', null]])
+    expect(back.items[2].row.text).toBe('r = 1 + cos(θ)')
+    expect(normalizeDocument(JSON.parse(JSON.stringify(document))).bookmarks).toBeUndefined()
+  })
+
+  it('count a group with its subgroups and recognise an expression already filed', () => {
+    const bookmarks = tree()
+    expect(groupCount(bookmarks, 'g1')).toBe(2)
+    expect(groupCount(bookmarks, 's1')).toBe(1)
+    const copy = { ...bookmarks.items[0].row, id: 'other', color: 'palette:blue', hidden: true }
+    expect(sameExpression(copy, bookmarks.items[0].row)).toBe(true)
+    expect(sameExpression({ ...copy, from: '1' }, bookmarks.items[0].row)).toBe(false)
+    expect([...filedIn(bookmarks, 'cartesian', copy)]).toEqual(['g1'])
+    expect(filedIn(bookmarks, 'polar', copy).size).toBe(0)
+  })
+
+  it('move groups without a third level and bookmarks into groups or beside each other', () => {
+    const { groups, items } = tree()
+    expect(moveGroup(groups, 'g1', { kind: 'group', id: 'g2', position: 'inside' })).toBeNull()
+    expect(moveGroup(groups, 'g2', { kind: 'group', id: 's1', position: 'inside' })).toBeNull()
+    expect(moveGroup(groups, 'g2', { kind: 'group', id: 'g1', position: 'inside' })?.map((group) => `${group.id}:${group.parent ?? ''}`)).toEqual(['g1:', 's1:g1', 'g2:g1'])
+    expect(moveGroup(groups, 's1', { kind: 'root' })?.map((group) => `${group.id}:${group.parent ?? ''}`)).toEqual(['g1:', 'g2:', 's1:'])
+    expect(moveGroup(groups, 'g2', { kind: 'group', id: 'g1', position: 'before' })?.map((group) => group.id)).toEqual(['g2', 'g1', 's1'])
+    expect(moveBookmark(items, groups, 'b3', { kind: 'group', id: 'g2', position: 'inside' })?.find((item) => item.id === 'b3')?.group).toBe('g2')
+    expect(moveBookmark(items, groups, 'b1', { kind: 'bookmark', id: 'b3', position: 'after' })?.map((item) => `${item.id}:${item.group ?? ''}`)).toEqual(['b2:s1', 'b3:', 'b1:'])
+    expect(moveBookmark(items, groups, 'b3', { kind: 'root' })).toBeNull()
+  })
+
+  it('keep their bookmarks when a group is deleted', () => {
+    const next = deleteGroup(tree(), 'g1')
+    expect(next.groups.map((group) => `${group.id}:${group.parent ?? ''}`)).toEqual(['s1:', 'g2:'])
+    expect(next.items.map((item) => `${item.id}:${item.group ?? ''}`)).toEqual(['b1:', 'b2:s1', 'b3:'])
+    expect(deleteGroup(tree(), 's1').items.find((item) => item.id === 'b2')?.group).toBe('g1')
   })
 })
 

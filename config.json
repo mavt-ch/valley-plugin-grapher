@@ -37,7 +37,6 @@
   },
   "runtime": {
     "ui": "runtime/index.js",
-    "backend": "runtime/backend.js",
     "wasm": [
       {
         "id": "plot",
@@ -57,12 +56,5 @@
         ]
       }
     ]
-  },
-  "permissions": {
-    "storage": {
-      "metadata": [
-        "assets/icons/grapher-icon"
-      ]
-    }
   }
 }

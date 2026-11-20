@@ -2,7 +2,7 @@ import { React } from './runtime'
 import type { ReactElement } from 'react'
 import { ChevronDown, CollapseAll, ExpandAll, Search, X } from './icons'
 import { uiText } from './localization'
-import { MAIN_GRAPH, MODES, createRow, filled, graphOf, profileOf, type Mode } from './model'
+import { MAIN_GRAPH, MODES, createRow, filled, graphOf, graphIdOf, type Mode } from './model'
 import { insertTemplate, takesTables } from './Sidebar'
 import { useGrapher } from './store'
 
@@ -108,7 +108,7 @@ export const REFERENCE_SEGMENT = 'grapher.reference'
  */
 export const Reference = ({ tab }: { tab?: string }): ReactElement => {
   const { loaded, document, active, engine } = useGrapher()
-  const id = tab ? profileOf(document, tab) : active
+  const id = tab ? graphIdOf(document, tab) : active
   const graph = graphOf(document, id)
   const mode = graph.mode
   const rows = graph.sheets[mode]

@@ -3,15 +3,14 @@ import type { ClipboardEvent, KeyboardEvent, MouseEvent, PointerEvent, ReactElem
 import { paletteCssValue, paletteRef } from '@valley/plugin-sdk/palette'
 import type { UiMenuItem } from '@valley/plugin-sdk'
 import type { RowAnalysis } from './engine'
-import { Check, ChevronDown, Copy, Eye, EyeOff, FolderIcon, FolderPlus, Grip, More, Pause, Pencil, Play, Plus, Slider, Smile, TableIcon, Trash, Warning, X } from './icons'
+import { Bookmark, BookmarkFilled, Check, ChevronDown, Eye, EyeOff, Grip, Pause, Play, Slider, TableIcon, Trash, Warning } from './icons'
 import { SliderAnimator, snap, startMotion } from './animate'
 import { uiText } from './localization'
 import { INTEGRAL_AXES, MathText } from './MathText'
-import { ANIMATION_SPEEDS, COLORS, DEFAULT_ANIMATION, DEFAULT_LEVELS, MAIN_GRAPH, MAX_LEVELS, MAX_NAME, MODES, profileIds, blockEnd, createRow, createTable, filled, graphOf, intoNewFolder, leaveFolder, moveIntoGap, rangeVariable, removeFolder, unitsOf, type Animation, type AxisUnits, type Mode, type Row, type Table } from './model'
+import { ANIMATION_SPEEDS, COLORS, DEFAULT_ANIMATION, DEFAULT_LEVELS, MAIN_GRAPH, MAX_LEVELS, MODES, createRow, createTable, filled, graphOf, moveRow, rangeVariable, unitsOf, type Animation, type AxisUnits, type Mode, type Row, type Table } from './model'
 import { getStore, useGrapher } from './store'
+import { BookmarkList, bookmarkMenu } from './BookmarkList'
 import { notePlaying } from './details'
-import { PROFILE_ICON_FOLDER, profileIconElement, profileIconSource, profileIconSvgs, refreshProfileIcons, subscribeProfileIcons } from './profileIcons'
-import { PROFILE_ICONS } from './profileIconSet'
 import { MAX_TABLE_ROWS, looksTabular, parseTable, type Cells, type PastedTable } from './table'
 import { formatComplex, formatLinear, formatNumber, formatPolar } from './ticks'
 import { viewOf, type Insert } from './views'
@@ -151,7 +150,7 @@ const InsertBar = ({ graph, mode }: { graph: string; mode: Mode }): ReactElement
 /** Opens a new tab with a fresh graph of its own on the given view. */
 export function openNewGraph(mode: Mode, paneId?: string): void {
   const id = getStore().createGraph(mode)
-  api.workspace.openMainTab({ instanceId: id, title: getStore().profileName(id), newTab: true, paneId })
+  api.workspace.openMainTab({ instanceId: id, title: uiText('graph.title'), newTab: true, paneId })
 }
 
 /** The header's view button: the focused graph's view; it swaps the expression list for the list of views. */
@@ -214,211 +213,6 @@ const ViewList = ({ graph, mode, close }: { graph: string; mode: Mode; close: ()
   )
 }
 
-/** A profile's icon: its SVG from the icon folder (or the bundled copy of it), drawn in the text colour; the view's icon
- * only while a profile has none yet. */
-export const ProfileGlyph = ({ profile, className }: { profile: string; className: string }): ReactElement => {
-  const { document } = useGrapher()
-  React.useSyncExternalStore(subscribeProfileIcons, profileIconSvgs)
-  const source = profileIconSource(document.icons?.[profile])
-  if (source) return <span className={`grapher-profile-glyph ${className}`} style={{ maskImage: `url("${source}")`, WebkitMaskImage: `url("${source}")` }} aria-hidden />
-  const Icon = viewOf(graphOf(document, profile).mode).icon
-  return <Icon className={className} />
-}
-
-/**
- * The icons of the folder as a compact grid drawn inside the profile list, under the profile's row. It is not a host
- * popover: one opened from a menu entry depended on the closed menu and its anchor, and never appeared.
- */
-const IconPicker = ({ profile, close }: { profile: string; close: () => void }): ReactElement => {
-  const store = getStore()
-  const icons = React.useSyncExternalStore(subscribeProfileIcons, profileIconSvgs)
-  React.useEffect(() => { void refreshProfileIcons() }, [])
-  const chosen = store.getSnapshot().document.icons?.[profile]
-  return (
-    <div className="grapher-icon-grid" role="group" aria-label={uiText('profile.icons', { folder: PROFILE_ICON_FOLDER })} onKeyDown={(event) => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); close() } }}>
-      {Object.keys(icons).sort((a, b) => a.localeCompare(b)).map((name) => {
-        const source = profileIconSource(name)!
-        return (
-          <button key={name} type="button" className="grapher-icon-choice" aria-pressed={chosen === name} aria-label={name} title={name} onClick={() => { store.setProfileIcon(profile, name); close() }}>
-            <span className="grapher-profile-glyph" style={{ maskImage: `url("${source}")`, WebkitMaskImage: `url("${source}")` }} aria-hidden />
-          </button>
-        )
-      })}
-    </div>
-  )
-}
-
-/** Under the view header: the profile the focused tab shows (its icon and name) and a button for a new one. */
-const ProfileBar = ({ tab, profile, open, toggle }: { tab: string; profile: string; open: boolean; toggle: () => void }): ReactElement => {
-  const store = getStore()
-  const { document } = useGrapher()
-  const name = store.profileName(profile)
-  return (
-    <div className="grapher-profile-bar">
-      <button type="button" className="grapher-view-picker grapher-profile-picker" aria-expanded={open} aria-label={uiText('profile.choose', { name })} onClick={toggle}>
-        <ProfileGlyph profile={profile} className="grapher-view-icon" />
-        <span className="grapher-view-name">{name}</span>
-        <ChevronDown className="grapher-view-chevron" />
-      </button>
-      <button
-        type="button"
-        className="grapher-profile-action"
-        aria-label={uiText('profile.add')}
-        title={uiText('profile.add')}
-        disabled={!store.canAddProfile()}
-        onClick={() => store.createProfile(tab, graphOf(document, profile).mode)}
-      >
-        <Plus />
-      </button>
-    </div>
-  )
-}
-
-/** The icons the menu offers: the folder's, or the bundled ones until it has been listed. */
-const iconNames = (): string[] => {
-  const listed = Object.keys(profileIconSvgs())
-  return (listed.length ? listed : Object.keys(PROFILE_ICONS)).sort((a, b) => a.localeCompare(b))
-}
-
-/** Every profile in place of the expressions, one compact row each: the whole row picks it for the focused tab; the
- * three dots (or a right-click) open Rename, Change icon, Duplicate and Delete. */
-const ProfileList = ({ tab, profile, close }: { tab: string; profile: string; close: () => void }): ReactElement => {
-  const store = getStore()
-  const { document } = useGrapher()
-  const [renaming, setRenaming] = React.useState<string | null>(null)
-  const [picking, setPicking] = React.useState<string | null>(null)
-  const ids = profileIds(document)
-  const last = ids.length < 2
-  // Reordering by the grip, as the expression rows do: one marker at the midpoint of the gap nearest the pointer.
-  const listRef = React.useRef<HTMLDivElement>(null)
-  const dragRef = React.useRef<{ pointer: number; from: number; to: number } | null>(null)
-  const [drag, setDrag] = React.useState<{ from: number; to: number; marker: number } | null>(null)
-  const gapAt = (clientY: number): { gap: number; marker: number } | null => {
-    const rows = Array.from(listRef.current?.querySelectorAll<HTMLElement>('[data-profile]') ?? [])
-    if (!rows.length) return null
-    let gap = 0
-    rows.forEach((row, at) => {
-      const rect = row.getBoundingClientRect()
-      if (clientY > rect.top + rect.height / 2) gap = at + 1
-    })
-    const before = rows[gap - 1]
-    const after = rows[gap]
-    const marker = before && after ? (before.offsetTop + before.offsetHeight + after.offsetTop) / 2 : after ? after.offsetTop : before.offsetTop + before.offsetHeight
-    return { gap, marker }
-  }
-  const startDrag = (index: number) => (event: PointerEvent<HTMLButtonElement>): void => {
-    if (event.button !== 0) return
-    event.preventDefault()
-    event.currentTarget.setPointerCapture(event.pointerId)
-    const found = gapAt(event.clientY)
-    dragRef.current = { pointer: event.pointerId, from: index, to: index }
-    setDrag({ from: index, to: index, marker: found?.marker ?? 0 })
-  }
-  const moveDrag = (event: PointerEvent<HTMLDivElement>): void => {
-    const current = dragRef.current
-    if (!current || current.pointer !== event.pointerId) return
-    const found = gapAt(event.clientY)
-    if (!found) return
-    current.to = found.gap
-    setDrag({ from: current.from, to: found.gap, marker: found.marker })
-  }
-  const endDrag = (commit: boolean) => (event: PointerEvent<HTMLDivElement>): void => {
-    const current = dragRef.current
-    if (!current || current.pointer !== event.pointerId) return
-    dragRef.current = null
-    setDrag(null)
-    if (commit) store.moveProfile(current.from, current.to)
-  }
-  const showMarker = drag !== null && drag.to !== drag.from && drag.to !== drag.from + 1
-  const menu = (id: string, target: { anchor: HTMLElement } | { x: number; y: number }): void => {
-    const items: UiMenuItem[] = [
-      { id: 'rename', label: uiText('profile.renameItem'), icon: <Pencil />, onSelect: () => setRenaming(id) },
-      {
-        id: 'icon',
-        label: uiText('profile.iconItem'),
-        icon: <Smile />,
-        // A flyout beside the menu with every icon of the folder; picking one closes the menu and saves it.
-        submenu: iconNames().map((icon): UiMenuItem => ({
-          id: `icon:${icon}`,
-          type: 'radio',
-          checked: document.icons?.[id] === icon,
-          label: icon,
-          icon: profileIconElement(icon) ?? <Smile />,
-          onSelect: () => store.setProfileIcon(id, icon)
-        }))
-      },
-      { id: 'duplicate', label: uiText('profile.duplicateItem'), icon: <Copy />, enabled: store.canAddProfile(), onSelect: () => store.duplicateProfile(tab, id) },
-      { type: 'separator' },
-      { id: 'delete', label: uiText('profile.deleteItem'), icon: <Trash />, danger: true, enabled: !last, ...(last ? { description: uiText('profile.lastOne') } : {}), onSelect: () => store.deleteProfile(id) }
-    ]
-    void refreshProfileIcons()
-    void api.ui.openMenu(items, target).catch(() => {})
-  }
-  return (
-    <div
-      ref={listRef}
-      className="grapher-views grapher-profiles"
-      role="radiogroup"
-      aria-label={uiText('profile.list')}
-      data-dragging={drag ? '' : undefined}
-      onKeyDown={(event) => { if (event.key === 'Escape' && !renaming) { event.preventDefault(); close() } }}
-      onPointerMove={moveDrag}
-      onPointerUp={endDrag(true)}
-      onPointerCancel={endDrag(false)}
-    >
-      {ids.map((id, index) => {
-        const name = store.profileName(id)
-        const checked = id === profile
-        return (
-          <React.Fragment key={id}>
-          <div
-            className={checked ? 'grapher-profile-row active' : 'grapher-profile-row'}
-            data-profile={id}
-            data-dragging={drag?.from === index || undefined}
-            onContextMenu={(event) => { event.preventDefault(); menu(id, { x: event.clientX, y: event.clientY }) }}
-          >
-            <button type="button" className="grapher-profile-grip" tabIndex={-1} aria-label={uiText('profile.drag', { name })} title={uiText('profile.drag', { name })} onPointerDown={startDrag(index)}>
-              <Grip />
-            </button>
-            <button type="button" className="grapher-profile-icon" aria-expanded={picking === id} aria-label={uiText('profile.icon', { name })} title={uiText('profile.icon', { name })} onClick={() => setPicking((open) => (open === id ? null : id))}>
-              <ProfileGlyph profile={id} className="grapher-profile-item-icon" />
-            </button>
-            {renaming === id ? (
-              <span className="grapher-profile-item">
-                <input
-                  className="grapher-profile-name-field"
-                  defaultValue={name}
-                  maxLength={MAX_NAME}
-                  aria-label={uiText('profile.nameField', { name })}
-                  spellCheck={false}
-                  autoComplete="off"
-                  ref={(input) => { if (input && input.ownerDocument.activeElement !== input) { input.focus(); input.select() } }}
-                  onBlur={(event) => { store.renameProfile(id, event.currentTarget.value); setRenaming(null) }}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter') event.currentTarget.blur()
-                    else if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); event.currentTarget.value = name; setRenaming(null) }
-                  }}
-                />
-              </span>
-            ) : (
-              <button type="button" role="radio" aria-checked={checked} className="grapher-profile-item" onClick={() => { store.setTabProfile(tab, id); close() }}>
-                <span className="grapher-profile-item-name">{name}</span>
-                {checked ? <Check className="grapher-profile-item-check" /> : null}
-              </button>
-            )}
-            <button type="button" className="grapher-profile-more" aria-haspopup="menu" aria-label={uiText('profile.more', { name })} title={uiText('profile.more', { name })} onClick={(event) => menu(id, { anchor: event.currentTarget })}>
-              <More />
-            </button>
-          </div>
-          {picking === id ? <IconPicker profile={id} close={() => setPicking(null)} /> : null}
-          </React.Fragment>
-        )
-      })}
-      {showMarker ? <div className="grapher-drop-marker" style={{ top: drag.marker }} aria-hidden /> : null}
-    </div>
-  )
-}
-
 /** Beside the open-graph button on every view: label the axes in real numbers or in multiples of π; only the labels change. */
 const UnitsSwitch = ({ graph, mode, units }: { graph: string; mode: Mode; units: AxisUnits }): ReactElement => {
   const store = getStore()
@@ -454,18 +248,15 @@ interface RowProps {
   addSlider: (name: string) => void
   dragging: boolean
   startDrag: (event: PointerEvent<HTMLButtonElement>) => void
-  /** Rows in a folder are indented, and dimmed while the folder is hidden. */
-  inFolder: boolean
-  folderHidden: boolean
-  leaveFolder: () => void
-  intoNewFolder: () => void
+  /** Opens the bookmark list, renaming the group just made from the row menu. */
+  showBookmarks: (renaming?: string) => void
 }
 
-/** Focuses the input of the rendered row `delta` places away (rows in a closed folder are not rendered). */
+/** Focuses the input of the row `delta` places away. */
 function focusNeighbour(from: HTMLElement, delta: number): boolean {
   const row = from.closest<HTMLElement>('[data-row-index]')
   const rows = Array.from(row?.closest('.grapher-list')?.querySelectorAll<HTMLElement>('[data-row-index]') ?? [])
-  const target = rows[rows.indexOf(row!) + delta]?.querySelector<HTMLInputElement>(':is(input[data-row-input], input[data-folder-input], input[data-cell])')
+  const target = rows[rows.indexOf(row!) + delta]?.querySelector<HTMLInputElement>(':is(input[data-row-input], input[data-cell])')
   target?.focus()
   return Boolean(target)
 }
@@ -1005,9 +796,11 @@ const ExpressionRow = (props: RowProps): ReactElement => {
   const typeset = !editing && row.text.trim() !== ''
   const error = analysis?.kind === 'error' && analysis.error ? uiText(analysis.error.key, { name: analysis.error.param }) : null
   const color = paletteCssValue(row.color)
-  const openMenu = (event: MouseEvent<HTMLElement>): void => {
+  /** The row's menu, from its menu button or a right-click: Bookmark, the eye, the colours and Delete. */
+  const openMenu = (event: MouseEvent<HTMLElement>, anchored = false): void => {
     event.preventDefault()
     const items: UiMenuItem[] = [
+      ...(trailing || !filled(row) ? [] : [bookmarkMenu(mode, row, props.showBookmarks), { type: 'separator' } as UiMenuItem]),
       { id: 'visibility', label: uiText(row.hidden ? 'row.show' : 'row.hide'), icon: row.hidden ? <Eye /> : <EyeOff />, onSelect: () => edit((current) => ({ ...current, hidden: !current.hidden })) },
       { type: 'separator' },
       ...COLORS.map((id): UiMenuItem => ({
@@ -1020,14 +813,10 @@ const ExpressionRow = (props: RowProps): ReactElement => {
       })),
       ...(trailing ? [] : [
         { type: 'separator' } as UiMenuItem,
-        props.inFolder
-          ? { id: 'leave-folder', label: uiText('row.leaveFolder'), icon: <FolderIcon />, onSelect: props.leaveFolder }
-          : { id: 'new-folder', label: uiText('row.newFolder'), icon: <FolderPlus />, onSelect: props.intoNewFolder },
-        { type: 'separator' } as UiMenuItem,
         { id: 'delete', label: uiText('row.delete'), icon: <Trash />, danger: true, onSelect: () => props.remove('next') }
       ])
     ]
-    void api.ui.openMenu(items, { x: event.clientX, y: event.clientY })
+    void api.ui.openMenu(items, anchored ? { anchor: event.currentTarget } : { x: event.clientX, y: event.clientY }).catch(() => {})
   }
   const onKeyDown = (event: KeyboardEvent<HTMLInputElement>): void => {
     const move = (delta: number): void => {
@@ -1038,9 +827,6 @@ const ExpressionRow = (props: RowProps): ReactElement => {
       event.preventDefault()
       pendingFocus = row.id
       edit((current) => ({ ...current, text: '', table: createTable() }))
-    } else if (event.key === 'Enter' && typed === 'folder' && !props.inFolder) {
-      event.preventDefault()
-      addFolder()
     } else if (event.key === 'Enter' && !trailing) {
       event.preventDefault()
       props.insertAfter()
@@ -1064,12 +850,8 @@ const ExpressionRow = (props: RowProps): ReactElement => {
     pendingFocus = row.id
     edit((current) => ({ ...current, text: '', table: createTable() }))
   }
-  const addFolder = (): void => {
-    pendingFocus = row.id
-    edit((current) => ({ ...current, text: '', folder: { collapsed: false } }))
-  }
   return (
-    <div className="grapher-row" role="listitem" data-row-index={index} data-row-id={row.id} data-kind={analysis?.kind ?? 'empty'} data-hidden={row.hidden || props.folderHidden || undefined} data-in-folder={props.inFolder || undefined} data-trailing={trailing || undefined} data-dragging={props.dragging || undefined}>
+    <div className="grapher-row" role="listitem" data-row-index={index} data-row-id={row.id} data-kind={analysis?.kind ?? 'empty'} data-hidden={row.hidden || undefined} data-trailing={trailing || undefined} data-dragging={props.dragging || undefined}>
       <div className="grapher-gutter">
         {trailing ? <span className="grapher-handle"><span className="grapher-index">{index + 1}</span></span> : (
           <button
@@ -1130,119 +912,28 @@ const ExpressionRow = (props: RowProps): ReactElement => {
         </>)}
       </div>
       {trailing ? (
-        <span className="grapher-trailing-actions">
-          <button type="button" className="grapher-delete grapher-add-table" aria-label={uiText('folder.add')} {...api.ui.tooltip(uiText('folder.add'))} onClick={addFolder}>
-            <FolderPlus />
+        takesTables(mode) ? (
+          <button type="button" className="grapher-delete grapher-add-table" aria-label={uiText('table.add')} {...api.ui.tooltip(uiText('table.add'))} onClick={addTable}>
+            <TableIcon />
           </button>
-          {takesTables(mode) ? (
-            <button type="button" className="grapher-delete grapher-add-table" aria-label={uiText('table.add')} {...api.ui.tooltip(uiText('table.add'))} onClick={addTable}>
-              <TableIcon />
-            </button>
-          ) : null}
-        </span>
+        ) : <span className="grapher-row-spacer" />
       ) : (
-        <button type="button" className="grapher-delete" aria-label={uiText('row.delete')} title={uiText('row.delete')} onClick={() => props.remove('next')}>
-          <X />
+        <button type="button" className="grapher-delete grapher-row-menu" aria-haspopup="menu" aria-label={uiText('row.menu', { index: index + 1 })} {...api.ui.tooltip(uiText('row.menuHint'))} onClick={(event) => openMenu(event, true)}>
+          <ChevronDown />
         </button>
       )}
     </div>
   )
 }
 
-interface FolderProps {
-  row: Row
-  index: number
-  /** How many rows the folder holds. */
-  count: number
-  edit: (change: (row: Row) => Row) => void
-  /** Adds an empty first row inside the folder (opening it) and focuses it. */
-  insertInside: () => void
-  remove: (withRows: boolean) => void
-  dragging: boolean
-  startDrag: (event: PointerEvent<HTMLButtonElement>) => void
-}
+/** The header's bookmark button beside ℝ | π: the outline while the expressions show, filled while the bookmark list does. */
+const BookmarksToggle = ({ open, toggle }: { open: boolean; toggle: () => void }): ReactElement => (
+  <button type="button" className="grapher-bookmarks-toggle" aria-pressed={open} aria-label={uiText('bookmarks.toggle')} {...api.ui.tooltip(uiText('bookmarks.toggle'))} onClick={toggle}>
+    {open ? <BookmarkFilled /> : <Bookmark />}
+  </button>
+)
 
-/**
- * A folder row: grip, a chevron that opens or closes it, its name and an eye that hides or shows every row in it.
- * Folders hold expressions only, one level deep: a folder is never dropped into another one.
- */
-const FolderRow = ({ row, index, count, edit, insertInside, remove, dragging, startDrag }: FolderProps): ReactElement => {
-  const inputRef = React.useRef<HTMLInputElement>(null)
-  React.useEffect(() => {
-    if (pendingFocus !== row.id) return
-    pendingFocus = null
-    inputRef.current?.focus()
-  })
-  const collapsed = row.folder?.collapsed === true
-  const toggle = (): void => edit((current) => ({ ...current, folder: { collapsed: !current.folder?.collapsed } }))
-  const toggleHidden = (): void => edit((current) => ({ ...current, hidden: !current.hidden }))
-  const openMenu = (event: MouseEvent<HTMLElement>): void => {
-    event.preventDefault()
-    const items: UiMenuItem[] = [
-      { id: 'visibility', label: uiText(row.hidden ? 'folder.show' : 'folder.hide'), icon: row.hidden ? <Eye /> : <EyeOff />, onSelect: toggleHidden },
-      { type: 'separator' },
-      { id: 'ungroup', label: uiText('folder.delete'), icon: <FolderIcon />, onSelect: () => remove(false) },
-      { id: 'delete', label: uiText('folder.deleteAll'), icon: <Trash />, danger: true, onSelect: () => remove(true) }
-    ]
-    void api.ui.openMenu(items, { x: event.clientX, y: event.clientY })
-  }
-  return (
-    <div className="grapher-row grapher-folder" role="listitem" data-row-index={index} data-row-id={row.id} data-kind="folder" data-hidden={row.hidden || undefined} data-dragging={dragging || undefined} onContextMenu={openMenu}>
-      <div className="grapher-gutter">
-        <button type="button" className="grapher-handle" tabIndex={-1} aria-label={uiText('row.drag')} title={uiText('row.drag')} onPointerDown={startDrag}>
-          <span className="grapher-index">{index + 1}</span>
-          <Grip className="grapher-grip-icon" />
-        </button>
-        <span className="grapher-mark">
-          <button type="button" className="grapher-folder-toggle" aria-expanded={!collapsed} aria-label={uiText(collapsed ? 'folder.expand' : 'folder.collapse')} title={uiText(collapsed ? 'folder.expand' : 'folder.collapse')} onClick={toggle}>
-            <ChevronDown />
-          </button>
-        </span>
-      </div>
-      <div className="grapher-folder-main">
-        <FolderIcon className="grapher-folder-icon" />
-        <input
-          ref={inputRef}
-          data-folder-input=""
-          className="grapher-input grapher-folder-name"
-          value={row.text}
-          placeholder={uiText('folder.name')}
-          spellCheck={false}
-          autoComplete="off"
-          aria-label={uiText('folder.input', { index: index + 1 })}
-          onChange={(event) => {
-            const text = event.target.value
-            edit((current) => ({ ...current, text }))
-          }}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter') {
-              event.preventDefault()
-              insertInside()
-            } else if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
-              if (focusNeighbour(event.currentTarget, event.key === 'ArrowUp' ? -1 : 1)) event.preventDefault()
-            }
-          }}
-        />
-        {collapsed && count ? <span className="grapher-folder-count">{count}</span> : null}
-        <button type="button" className="grapher-folder-eye" aria-pressed={!row.hidden} aria-label={uiText(row.hidden ? 'folder.show' : 'folder.hide')} title={uiText(row.hidden ? 'folder.show' : 'folder.hide')} onClick={toggleHidden}>
-          {row.hidden ? <EyeOff /> : <Eye />}
-        </button>
-      </div>
-      <button type="button" className="grapher-delete" aria-label={uiText('folder.delete')} title={uiText('folder.delete')} onClick={() => remove(false)}>
-        <X />
-      </button>
-    </div>
-  )
-}
-
-/** Where a dragged row lands: the gap before row `gap`, in `folder` or on the top level, and the marker's y. */
-interface DropGap {
-  gap: number
-  folder?: string
-  marker: number
-}
-
-/** Left sidebar: the focused graph's view button, axis labels and open button in the 38px header, then its expressions. */
+/** Left sidebar: the focused graph's view button, axis labels, bookmarks and open button in the 38px header, then its expressions. */
 export const Sidebar = (): ReactElement => {
   const store = getStore()
   const { loaded, document, active, tab, engine, problems } = useGrapher()
@@ -1251,21 +942,22 @@ export const Sidebar = (): ReactElement => {
   const rows = graph.sheets[mode]
   const units = unitsOf(graph, mode)
   const [choosing, setChoosing] = React.useState(false)
-  const [profiling, setProfiling] = React.useState(false)
+  // The bookmark list stays open across tabs: a bookmark is added to whichever graph is focused.
+  const [bookmarking, setBookmarking] = React.useState<{ renaming?: string } | null>(null)
   React.useEffect(() => setChoosing(false), [active])
-  React.useEffect(() => setProfiling(false), [tab])
+  const showBookmarks = (renaming?: string): void => {
+    setChoosing(false)
+    setBookmarking(renaming ? { renaming } : {})
+  }
   const analyses = React.useMemo(() => (engine ? engine.analyze(mode, rows) : []), [engine, mode, rows])
   const editRow = (id: string) => (change: (row: Row) => Row): void => {
     store.updateRows(active, mode, (current) => current.map((row) => (row.id === id ? change(row) : row)))
   }
-  // A row added after a folder row opens the folder and becomes its first row; one added after a folder's row joins it.
   const insertAfter = (index: number) => (): void => {
     store.updateRows(active, mode, (current) => {
-      const at = current[index]
       const row = createRow(current)
       pendingFocus = row.id
-      if (at?.folder) return [...current.slice(0, index), { ...at, folder: { collapsed: false } }, { ...row, parent: at.id }, ...current.slice(index + 1)]
-      return [...current.slice(0, index + 1), at?.parent !== undefined ? { ...row, parent: at.parent } : row, ...current.slice(index + 1)]
+      return [...current.slice(0, index + 1), row, ...current.slice(index + 1)]
     })
   }
   const remove = (index: number) => (focus: 'previous' | 'next'): void => {
@@ -1276,42 +968,29 @@ export const Sidebar = (): ReactElement => {
     })
   }
   const listRef = React.useRef<HTMLDivElement>(null)
-  const dragRef = React.useRef<{ pointer: number; from: number; gap: DropGap | null } | null>(null)
-  const [drag, setDrag] = React.useState<{ from: number; gap: DropGap | null } | null>(null)
-  /**
-   * The gap nearest the pointer among the rendered typed rows, and whether a dropped row lands in a folder there: between
-   * a folder's rows always; right under an open folder's last row (or an empty open folder) when the pointer is right
-   * of the gutter. A folder only lands on the top level, so a gap inside another folder takes none.
-   */
-  const gapAt = (clientX: number, clientY: number, from: number): DropGap | null => {
+  const dragRef = React.useRef<{ pointer: number; from: number; to: number } | null>(null)
+  const [drag, setDrag] = React.useState<{ from: number; to: number; marker: number } | null>(null)
+  /** The gap (0 … typed rows) nearest the pointer, and the y of its separator line inside the list. */
+  const gapAt = (clientY: number): { gap: number; marker: number } | null => {
     const list = listRef.current
-    const moving = rows[from]
-    if (!list || !moving) return null
-    const elements = Array.from(list.querySelectorAll<HTMLElement>('[data-row-index]')).filter((element) => Number(element.dataset.rowIndex) < rows.length - 1)
+    if (!list) return null
+    const elements = Array.from(list.querySelectorAll<HTMLElement>('[data-row-index]')).slice(0, rows.length - 1)
     if (!elements.length) return null
-    let after = -1
+    let gap = 0
     elements.forEach((element, at) => {
       const rect = element.getBoundingClientRect()
-      if (clientY > rect.top + rect.height / 2) after = at
+      if (clientY > rect.top + rect.height / 2) gap = at + 1
     })
-    if (after < 0) return { gap: Number(elements[0].dataset.rowIndex), marker: elements[0].offsetTop }
-    const element = elements[after]
-    const marker = element.offsetTop + element.offsetHeight
-    const index = Number(element.dataset.rowIndex)
-    const above = rows[index]
-    const owner = above.folder ? (above.folder.collapsed ? undefined : above.id) : above.parent
-    if (owner === undefined) return { gap: above.folder ? blockEnd(rows, index) : index + 1, marker }
-    const inside = rows[index + 1]?.parent === owner
-    if (inside) return moving.folder ? null : { gap: index + 1, folder: owner, marker }
-    const right = clientX > list.getBoundingClientRect().left + 46
-    return { gap: index + 1, ...(right && !moving.folder ? { folder: owner } : {}), marker }
+    const marker = gap < elements.length ? elements[gap].offsetTop : elements[gap - 1].offsetTop + elements[gap - 1].offsetHeight
+    return { gap, marker }
   }
   const startDrag = (index: number) => (event: PointerEvent<HTMLButtonElement>): void => {
     if (event.button !== 0) return
     event.preventDefault()
     event.currentTarget.setPointerCapture(event.pointerId)
-    dragRef.current = { pointer: event.pointerId, from: index, gap: null }
-    setDrag({ from: index, gap: null })
+    const found = gapAt(event.clientY)
+    dragRef.current = { pointer: event.pointerId, from: index, to: index }
+    setDrag({ from: index, to: index, marker: found?.marker ?? 0 })
   }
   const moveDrag = (event: PointerEvent<HTMLDivElement>): void => {
     const current = dragRef.current
@@ -1320,30 +999,19 @@ export const Sidebar = (): ReactElement => {
     const bounds = list.getBoundingClientRect()
     if (event.clientY < bounds.top + 24) list.scrollTop -= 8
     else if (event.clientY > bounds.bottom - 24) list.scrollTop += 8
-    current.gap = gapAt(event.clientX, event.clientY, current.from)
-    setDrag({ from: current.from, gap: current.gap })
+    const found = gapAt(event.clientY)
+    if (!found) return
+    current.to = found.gap
+    setDrag({ from: current.from, to: found.gap, marker: found.marker })
   }
   const endDrag = (commit: boolean) => (event: PointerEvent<HTMLDivElement>): void => {
     const current = dragRef.current
     if (!current || current.pointer !== event.pointerId) return
     dragRef.current = null
     setDrag(null)
-    const gap = current.gap
-    if (commit && gap) store.updateRows(active, mode, (all) => moveIntoGap(all, current.from, Math.min(gap.gap, all.length - 1), gap.folder))
+    if (commit && current.to !== current.from && current.to !== current.from + 1) store.updateRows(active, mode, (all) => moveRow(all, current.from, Math.min(current.to, all.length - 1)))
   }
-  const moves = (from: number, gap: DropGap): boolean => {
-    const moving = rows[from]
-    return !(gap.gap >= from && gap.gap <= blockEnd(rows, from) && (moving.folder || moving.parent === gap.folder))
-  }
-  const marker = drag?.gap && moves(drag.from, drag.gap) ? drag.gap : null
-  const folders = new Map(rows.filter((row) => row.folder).map((row) => [row.id, row]))
-  const removeFolderAt = (index: number) => (withRows: boolean): void => store.updateRows(active, mode, (current) => removeFolder(current, index, withRows))
-  const leaveFolderAt = (index: number) => (): void => store.updateRows(active, mode, (current) => leaveFolder(current, index))
-  const intoNewFolderAt = (index: number) => (): void => store.updateRows(active, mode, (current) => {
-    const result = intoNewFolder(current, index)
-    pendingFocus = result.folder.id
-    return result.rows
-  })
+  const showMarker = drag !== null && drag.to !== drag.from && drag.to !== drag.from + 1
   const addSlider = (name: string): void => {
     store.updateRows(active, mode, (current) => {
       const kept = current.filter(filled)
@@ -1353,28 +1021,28 @@ export const Sidebar = (): ReactElement => {
   return (
     <div className="grapher-panel">
       <div className="panel-header grapher-header">
-        <ViewButton mode={mode} open={choosing} toggle={() => { setProfiling(false); setChoosing((open) => !open) }} />
+        <ViewButton mode={mode} open={choosing} toggle={() => { setBookmarking(null); setChoosing((open) => !open) }} />
         {!choosing ? <UnitsSwitch graph={active} mode={mode} units={units} /> : null}
+        {!choosing && loaded ? <BookmarksToggle open={bookmarking !== null} toggle={() => (bookmarking ? setBookmarking(null) : showBookmarks())} /> : null}
         <button
           type="button"
           className="plugin-open-page"
           onClick={(event) => {
             if (api.ui.hasModKey(event)) openNewGraph(mode)
-            else api.workspace.openMainTab({ instanceId: tab === MAIN_GRAPH ? store.tabFor(active) : tab, title: store.profileName(active) })
+            else api.workspace.openMainTab({ instanceId: tab === MAIN_GRAPH ? store.forkGraph(active) : tab, title: uiText('graph.title') })
           }}
           aria-label={uiText('graph.open')}
           title={uiText('graph.open')}
         />
       </div>
-      {loaded ? <ProfileBar tab={tab} profile={active} open={profiling} toggle={() => { setChoosing(false); setProfiling((open) => !open) }} /> : null}
-      {loaded && !choosing && !profiling ? <InsertBar graph={active} mode={mode} /> : null}
+      {loaded && !choosing && !bookmarking ? <InsertBar graph={active} mode={mode} /> : null}
       {problems.filter((problem) => problem.key !== 'problem.engine').map((problem) => (
         <p key={problem.key} role="alert" className="grapher-alert">{uiText(problem.key, { message: problem.message })}</p>
       ))}
-      {loaded && profiling ? (
-        <ProfileList tab={tab} profile={active} close={() => setProfiling(false)} />
-      ) : loaded && choosing ? (
+      {loaded && choosing ? (
         <ViewList graph={active} mode={mode} close={() => setChoosing(false)} />
+      ) : loaded && bookmarking ? (
+        <BookmarkList graph={active} mode={mode} renaming={bookmarking.renaming} close={() => setBookmarking(null)} />
       ) : loaded ? (
         <div
           ref={listRef}
@@ -1386,50 +1054,27 @@ export const Sidebar = (): ReactElement => {
           onPointerUp={endDrag(true)}
           onPointerCancel={endDrag(false)}
         >
-          {rows.map((row, index) => {
-            const folder = row.parent !== undefined ? folders.get(row.parent) : undefined
-            if (folder?.folder?.collapsed) return null
-            const dragging = drag !== null && (drag.from === index || (rows[drag.from]?.folder !== undefined && row.parent === rows[drag.from].id))
-            if (row.folder) {
-              return (
-                <FolderRow
-                  key={row.id}
-                  row={row}
-                  index={index}
-                  count={blockEnd(rows, index) - index - 1}
-                  edit={editRow(row.id)}
-                  insertInside={insertAfter(index)}
-                  remove={removeFolderAt(index)}
-                  dragging={dragging}
-                  startDrag={startDrag(index)}
-                />
-              )
-            }
-            return (
-              <ExpressionRow
-                key={row.id}
-                mode={mode}
-                row={row}
-                index={index}
-                trailing={index === rows.length - 1 && !filled(row)}
-                analysis={analyses[index]}
-                edit={editRow(row.id)}
-                insertAfter={insertAfter(index)}
-                remove={remove(index)}
-                addSlider={addSlider}
-                dragging={dragging}
-                startDrag={startDrag(index)}
-                inFolder={folder !== undefined}
-                folderHidden={folder?.hidden === true}
-                leaveFolder={leaveFolderAt(index)}
-                intoNewFolder={intoNewFolderAt(index)}
-              />
-            )
-          })}
-          {marker ? <div className="grapher-drop-marker" data-in-folder={marker.folder !== undefined || undefined} style={{ top: marker.marker }} aria-hidden /> : null}
+          {rows.map((row, index) => (
+            <ExpressionRow
+              key={row.id}
+              mode={mode}
+              row={row}
+              index={index}
+              trailing={index === rows.length - 1 && !filled(row)}
+              analysis={analyses[index]}
+              edit={editRow(row.id)}
+              insertAfter={insertAfter(index)}
+              remove={remove(index)}
+              addSlider={addSlider}
+              dragging={drag?.from === index}
+              startDrag={startDrag(index)}
+              showBookmarks={showBookmarks}
+            />
+          ))}
+          {showMarker ? <div className="grapher-drop-marker" style={{ top: drag.marker }} aria-hidden /> : null}
           <p className="grapher-hint">
             {uiText('hint.short')}{' '}
-            <button type="button" className="grapher-hint-link" onClick={() => api.workspace.showProperties(tab === MAIN_GRAPH ? store.tabFor(active) : tab, { segmentId: REFERENCE_SEGMENT })}>{uiText('hint.open')}</button>
+            <button type="button" className="grapher-hint-link" onClick={() => api.workspace.showProperties(tab === MAIN_GRAPH ? store.forkGraph(active) : tab, { segmentId: REFERENCE_SEGMENT })}>{uiText('hint.open')}</button>
           </p>
         </div>
       ) : (

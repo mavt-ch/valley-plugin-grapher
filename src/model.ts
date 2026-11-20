@@ -59,104 +59,10 @@ export interface Row {
   connect?: boolean
   /** Slider rows: how the play button animates the value (added later: absent means forward, 1×, looping). */
   animation?: Animation
-  /** A folder row (added later): its text is the folder's name, never an expression; `hidden` hides every row in it. */
-  folder?: { collapsed: boolean }
-  /** The folder row this row sits in (added later). Folders hold expressions only, one level deep, and a folder's rows
-   * follow it without a gap. */
-  parent?: string
 }
 
-/** A row with something in it: text, a table (even an empty one), or a folder (even an unnamed one). */
-export const filled = (row: Row): boolean => row.folder !== undefined || row.table !== undefined || row.text.trim() !== ''
-
-/** Keeps folders one level deep and contiguous: a folder never sits in a folder, and a row only stays in the folder
- * directly above it (or above its siblings); every other `parent` is dropped. */
-export function withFolders(rows: readonly Row[]): Row[] {
-  let open: string | null = null
-  let changed = false
-  const next = rows.map((row) => {
-    if (row.folder) {
-      open = row.id
-      if (row.parent === undefined) return row
-      changed = true
-      const { parent: _, ...rest } = row
-      return rest
-    }
-    if (row.parent !== undefined && row.parent === open) return row
-    open = null
-    if (row.parent === undefined) return row
-    changed = true
-    const { parent: _, ...rest } = row
-    return rest
-  })
-  return changed ? next : [...rows]
-}
-
-/** What the kernel and the canvas draw: rows in a hidden folder are hidden too. */
-export function drawnRows(rows: readonly Row[]): Row[] {
-  const hidden = new Set(rows.filter((row) => row.folder && row.hidden).map((row) => row.id))
-  return hidden.size ? rows.map((row) => (row.parent !== undefined && hidden.has(row.parent) && !row.hidden ? { ...row, hidden: true } : row)) : rows as Row[]
-}
-
-/** The index after the last row of the folder at `index` (or `index + 1` for any other row). */
-export function blockEnd(rows: readonly Row[], index: number): number {
-  const row = rows[index]
-  let end = index + 1
-  if (row?.folder) while (end < rows.length && rows[end].parent === row.id) end++
-  return end
-}
-
-/**
- * Moves the row at `from` (a folder with all its rows) into the gap before row `to`, into `folder` or onto the top
- * level. A folder only lands on the top level, never between another folder's rows.
- */
-export function moveIntoGap(rows: readonly Row[], from: number, to: number, folder?: string): Row[] {
-  const moving = rows[from]
-  if (!moving) return [...rows]
-  const end = blockEnd(rows, from)
-  if (moving.folder && folder !== undefined) return [...rows]
-  if (to >= from && to <= end && (moving.folder || moving.parent === folder)) return [...rows]
-  if (to > from && to < end) return [...rows]
-  const block = rows.slice(from, end).map((row, at) => (at > 0 || row.folder ? row : folder === undefined ? withoutParent(row) : { ...row, parent: folder }))
-  const rest = [...rows.slice(0, from), ...rows.slice(end)]
-  const at = to > from ? to - (end - from) : to
-  return withFolders([...rest.slice(0, at), ...block, ...rest.slice(at)])
-}
-
-function withoutParent(row: Row): Row {
-  const { parent: _, ...rest } = row
-  return rest
-}
-
-/** Takes the folder at `index` away: its rows move to the top level, or go with it when `withRows`. */
-export function removeFolder(rows: readonly Row[], index: number, withRows: boolean): Row[] {
-  if (!rows[index]?.folder) return [...rows]
-  const end = blockEnd(rows, index)
-  return [...rows.slice(0, index), ...(withRows ? [] : rows.slice(index + 1, end).map(withoutParent)), ...rows.slice(end)]
-}
-
-/** Puts the top-level expression at `index` into a new folder in its place. */
-export function intoNewFolder(rows: readonly Row[], index: number): { rows: Row[]; folder: Row } {
-  const folder = createFolder(rows)
-  const row = rows[index]
-  if (!row || row.folder || row.parent !== undefined) return { rows: [...rows], folder }
-  return { rows: [...rows.slice(0, index), folder, { ...row, parent: folder.id }, ...rows.slice(index + 1)], folder }
-}
-
-/** Moves a row of a folder out to the top level, just after the folder's last row. */
-export function leaveFolder(rows: readonly Row[], index: number): Row[] {
-  const row = rows[index]
-  if (row?.parent === undefined) return [...rows]
-  const folder = rows.findIndex((candidate) => candidate.id === row.parent)
-  if (folder < 0) return withFolders(rows.map((candidate, at) => (at === index ? withoutParent(candidate) : candidate)))
-  const end = blockEnd(rows, folder)
-  return moveIntoGap(rows, index, end)
-}
-
-/** A new, open folder row. */
-export function createFolder(rows: readonly Row[], name = ''): Row {
-  return { ...createRow(rows, name), folder: { collapsed: false } }
-}
+/** A row with something in it: text or a table (even an empty one). */
+export const filled = (row: Row): boolean => row.table !== undefined || row.text.trim() !== ''
 
 /** A fresh table: columns x and y and three rows to fill. */
 export function createTable(): Table {
@@ -166,6 +72,34 @@ export function createTable(): Table {
 /** The most level curves a row may ask for, and the count it draws when it does not say. */
 export const MAX_LEVELS = 50
 export const DEFAULT_LEVELS = 10
+
+/** A bookmark group; a subgroup names its top-level group in `parent` (one level deep, never a third). */
+export interface BookmarkGroup {
+  id: string
+  name: string
+  parent?: string
+  /** Closed in the bookmark list (absent means open). */
+  collapsed?: boolean
+}
+
+/** A saved copy of an expression row and the view it was written for; it stays when the row is deleted from a graph. */
+export interface Bookmark {
+  id: string
+  mode: Mode
+  row: Row
+  /** The group (or subgroup) it is filed in; absent means the top level. */
+  group?: string
+}
+
+/** Every bookmark of the realm, shared by all graphs; the arrays' order is the list's order. */
+export interface Bookmarks {
+  groups: BookmarkGroup[]
+  items: Bookmark[]
+}
+
+export const MAX_BOOKMARKS = 500
+export const MAX_BOOKMARK_GROUPS = 200
+export const BOOKMARK_GROUP_NAME_MAX = 60
 
 /** One graph: what a single Grapher tab shows and the sidebar edits while that tab is focused. */
 export interface Graph {
@@ -179,18 +113,15 @@ export interface Graph {
 export interface GrapherDocument extends Graph {
   version: 1
   graphs: Record<string, Graph>
-  /** Profile names by graph id: every graph is a named profile (`main` included). Absent in files before profiles. */
-  names?: Record<string, string>
-  /** The profile a tab shows, by tab instance id, where it is not the tab's own graph. */
+  /** The graph a tab shows, by tab instance id, where it is not the tab's own graph (tabs opened while graphs could be
+   * picked per tab; read so they keep showing it, never written anew). */
   tabs?: Record<string, string>
-  /** Each profile's Markdown note, as written. */
+  /** Each graph's Markdown note, as written. */
   notes?: Record<string, string>
-  /** The order of the profile list, by graph id; profiles not listed follow in creation order. */
-  order?: string[]
-  /** Each profile's chosen icon: a file name (without `.svg`) in `.valley/assets/icons/grapher-icon/`. */
-  icons?: Record<string, string>
-  /** The last 2D view (`cx`, `cy`, `scale`) or 3D camera (`yaw`, `pitch`, `range`) of each profile's sheets, by `graph:mode`. */
+  /** The last 2D view (`cx`, `cy`, `scale`) or 3D camera (`yaw`, `pitch`, `range`) of each graph's sheets, by `graph:mode`. */
   cameras?: Record<string, Record<string, number>>
+  /** Bookmarked expressions in groups and subgroups (added later: a file without it gets the example bookmarks). */
+  bookmarks?: Bookmarks
 }
 
 /** The graph id of the tab opened without an instance id. */
@@ -223,8 +154,8 @@ export function createRow(rows: readonly Row[], text = '', range: Partial<Pick<R
 
 /** Every sheet ends in one empty row to type into, like a fresh line on paper. */
 export function withTrailingRow(rows: readonly Row[]): Row[] {
-  const next = withFolders(rows)
-  const loose = (row: Row | undefined): boolean => row !== undefined && !filled(row) && row.parent === undefined
+  const next = [...rows]
+  const loose = (row: Row | undefined): boolean => row !== undefined && !filled(row)
   while (next.length > 1 && loose(next[next.length - 1]) && loose(next[next.length - 2])) next.pop()
   if (!loose(next[next.length - 1])) next.push(createRow(next))
   return next
@@ -261,60 +192,18 @@ export function graphOf(document: GrapherDocument, id: string): Graph {
   return id === MAIN_GRAPH ? document : document.graphs[id] ?? document
 }
 
-/** The longest profile name kept. */
-export const MAX_NAME = 80
-/** The longest profile note kept, in characters. */
+/** The longest note kept, in characters. */
 export const MAX_NOTE = 200_000
 
-/** Every profile id, `main` first, the others in creation order. */
-export function profileIds(document: GrapherDocument): string[] {
-  const all = [MAIN_GRAPH, ...Object.keys(document.graphs)]
-  const known = new Set(all)
-  const ordered = (document.order ?? []).filter((id, index, list) => known.has(id) && list.indexOf(id) === index)
-  const placed = new Set(ordered)
-  return [...ordered, ...all.filter((id) => !placed.has(id))]
+/** Every stored graph id, `main` first. */
+export function graphIds(document: GrapherDocument): string[] {
+  return [MAIN_GRAPH, ...Object.keys(document.graphs)]
 }
 
-/** The profile a tab shows: its chosen profile when that still exists, else its own graph. */
-export function profileOf(document: GrapherDocument, tab: string): string {
+/** The graph a tab shows: the one an older tab was pointed at while that still exists, else the tab's own. */
+export function graphIdOf(document: GrapherDocument, tab: string): string {
   const chosen = document.tabs?.[tab]
   return chosen && (chosen === MAIN_GRAPH || document.graphs[chosen]) ? chosen : tab
-}
-
-/** The smallest "Graph n" not taken yet, in the given words (`label(n)`). */
-export function nextName(document: GrapherDocument, label: (n: number) => string): string {
-  const taken = new Set(Object.values(document.names ?? {}))
-  let n = 1
-  while (taken.has(label(n))) n++
-  return label(n)
-}
-
-/** Names every profile without one, in order (`main` is Graph 1, then creation order), so older files get profiles. */
-export function withNames(document: GrapherDocument, label: (n: number) => string): GrapherDocument {
-  const missing = profileIds(document).filter((id) => !document.names?.[id])
-  if (!missing.length) return document
-  let next: GrapherDocument = { ...document, names: { ...document.names } }
-  for (const id of missing) next = { ...next, names: { ...next.names, [id]: nextName(next, label) } }
-  return next
-}
-
-/**
- * Gives every profile without an icon (or with one the folder no longer holds) the first icon of `order` no other
- * profile uses, so every tab shows an object icon; `available` is the folder's listing, or null before it is known.
- */
-export function withIcons(document: GrapherDocument, order: readonly string[], available: ReadonlySet<string> | null): GrapherDocument {
-  const icons = { ...document.icons }
-  const candidates = available ? order.filter((name) => available.has(name)) : order
-  if (!candidates.length) return document
-  let changed = false
-  profileIds(document).forEach((id, index) => {
-    const icon = icons[id]
-    if (icon && (!available || available.has(icon))) return
-    const used = new Set(Object.entries(icons).filter(([other]) => other !== id).map(([, name]) => name))
-    icons[id] = candidates.find((name) => !used.has(name)) ?? candidates[index % candidates.length]
-    changed = true
-  })
-  return changed ? { ...document, icons } : document
 }
 
 /** Replaces one graph and leaves every other tab's graph as it was. */
@@ -367,9 +256,7 @@ function normalizeRow(value: unknown, rows: readonly Row[]): Row | null {
     ...(typeof record.normal === 'boolean' ? { normal: record.normal } : {}),
     ...readTable(record.table),
     ...(typeof record.connect === 'boolean' ? { connect: record.connect } : {}),
-    ...readAnimation(record.animation),
-    ...(record.folder && typeof record.folder === 'object' ? { folder: { collapsed: (record.folder as Record<string, unknown>).collapsed === true } } : {}),
-    ...(typeof record.parent === 'string' && record.parent ? { parent: record.parent.slice(0, 128) } : {})
+    ...readAnimation(record.animation)
   }
 }
 
@@ -397,11 +284,29 @@ function readTable(value: unknown): { table?: Table } {
   }
 }
 
-function readRows(stored: unknown): Row[] | null {
+/**
+ * Expression folders are gone: a file from before keeps every expression in its place on the top level, an expression of
+ * a hidden folder stays hidden, and the folder rows themselves (only a name) are dropped.
+ */
+function withoutFolders(stored: readonly unknown[]): unknown[] {
+  const hidden = new Set<unknown>()
+  const kept: unknown[] = []
+  for (const entry of stored) {
+    const record = entry && typeof entry === 'object' ? entry as Record<string, unknown> : null
+    if (record?.folder && typeof record.folder === 'object') {
+      if (record.hidden === true) hidden.add(record.id)
+      continue
+    }
+    kept.push(record && record.parent !== undefined && hidden.has(record.parent) ? { ...record, hidden: true } : entry)
+  }
+  return kept
+}
+
+export function readRows(stored: unknown): Row[] | null {
   if (!Array.isArray(stored)) return null
   const rows: Row[] = []
   const ids = new Set<string>()
-  for (const entry of stored.slice(0, 500)) {
+  for (const entry of withoutFolders(stored.slice(0, 500))) {
     const row = normalizeRow(entry, rows)
     if (!row) continue
     if (ids.has(row.id)) row.id = rowId()
@@ -438,10 +343,46 @@ function normalizeGraph(record: { mode?: unknown; sheets?: unknown; units?: unkn
   return graph
 }
 
+/** Reads the saved bookmarks: unnamed, duplicate or excess entries are dropped, a subgroup whose group is missing (or is
+ * itself a subgroup) moves to the top level, and a bookmark filed in a missing group too. */
+export function normalizeBookmarks(value: unknown): Bookmarks | null {
+  if (!value || typeof value !== 'object') return null
+  const record = value as { groups?: unknown; items?: unknown }
+  const groups: BookmarkGroup[] = []
+  const seen = new Set<string>()
+  for (const entry of Array.isArray(record.groups) ? record.groups : []) {
+    if (!entry || typeof entry !== 'object') continue
+    const { id, name, parent, collapsed } = entry as Record<string, unknown>
+    if (typeof id !== 'string' || !id || id.length > 128 || seen.has(id) || typeof name !== 'string') continue
+    seen.add(id)
+    groups.push({ id, name: name.slice(0, BOOKMARK_GROUP_NAME_MAX), ...(typeof parent === 'string' && parent ? { parent } : {}), ...(collapsed === true ? { collapsed: true } : {}) })
+    if (groups.length >= MAX_BOOKMARK_GROUPS) break
+  }
+  const top = new Set(groups.filter((group) => !group.parent).map((group) => group.id))
+  const tree = groups.map((group) => {
+    if (!group.parent || (top.has(group.parent) && group.parent !== group.id)) return group
+    const { parent: _, ...rest } = group
+    return rest
+  })
+  const known = new Set(tree.map((group) => group.id))
+  const items: Bookmark[] = []
+  const ids = new Set<string>()
+  for (const entry of Array.isArray(record.items) ? record.items : []) {
+    if (!entry || typeof entry !== 'object') continue
+    const { id, mode, row, group } = entry as Record<string, unknown>
+    const read = readRows([row])?.[0]
+    if (typeof id !== 'string' || !id || id.length > 128 || ids.has(id) || !MODES.includes(mode as Mode) || !read || !filled(read)) continue
+    ids.add(id)
+    items.push({ id, mode: mode as Mode, row: { ...read, hidden: false }, ...(typeof group === 'string' && known.has(group) ? { group } : {}) })
+    if (items.length >= MAX_BOOKMARKS) break
+  }
+  return { groups: tree, items }
+}
+
 /** Reads a stored `graphs.json`; throws when it is not a Grapher document, so the caller never overwrites it. */
 export function normalizeDocument(value: unknown): GrapherDocument {
   if (!value || typeof value !== 'object' || (value as { version?: unknown }).version !== 1) throw new Error('graphs.json is not a Grapher document (version 1).')
-  const record = value as { mode?: unknown; sheets?: unknown; units?: unknown; graphs?: unknown; names?: unknown; tabs?: unknown; icons?: unknown; cameras?: unknown; order?: unknown; notes?: unknown }
+  const record = value as { mode?: unknown; sheets?: unknown; units?: unknown; graphs?: unknown; tabs?: unknown; cameras?: unknown; notes?: unknown; bookmarks?: unknown }
   const stored = (record.graphs && typeof record.graphs === 'object' && !Array.isArray(record.graphs) ? record.graphs : {}) as Record<string, unknown>
   const graphs: Record<string, Graph> = {}
   for (const [id, graph] of Object.entries(stored).slice(0, MAX_GRAPHS)) {
@@ -449,20 +390,16 @@ export function normalizeDocument(value: unknown): GrapherDocument {
   }
   const text = (entry: unknown): entry is string => typeof entry === 'string' && entry.trim() !== '' && entry.length <= 128
   const known = (id: string): boolean => id === MAIN_GRAPH || id in graphs
-  const names = Object.fromEntries(Object.entries(record.names && typeof record.names === 'object' ? record.names as Record<string, unknown> : {})
-    .filter((entry): entry is [string, string] => known(entry[0]) && text(entry[1])).map(([id, name]) => [id, name.trim().slice(0, MAX_NAME)]))
   const tabs = Object.fromEntries(Object.entries(record.tabs && typeof record.tabs === 'object' ? record.tabs as Record<string, unknown> : {})
     .filter((entry): entry is [string, string] => text(entry[0]) && text(entry[1]) && known(entry[1])).slice(0, MAX_GRAPHS * 4))
-  const icons = Object.fromEntries(Object.entries(record.icons && typeof record.icons === 'object' ? record.icons as Record<string, unknown> : {})
-    .filter((entry): entry is [string, string] => known(entry[0]) && typeof entry[1] === 'string' && /^[a-zA-Z0-9][a-zA-Z0-9 ._-]{0,63}$/.test(entry[1])))
   const cameraFields = (entry: unknown): entry is Record<string, number> => !!entry && typeof entry === 'object' && Object.values(entry).every((field) => typeof field === 'number' && Number.isFinite(field))
     && (['cx', 'cy', 'scale'].every((key) => key in entry) || ['yaw', 'pitch', 'range'].every((key) => key in entry))
   const cameras = Object.fromEntries(Object.entries(record.cameras && typeof record.cameras === 'object' ? record.cameras as Record<string, unknown> : {})
     .filter((entry): entry is [string, Record<string, number>] => known(entry[0].slice(0, entry[0].lastIndexOf(':'))) && MODES.includes(entry[0].slice(entry[0].lastIndexOf(':') + 1) as Mode) && cameraFields(entry[1])))
-  const order = Array.isArray(record.order) ? record.order.filter((id): id is string => typeof id === 'string' && known(id)).slice(0, MAX_GRAPHS + 1) : []
+  const bookmarks = normalizeBookmarks(record.bookmarks)
   const notes = Object.fromEntries(Object.entries(record.notes && typeof record.notes === 'object' ? record.notes as Record<string, unknown> : {})
     .filter((entry): entry is [string, string] => known(entry[0]) && typeof entry[1] === 'string' && entry[1] !== '' && entry[1].length <= MAX_NOTE))
-  return { version: 1, ...normalizeGraph(record), graphs, ...(order.length ? { order } : {}), ...(Object.keys(notes).length ? { notes } : {}), ...(Object.keys(names).length ? { names } : {}), ...(Object.keys(tabs).length ? { tabs } : {}), ...(Object.keys(icons).length ? { icons } : {}), ...(Object.keys(cameras).length ? { cameras } : {}) }
+  return { version: 1, ...normalizeGraph(record), graphs, ...(Object.keys(notes).length ? { notes } : {}), ...(Object.keys(tabs).length ? { tabs } : {}), ...(Object.keys(cameras).length ? { cameras } : {}), ...(bookmarks ? { bookmarks } : {}) }
 }
 
 /** The range variable of a row: θ for polar curves, t for plane and space curves. */

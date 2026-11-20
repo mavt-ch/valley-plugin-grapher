@@ -32,7 +32,7 @@ export function register(api: ValleyPluginApi): () => Promise<void> {
   const offSurface = provideGraphSurface(api, store)
   // Info rows of the focused graph tab in Properties.
   const offDetails = provideGraphDetails(api, store)
-  // Beside it, the profile's Markdown notes.
+  // Beside it, the graph's Markdown notes.
   const offNotes = api.interop.extensions.provide(METADATA_PANEL_SEGMENT_V1, {
     id: NOTES_SEGMENT, label: 'Notes', labelKey: 'notes.tab', icon: EDIT_NOTE_ICON, pluginSurfaces: ['main_workspace'],
     render: (context) => React.createElement(Notes, { tab: context.tab?.instanceId ?? context.subject?.instanceId })

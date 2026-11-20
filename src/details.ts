@@ -3,7 +3,7 @@ import { pluginDataDirectoryPath } from '@valley/plugin-sdk/paths'
 import { toWorldX, toWorldY, type Size } from './draw'
 import type { Camera, Viewport } from './engine'
 import { uiText } from './localization'
-import { MAIN_GRAPH, drawnRows, filled, graphOf, unitsOf } from './model'
+import { MAIN_GRAPH, filled, graphOf, unitsOf } from './model'
 import { GRAPHS_FILE, cameraKey, type GrapherStore } from './store'
 import { formatNumber } from './ticks'
 import { viewOf } from './views'
@@ -44,11 +44,11 @@ const degrees = (radians: number): string => `${formatNumber((radians * 180) / M
 /** The Info rows of one graph tab; a row without text is left out by the host. */
 export function graphDetails(store: GrapherStore, instanceId: string | undefined): WorkspaceDetailsSnapshot {
   const { document, engine } = store.getSnapshot()
-  const id = store.profileOf(instanceId || MAIN_GRAPH)
+  const id = store.graphIdOf(instanceId || MAIN_GRAPH)
   const graph = graphOf(document, id)
   const mode = graph.mode
   const view = viewOf(mode)
-  const rows = drawnRows(graph.sheets[mode]).filter((row) => filled(row) && !row.folder)
+  const rows = graph.sheets[mode].filter(filled)
   const analyses = engine ? engine.analyze(mode, rows) : []
   const hidden = rows.filter((row) => row.hidden).length
   const sliders = analyses.filter((analysis) => analysis.kind === 'param' && analysis.slider).length

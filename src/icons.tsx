@@ -146,18 +146,9 @@ export const Pencil = (p: IconProps): ReactElement => (
   <Svg {...p}><path d="M4 20h4L19 9l-4-4L4 16z" /><path d="M13.5 6.5l4 4" /></Svg>
 )
 
-export const Copy = (p: IconProps): ReactElement => (
-  <Svg {...p}><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3" /></Svg>
-)
-
 /** Three dots: more actions. */
 export const More = (p: IconProps): ReactElement => (
   <Svg {...p}><circle cx="5" cy="12" r="1" /><circle cx="12" cy="12" r="1" /><circle cx="19" cy="12" r="1" /></Svg>
-)
-
-/** A smiling face: change a profile's icon. */
-export const Smile = (p: IconProps): ReactElement => (
-  <Svg {...p}><circle cx="12" cy="12" r="9" /><path d="M8.5 14.5c2 2 5 2 7 0M9 9.5h.01M15 9.5h.01" /></Svg>
 )
 
 export const FolderIcon = (p: IconProps): ReactElement => (
@@ -166,4 +157,18 @@ export const FolderIcon = (p: IconProps): ReactElement => (
 
 export const FolderPlus = (p: IconProps): ReactElement => (
   <Svg {...p}><path d="M3.5 7a1.5 1.5 0 0 1 1.5-1.5h4l2 2.5h8a1.5 1.5 0 0 1 1.5 1.5v8A1.5 1.5 0 0 1 19 19H5a1.5 1.5 0 0 1-1.5-1.5z" /><path d="M12 10.5v6M9 13.5h6" /></Svg>
+)
+
+/* react-icons FaRegBookmark / FaBookmark (Font Awesome, 384 × 512), inlined: a plugin cannot bundle react-icons. The
+   viewBox carries the margin the stroke icons have, so they weigh the same at one box size. */
+export const Bookmark = ({ className }: IconProps): ReactElement => (
+  <svg className={className} width="1em" height="1em" viewBox="-64 -32 512 576" fill="currentColor" aria-hidden>
+    <path d="M336 0H48C21.49 0 0 21.49 0 48v464l192-112 192 112V48c0-26.51-21.49-48-48-48zm0 428.43l-144-84-144 84V54a6 6 0 0 1 6-6h276c3.314 0 6 2.683 6 5.996V428.43z" />
+  </svg>
+)
+
+export const BookmarkFilled = ({ className }: IconProps): ReactElement => (
+  <svg className={className} width="1em" height="1em" viewBox="-64 -32 512 576" fill="currentColor" aria-hidden>
+    <path d="M0 512V48C0 21.49 21.49 0 48 0h288c26.51 0 48 21.49 48 48v464L192 400 0 512z" />
+  </svg>
 )

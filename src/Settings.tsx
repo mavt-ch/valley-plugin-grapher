@@ -51,7 +51,7 @@ export const SettingsView = (): ReactElement => {
   })
   const isDefault = order.length === COLORS.length && order.every((id, index) => id === COLORS[index])
   return (
-    <Section title={uiText('settings.colors.title')}>
+    <Section>
       <Row title={uiText('settings.colors.title')} description={uiText('settings.colors.description')}
         extra={<Button disabled={isDefault} onClick={() => save(COLORS)}>{uiText('settings.colors.reset')}</Button>} />
       <div className="grapher-colors" role="list" aria-label={uiText('settings.colors.title')}>

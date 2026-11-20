@@ -29,6 +29,8 @@ export interface GrapherSnapshot {
   problems: GrapherProblem[]
   /** The bookmark folder whose notes Properties → Notes shows (the one clicked last in the open bookmark list), else null. */
   noteFolder: string | null
+  /** Whether Notes shows that folder's notes or the graph's (the Graph | Folder switch); a folder click picks the folder. */
+  noteScope: 'graph' | 'folder'
 }
 
 const messageOf = (error: unknown): string => (error instanceof Error ? error.message : String(error))
@@ -39,7 +41,7 @@ const messageOf = (error: unknown): string => (error instanceof Error ? error.me
  * document is left untouched until the user repairs or removes it.
  */
 export class GrapherStore {
-  private snapshot: GrapherSnapshot = { loaded: false, document: defaultDocument(), active: MAIN_GRAPH, tab: MAIN_GRAPH, engine: null, problems: [], noteFolder: null }
+  private snapshot: GrapherSnapshot = { loaded: false, document: defaultDocument(), active: MAIN_GRAPH, tab: MAIN_GRAPH, engine: null, problems: [], noteFolder: null, noteScope: 'folder' }
   private readonly listeners = new Set<() => void>()
   private baseline: FileBaseline | null = null
   private written: string | null = null
@@ -336,7 +338,12 @@ export class GrapherStore {
 
   /** Points Properties → Notes at a bookmark folder's notes; null goes back to the graph's notes. */
   showFolderNote(id: string | null): void {
-    if (this.snapshot.noteFolder !== id) this.update({ noteFolder: id })
+    if (this.snapshot.noteFolder !== id || (id && this.snapshot.noteScope !== 'folder')) this.update({ noteFolder: id, noteScope: 'folder' })
+  }
+
+  /** The Graph | Folder switch of Notes. */
+  setNoteScope(scope: 'graph' | 'folder'): void {
+    if (this.snapshot.noteScope !== scope) this.update({ noteScope: scope })
   }
 
   /** A new open group (a subgroup under `parent`); returns its id, or null when there is no room. */

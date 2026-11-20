@@ -20,13 +20,10 @@ export const EDIT_NOTE_ICON = `data:image/svg+xml,${encodeURIComponent('<svg xml
  */
 export const Notes = ({ tab }: { tab?: string }): ReactElement => {
   const store = getStore()
-  const { loaded, document, active, noteFolder } = useGrapher()
+  const { loaded, document, active, noteFolder, noteScope: scope } = useGrapher()
   // The described tab's graph; the focused one without a tab. The header names the graph's view.
   const id = tab ? graphIdOf(document, tab) : active ?? MAIN_GRAPH
   const folder = noteFolder ? document.bookmarks?.groups.find((group) => group.id === noteFolder) : undefined
-  const [scope, setScope] = React.useState<'graph' | 'folder'>('folder')
-  // A folder clicked in the bookmark list brings its notes forward.
-  React.useEffect(() => { if (noteFolder) setScope('folder') }, [noteFolder])
   const onFolder = folder !== undefined && scope === 'folder'
   const text = onFolder ? folder.note ?? '' : document.notes?.[id] ?? ''
   const [preview, setPreview] = React.useState(false)
@@ -50,7 +47,7 @@ export const Notes = ({ tab }: { tab?: string }): ReactElement => {
               <button key={candidate} type="button" role="radio" aria-checked={scope === candidate}
                 className={scope === candidate ? 'grapher-unit active' : 'grapher-unit'}
                 {...api.ui.tooltip(uiText(candidate === 'graph' ? 'notes.graphHint' : 'notes.folderHint', { name: folder.name || uiText('bookmarks.unnamed') }))}
-                onClick={() => setScope(candidate)}>
+                onClick={() => store.setNoteScope(candidate)}>
                 {uiText(`notes.${candidate}`)}
               </button>
             ))}

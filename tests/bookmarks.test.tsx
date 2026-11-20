@@ -117,29 +117,45 @@ describe('bookmarks', () => {
     expect(getStore().bookmarks().items).toHaveLength(1)
     await waitFor(async () => expect(JSON.parse((await mock.api.data.files.readText('graphs.json')) ?? '{}').bookmarks.items[0].row.text).toBe('y = x^2 - 2'), { timeout: 2000 })
 
-    // The header's bookmark opens the list in place of the expressions; a click on a bookmark adds it to the graph and
-    // the list stays open, the bookmark marked as in the graph; a second click takes it out again, the bookmark stays.
+    // The header's bookmark opens the list in place of the expressions, and the graph shows the bookmark view instead:
+    // blank while nothing is picked, never the expressions. A click shows the bookmark there and the list stays open; a
+    // second click hides it. The expressions never change.
+    const store = getStore()
+    const expressions = (): string[] => store.graph('main').sheets.cartesian.map((row) => row.text)
+    const drawn = (): string[] => store.shownGraph('main').sheets[store.shownGraph('main').mode].map((row) => row.text)
+    const before = expressions()
+    expect(drawn()).toEqual(before)
     const toggle = screen.getByRole('button', { name: 'Bookmarks' })
     expect(toggle.getAttribute('aria-pressed')).toBe('false')
     fireEvent.click(toggle)
     expect(toggle.getAttribute('aria-pressed')).toBe('true')
     expect(screen.queryByRole('list')).toBeNull()
+    expect(drawn()).toEqual([''])
     const bookmark = screen.getByRole('button', { name: 'Bookmark y = x^2 - 2' })
     expect(bookmark.getAttribute('aria-pressed')).toBe('false')
     fireEvent.click(bookmark)
     expect(screen.getByRole('button', { name: 'Bookmarks' }).getAttribute('aria-pressed')).toBe('true')
     expect(screen.getByRole('button', { name: 'Bookmark y = x^2 - 2' }).getAttribute('aria-pressed')).toBe('true')
-    expect(screen.getByRole('button', { name: 'Bookmark y = x^2 - 2' }).classList.contains('selected')).toBe(true)
-    const rows = getStore().graph('main').sheets.cartesian
-    expect(rows.map((row) => row.text)).toEqual(['y = a x + b', 'a = 1', 'b = 0', 'y = x^2 - 2', ''])
-    expect(new Set(rows.map((row) => row.id)).size).toBe(rows.length)
+    expect(drawn()).toEqual(['y = x^2 - 2', ''])
+    expect(expressions()).toEqual(before)
     fireEvent.click(screen.getByRole('button', { name: 'Bookmark y = x^2 - 2' }))
-    expect(getStore().graph('main').sheets.cartesian.map((row) => row.text)).toEqual(['y = a x + b', 'a = 1', 'b = 0', ''])
+    expect(drawn()).toEqual([''])
     expect(screen.getByRole('button', { name: 'Bookmark y = x^2 - 2' }).getAttribute('aria-pressed')).toBe('false')
-    expect(getStore().bookmarks().items).toHaveLength(1)
-    // Escape goes back to the expressions.
+    expect(store.bookmarks().items).toHaveLength(1)
+
+    // Shown again and the list closed with Escape: the expressions are back as they were, the bookmark is not drawn.
+    fireEvent.click(screen.getByRole('button', { name: 'Bookmark y = x^2 - 2' }))
     fireEvent.keyDown(screen.getByRole('button', { name: 'Bookmark y = x^2 - 2' }), { key: 'Escape' })
     expect(screen.getByRole('button', { name: 'Bookmarks' }).getAttribute('aria-pressed')).toBe('false')
+    expect(drawn()).toEqual(before)
+
+    // Reopened, the bookmark view still holds its pick; Copy to expressions is the one way into the expressions.
+    fireEvent.click(screen.getByRole('button', { name: 'Bookmarks' }))
+    expect(drawn()).toEqual(['y = x^2 - 2', ''])
+    fireEvent.click(screen.getByRole('button', { name: 'More' }))
+    await lastMenu(openMenu).select('copy')
+    expect(expressions()).toEqual([...before.slice(0, -1), 'y = x^2 - 2', ''])
+    expect(drawn()).toEqual(['y = x^2 - 2', ''])
   })
 
   it('file into a new group from the row menu, nest one subgroup level and move up when a group is deleted', async () => {
@@ -188,32 +204,41 @@ describe('bookmarks', () => {
     expect(within(list).getByText('Shifted')).toBeTruthy()
   })
 
-  it('show a bookmark on its own view: switching to it when the graph holds it there, adding it when not', async () => {
+  it('keep the bookmark view on its own view, apart from the expressions’ view', async () => {
     mount()
     render(<Sidebar />)
     await screen.findByDisplayValue('y = x^2 - 2')
-    const polar = getStore().graph('main').sheets.polar[0]
-    act(() => getStore().addBookmark('polar', polar))
-    act(() => getStore().addBookmark('space', { ...polar, id: 'surface', text: 'z = x y' }))
+    const store = getStore()
+    const polar = store.graph('main').sheets.polar[0]
+    act(() => store.addBookmark('polar', polar))
+    act(() => store.addBookmark('space', { ...polar, id: 'surface', text: 'z = x y' }))
     fireEvent.click(screen.getByRole('button', { name: 'Bookmarks' }))
-    // The polar sheet already holds it, but the Cartesian view is shown: no tick until the click shows it by switching the
-    // view (and adds no copy).
+    // The polar sheet holds it as an expression, but the bookmark view shows nothing until it is picked.
     const shown = screen.getByRole('button', { name: `Bookmark ${polar.text}` })
     expect(shown.getAttribute('aria-pressed')).toBe('false')
     fireEvent.click(shown)
     expect(await screen.findByRole('button', { name: 'View: Polar' })).toBeTruthy()
     expect(screen.getByRole('button', { name: `Bookmark ${polar.text}` }).getAttribute('aria-pressed')).toBe('true')
-    expect(getStore().graph('main').sheets.polar.filter((row) => row.text === polar.text)).toHaveLength(1)
-    expect(screen.getByRole('button', { name: 'Bookmarks' }).getAttribute('aria-pressed')).toBe('true')
-    // One the graph does not hold is added on its own view.
+    // Only the bookmark view moved to Polar; the expressions stay on Cartesian.
+    expect(store.graph('main').mode).toBe('cartesian')
+    expect(store.shownGraph('main').mode).toBe('polar')
+    // A 3D bookmark moves the bookmark view to 3D, where the polar one is not drawn (and not ticked).
     fireEvent.click(screen.getByRole('button', { name: 'Bookmark z = x y' }))
     expect(await screen.findByRole('button', { name: 'View: 3D' })).toBeTruthy()
-    expect(getStore().graph('main').sheets.space.filter((row) => row.text === 'z = x y')).toHaveLength(1)
-    expect(screen.getByRole('button', { name: 'Bookmark z = x y' }).getAttribute('aria-pressed')).toBe('true')
+    expect(store.shownGraph('main').sheets.space.map((row) => row.text)).toEqual(['z = x y', ''])
+    expect(screen.getByRole('button', { name: `Bookmark ${polar.text}` }).getAttribute('aria-pressed')).toBe('false')
+    // The view picker in bookmark mode changes the bookmark view only; closing the list goes back to Cartesian.
+    fireEvent.click(screen.getByRole('button', { name: 'View: 3D' }))
+    fireEvent.click(screen.getByRole('radio', { name: /Polar/ }))
+    expect(store.shownGraph('main').mode).toBe('polar')
+    expect(store.graph('main').mode).toBe('cartesian')
+    fireEvent.click(screen.getByRole('button', { name: 'Bookmarks' }))
+    expect(screen.getByRole('button', { name: 'View: Cartesian' })).toBeTruthy()
+    expect(store.shownGraph('main').mode).toBe('cartesian')
   })
 
-  it('save the sliders an expression reads and bring them back (and take them out) with it', async () => {
-    mount()
+  it('save the sliders an expression reads, draw them with it in the bookmark view and copy them to the expressions', async () => {
+    const { openMenu } = mount()
     render(<Sidebar />)
     await screen.findByDisplayValue('y = a x + b')
     await waitFor(() => expect(getStore().getSnapshot().engine).toBeTruthy())
@@ -224,29 +249,21 @@ describe('bookmarks', () => {
     const [item] = store.bookmarks().items
     expect(item.needs?.map((row) => row.text)).toEqual(['a = 1', 'b = 0'])
 
-    // A sheet without them gets the expression and both sliders; a second click takes all three out again.
-    act(() => store.updateRows('main', 'cartesian', () => []))
-    act(() => { store.toggleBookmarkInGraph('main', item.id) })
-    expect(texts()).toEqual(['y = a x + b', 'a = 1', 'b = 0', ''])
-    act(() => { store.toggleBookmarkInGraph('main', item.id) })
-    expect(texts()).toEqual([''])
-
-    // A slider the graph already has keeps its value and is not added twice, and it stays when the expression goes.
+    // In the bookmark view it draws with its own sliders, whatever the expressions hold.
     act(() => store.updateRows('main', 'cartesian', () => [createRow([], 'a = 5')]))
-    act(() => { store.toggleBookmarkInGraph('main', item.id) })
-    expect(texts()).toEqual(['a = 5', 'y = a x + b', 'b = 0', ''])
-    act(() => { store.toggleBookmarkInGraph('main', item.id) })
-    expect(texts()).toEqual(['a = 5', ''])
-
-    // A slider another expression still reads stays too.
-    act(() => store.updateRows('main', 'cartesian', () => [createRow([], 'y = b')]))
-    act(() => { store.toggleBookmarkInGraph('main', item.id) })
-    act(() => { store.toggleBookmarkInGraph('main', item.id) })
-    expect(texts()).toEqual(['y = b', 'b = 0', ''])
-
-    // The list names the saved sliders after the expression.
     fireEvent.click(screen.getByRole('button', { name: 'Bookmarks' }))
     expect(within(screen.getByRole('button', { name: 'Bookmark y = a x + b' })).getByText('a · b')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Bookmark y = a x + b' }))
+    expect(store.shownGraph('main').sheets.cartesian.map((row) => row.text)).toEqual(['y = a x + b', 'a = 1', 'b = 0', ''])
+    expect(texts()).toEqual(['a = 5', ''])
+
+    // Copied to the expressions, a slider they already have keeps its value and is not added twice.
+    fireEvent.click(screen.getAllByRole('button', { name: 'More' }).at(-1)!)
+    await lastMenu(openMenu).select('copy')
+    expect(texts()).toEqual(['a = 5', 'y = a x + b', 'b = 0', ''])
+    act(() => store.updateRows('main', 'cartesian', () => []))
+    act(() => { store.copyBookmarkToExpressions('main', item.id) })
+    expect(texts()).toEqual(['y = a x + b', 'a = 1', 'b = 0', ''])
   })
 
   it('show every bookmark of a one-view folder with one click and only open a folder that mixes views', async () => {
@@ -266,14 +283,16 @@ describe('bookmarks', () => {
       file('space', 'z = x y', mixed)
     })
     fireEvent.click(screen.getByRole('button', { name: 'Bookmarks' }))
-    const polar = (): string[] => store.graph('main').sheets.polar.map((row) => row.text)
+    const polar = (): string[] => store.shownGraph('main').sheets.polar.map((row) => row.text)
+    const expressions = JSON.stringify([store.graph('main').mode, store.graph('main').sheets])
     const folder = (): HTMLElement => screen.getByRole('button', { name: 'Folder Polar curves, Polar' })
     expect(folder().getAttribute('aria-pressed')).toBe('false')
 
     // One click shows both on their view and ticks the folder and its bookmarks; the next takes them out.
     fireEvent.click(folder())
     expect(await screen.findByRole('button', { name: 'View: Polar' })).toBeTruthy()
-    expect(polar()).toEqual(expect.arrayContaining(['r = 1 + cos(θ)', 'r = 2 sin(3θ)']))
+    expect(polar()).toEqual(['r = 1 + cos(θ)', 'r = 2 sin(3θ)', ''])
+    expect(JSON.stringify([store.graph('main').mode, store.graph('main').sheets])).toBe(expressions)
     expect(folder().getAttribute('aria-pressed')).toBe('true')
     expect(screen.getByRole('button', { name: 'Bookmark r = 2 sin(3θ)' }).getAttribute('aria-pressed')).toBe('true')
     expect(screen.getByRole('button', { name: 'Bookmark r = 2 sin(3θ)' }).classList.contains('selected')).toBe(true)
@@ -283,17 +302,17 @@ describe('bookmarks', () => {
     expect(folder().getAttribute('aria-pressed')).toBe('false')
 
     // Its chevron only folds it.
-    const sheets = JSON.stringify(store.graph('main').sheets)
+    const sheets = JSON.stringify(store.shownGraph('main').sheets)
     fireEvent.click(screen.getByRole('button', { name: 'Close Polar curves' }))
     expect(folder().getAttribute('aria-expanded')).toBe('false')
-    expect(JSON.stringify(store.graph('main').sheets)).toBe(sheets)
+    expect(JSON.stringify(store.shownGraph('main').sheets)).toBe(sheets)
 
     // A folder with Polar and 3D bookmarks has no view and only opens and closes; its bookmarks go one at a time.
     const mixedRow = (): HTMLElement => screen.getByRole('button', { name: 'Folder Mixed' })
     expect(mixedRow().hasAttribute('aria-pressed')).toBe(false)
     fireEvent.click(mixedRow())
     expect(mixedRow().getAttribute('aria-expanded')).toBe('false')
-    expect(JSON.stringify(store.graph('main').sheets)).toBe(sheets)
+    expect(JSON.stringify(store.shownGraph('main').sheets)).toBe(sheets)
     fireEvent.click(mixedRow())
     fireEvent.click(screen.getByRole('button', { name: 'Bookmark z = x y' }))
     expect(await screen.findByRole('button', { name: 'View: 3D' })).toBeTruthy()

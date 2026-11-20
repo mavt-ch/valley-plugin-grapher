@@ -3,8 +3,8 @@ import { pluginDataDirectoryPath } from '@valley/plugin-sdk/paths'
 import { toWorldX, toWorldY, type Size } from './draw'
 import type { Camera, Viewport } from './engine'
 import { uiText } from './localization'
-import { MAIN_GRAPH, filled, graphOf, unitsOf } from './model'
-import { GRAPHS_FILE, cameraKey, type GrapherStore } from './store'
+import { MAIN_GRAPH, filled, unitsOf } from './model'
+import { GRAPHS_FILE, type GrapherStore } from './store'
 import { formatNumber } from './ticks'
 import { viewOf } from './views'
 
@@ -45,7 +45,7 @@ const degrees = (radians: number): string => `${formatNumber((radians * 180) / M
 export function graphDetails(store: GrapherStore, instanceId: string | undefined): WorkspaceDetailsSnapshot {
   const { document, engine } = store.getSnapshot()
   const id = store.graphIdOf(instanceId || MAIN_GRAPH)
-  const graph = graphOf(document, id)
+  const graph = store.shownGraph(id)
   const mode = graph.mode
   const view = viewOf(mode)
   const rows = graph.sheets[mode].filter(filled)
@@ -54,7 +54,7 @@ export function graphDetails(store: GrapherStore, instanceId: string | undefined
   const sliders = analyses.filter((analysis) => analysis.kind === 'param' && analysis.slider).length
   const tables = rows.filter((row) => row.table)
   const points = analyses.reduce((total, analysis) => total + (analysis.kind === 'table' ? analysis.count ?? 0 : 0), 0)
-  const canvas = canvases.get(cameraKey(id, mode))
+  const canvas = canvases.get(store.shownSlot(id, mode))
   const playingHere = [...playing].filter((key) => key.startsWith(`${id} `)).length
   let range = ''
   let camera = ''

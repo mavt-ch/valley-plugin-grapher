@@ -214,41 +214,20 @@ const holds = (rows: readonly Row[], row: Row): boolean => rows.some((entry) => 
 
 /**
  * A sheet's rows with bookmarks added: each expression the sheet does not hold yet, then the definitions it needs. A
- * definition whose name the sheet already defines is not added again, so a slider of the graph keeps its value.
+ * definition whose name the sheet already defines is not added again, so a slider of the graph keeps its value. `idOf`
+ * names the new rows (fresh ids unless given; `need` is -1 for the expression itself).
  */
-export function withBookmarks(analyze: Analyze | null, rows: readonly Row[], items: readonly Bookmark[]): Row[] {
+export function withBookmarks(analyze: Analyze | null, rows: readonly Row[], items: readonly Bookmark[], idOf: (item: Bookmark, need: number) => string = () => rowId()): Row[] {
   const next = [...rows]
   while (next.length && !filled(next[next.length - 1])) next.pop()
   for (const item of items) {
-    if (!holds(next, item.row)) next.push({ ...item.row, id: rowId(), hidden: false })
-    for (const need of item.needs ?? []) {
+    if (!holds(next, item.row)) next.push({ ...item.row, id: idOf(item, -1), hidden: false })
+    for (const [index, need] of (item.needs ?? []).entries()) {
       if (holds(next, need)) continue
       const name = analyze ? definedName(need, analyze([need])[0]) : definedByText(need)
       if (name && (analyze ? definitions(analyze, next).has(name) : next.some((entry) => definedByText(entry) === name))) continue
-      next.push({ ...need, id: rowId(), hidden: false })
+      next.push({ ...need, id: idOf(item, index), hidden: false })
     }
   }
   return next
-}
-
-/**
- * A sheet's rows with bookmarks taken out: their expressions, and each saved definition that came with them unless it
- * was changed (a moved slider) or another row still reads it.
- */
-export function withoutBookmarks(analyze: Analyze | null, rows: readonly Row[], items: readonly Bookmark[]): Row[] {
-  let next = rows.filter((row) => !(filled(row) && items.some((item) => sameExpression(row, item.row))))
-  if (!analyze) return next
-  for (const need of items.flatMap((item) => item.needs ?? []).reverse()) {
-    const at = next.findIndex((row) => filled(row) && sameExpression(row, need))
-    if (at < 0) continue
-    const name = definedName(need, analyze([need])[0])
-    const candidate = next.filter((_, index) => index !== at)
-    if (name === null || !analyze(candidate).some((analysis) => missingNames(analysis).includes(name))) next = candidate
-  }
-  return next
-}
-
-/** Whether a sheet holds the expression of every one of these bookmarks. */
-export function sheetHolds(rows: readonly Row[], items: readonly Bookmark[]): boolean {
-  return items.length > 0 && items.every((item) => holds(rows, item.row))
 }

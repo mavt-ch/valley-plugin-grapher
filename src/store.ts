@@ -4,8 +4,8 @@ import { React, api } from './runtime'
 import { uiText } from './localization'
 import { exampleBookmarks } from './bookmarkExamples'
 import { loadPlotEngine, type Camera, type PlotEngine, type Viewport } from './engine'
-import { NO_BOOKMARKS, addGroup, bookmarkId, deleteGroup, filedIn, folderItems, folderMode, moveBookmark, moveGroup, needsOf, sameExpression, sheetHolds, withBookmarks, withoutBookmarks, type Analyze, type BookmarkDrop } from './bookmarks'
-import { BOOKMARK_GROUP_NAME_MAX, MAIN_GRAPH, MAX_BOOKMARKS, MAX_BOOKMARK_GROUPS, MAX_GRAPHS, MAX_NOTE, MODES, defaultDocument, filled, defaultGraph, graphIdOf, graphIds, graphOf, normalizeDocument, rowId, withGraph, withTrailingRow, type AxisUnits, type BookmarkGroup, type Bookmarks, type Graph, type GrapherDocument, type Mode, type Row } from './model'
+import { NO_BOOKMARKS, addGroup, bookmarkId, deleteGroup, filedIn, folderItems, folderMode, moveBookmark, moveGroup, needsOf, sameExpression, withBookmarks, type Analyze, type BookmarkDrop } from './bookmarks'
+import { BOOKMARK_GROUP_NAME_MAX, MAIN_GRAPH, MAX_BOOKMARKS, MAX_BOOKMARK_GROUPS, MAX_GRAPHS, MAX_NOTE, MODES, createRow, defaultDocument, filled, defaultGraph, graphIdOf, graphIds, graphOf, normalizeDocument, rowId, withGraph, withTrailingRow, type AxisUnits, type Bookmark, type BookmarkGroup, type BookmarkView, type Bookmarks, type Graph, type GrapherDocument, type Mode, type Row } from './model'
 
 /** The sheets live in `.valley/plugins/data/grapher/graphs.json`. */
 export const GRAPHS_FILE = 'graphs.json'
@@ -31,6 +31,8 @@ export interface GrapherSnapshot {
   noteFolder: string | null
   /** Whether Notes shows that folder's notes or the graph's (the Graph | Folder switch); a folder click picks the folder. */
   noteScope: 'graph' | 'folder'
+  /** Whether the bookmark list is open (in place of the expressions): every graph tab then draws its bookmark view. */
+  bookmarksOpen: boolean
 }
 
 const messageOf = (error: unknown): string => (error instanceof Error ? error.message : String(error))
@@ -41,7 +43,7 @@ const messageOf = (error: unknown): string => (error instanceof Error ? error.me
  * document is left untouched until the user repairs or removes it.
  */
 export class GrapherStore {
-  private snapshot: GrapherSnapshot = { loaded: false, document: defaultDocument(), active: MAIN_GRAPH, tab: MAIN_GRAPH, engine: null, problems: [], noteFolder: null, noteScope: 'folder' }
+  private snapshot: GrapherSnapshot = { loaded: false, document: defaultDocument(), active: MAIN_GRAPH, tab: MAIN_GRAPH, engine: null, problems: [], noteFolder: null, noteScope: 'folder', bookmarksOpen: false }
   private readonly listeners = new Set<() => void>()
   private baseline: FileBaseline | null = null
   private written: string | null = null
@@ -404,67 +406,122 @@ export class GrapherStore {
     return kind === 'group' ? moveGroup(bookmarks.groups, id, drop) !== null : moveBookmark(bookmarks.items, bookmarks.groups, id, drop) !== null
   }
 
-  /** Whether a graph's sheet of the bookmark's view holds the bookmarked expression. */
-  bookmarkInGraph(graph: string, id: string): boolean {
-    const item = this.bookmarks().items.find((entry) => entry.id === id)
-    return item !== undefined && this.graph(graph).sheets[item.mode].some((row) => filled(row) && sameExpression(row, item.row))
+  /** A graph's bookmark view: the one saved, else the graph's own view with nothing shown. */
+  bookmarkView(graph: string): BookmarkView {
+    const saved = this.snapshot.document.bookmarkViews?.[graph]
+    if (!saved) return { mode: this.graph(graph).mode, shown: [] }
+    const known = new Set(this.bookmarks().items.map((item) => item.id))
+    return saved.shown.every((id) => known.has(id)) ? saved : { ...saved, shown: saved.shown.filter((id) => known.has(id)) }
+  }
+
+  private setBookmarkView(graph: string, view: BookmarkView): void {
+    const document = this.snapshot.document
+    this.change({ ...document, bookmarkViews: { ...document.bookmarkViews, [graph]: { mode: view.mode, shown: [...view.shown] } } })
+  }
+
+  /** Opens or closes the bookmark list; while it is open every graph shows its bookmark view instead of its expressions. */
+  setBookmarksOpen(open: boolean): void {
+    if (this.snapshot.bookmarksOpen !== open) this.update({ bookmarksOpen: open, ...(open ? {} : { noteFolder: null }) })
+  }
+
+  /** The view the bookmark list shows its bookmarks on, changed from the header while the list is open. */
+  setBookmarkViewMode(graph: string, mode: Mode): void {
+    const view = this.bookmarkView(graph)
+    if (view.mode !== mode || !this.snapshot.document.bookmarkViews?.[graph]) this.setBookmarkView(graph, { ...view, mode })
+  }
+
+  /** The bookmarks a graph's bookmark view draws: the ones picked, written for the view it is on. */
+  private shownItems(graph: string): Bookmark[] {
+    const view = this.bookmarkView(graph)
+    const picked = new Set(view.shown)
+    return this.bookmarks().items.filter((item) => picked.has(item.id) && item.mode === view.mode)
+  }
+
+  /** Whether the bookmark view shows this bookmark on the view it is on. */
+  bookmarkShown(graph: string, id: string): boolean {
+    return this.shownItems(graph).some((item) => item.id === id)
   }
 
   /**
-   * A click on a bookmark: one not in the graph is added (switching the graph to its view); one in the graph on another
-   * view is shown by switching to that view; one in the graph on the view shown is taken out of it again (the bookmark
-   * stays). Returns what happened.
+   * A click on a bookmark: shown on the bookmark view's current view, it is hidden again; otherwise it is shown and the
+   * bookmark view switches to the bookmark's view. The graph's own expressions never change.
    */
-  toggleBookmarkInGraph(graph: string, id: string): 'added' | 'shown' | 'removed' | null {
+  toggleBookmarkShown(graph: string, id: string): 'shown' | 'hidden' | null {
     const item = this.bookmarks().items.find((entry) => entry.id === id)
     if (!item) return null
-    if (!this.bookmarkInGraph(graph, id)) return this.insertBookmark(graph, id) ? 'added' : null
-    if (this.graph(graph).mode !== item.mode) {
-      this.setMode(graph, item.mode)
-      return 'shown'
+    const view = this.bookmarkView(graph)
+    if (this.bookmarkShown(graph, id)) {
+      this.setBookmarkView(graph, { ...view, shown: view.shown.filter((entry) => entry !== id) })
+      return 'hidden'
     }
-    const analyze = this.analyzer(item.mode)
-    this.updateRows(graph, item.mode, (rows) => withoutBookmarks(analyze, rows, [item]))
-    return 'removed'
+    this.setBookmarkView(graph, { mode: item.mode, shown: view.shown.includes(id) ? view.shown : [...view.shown, id] })
+    return 'shown'
   }
 
-  /** Adds a copy of a bookmark, with the definitions it needs that the sheet lacks, to the end of a graph's sheet of the
-   * bookmark's view, switching the graph to that view; returns the new row's id. */
-  insertBookmark(graph: string, id: string): string | null {
+  /** Whether the bookmark view shows every bookmark of a one-view folder, on that view. */
+  folderShown(graph: string, id: string): boolean {
+    const bookmarks = this.bookmarks()
+    const mode = folderMode(bookmarks, id)
+    if (mode === null || this.bookmarkView(graph).mode !== mode) return false
+    const shown = new Set(this.shownItems(graph).map((item) => item.id))
+    return folderItems(bookmarks, id).every((item) => shown.has(item.id))
+  }
+
+  /**
+   * A click on a one-view folder: when all of its bookmarks are shown they are hidden; otherwise all are shown and the
+   * bookmark view switches to the folder's view. A folder that mixes views does nothing here (it only opens and closes).
+   */
+  toggleFolderShown(graph: string, id: string): 'shown' | 'hidden' | null {
+    const bookmarks = this.bookmarks()
+    const mode = folderMode(bookmarks, id)
+    if (mode === null) return null
+    const ids = folderItems(bookmarks, id).map((item) => item.id)
+    const view = this.bookmarkView(graph)
+    if (this.folderShown(graph, id)) {
+      this.setBookmarkView(graph, { ...view, shown: view.shown.filter((entry) => !ids.includes(entry)) })
+      return 'hidden'
+    }
+    this.setBookmarkView(graph, { mode, shown: [...new Set([...view.shown, ...ids])] })
+    return 'shown'
+  }
+
+  /**
+   * Copies a bookmark, with the saved definitions the sheet lacks, to the end of the graph's own expressions on the
+   * bookmark's view: the one way a bookmark reaches the expressions, chosen from its menu. Returns the new row's id.
+   */
+  copyBookmarkToExpressions(graph: string, id: string): string | null {
     const item = this.bookmarks().items.find((entry) => entry.id === id)
     if (!item) return null
     const rows = this.graph(graph).sheets[item.mode]
     const next = withBookmarks(this.analyzer(item.mode), rows, [item])
-    const added = next.find((row) => !rows.includes(row) && sameExpression(row, item.row))
-    this.editGraph(graph, (current) => ({ ...current, mode: item.mode, sheets: { ...current.sheets, [item.mode]: withTrailingRow(next) } }))
-    return added?.id ?? null
+    this.updateRows(graph, item.mode, () => next)
+    return next.find((row) => !rows.includes(row) && sameExpression(row, item.row))?.id ?? null
   }
 
-  /** Whether a graph shows every bookmark of a one-view folder on that view right now. */
-  folderInGraph(graph: string, id: string): boolean {
-    const bookmarks = this.bookmarks()
-    const mode = folderMode(bookmarks, id)
-    const current = this.graph(graph)
-    return mode !== null && current.mode === mode && sheetHolds(current.sheets[mode], folderItems(bookmarks, id))
-  }
+  private readonly shownCache = new Map<string, { key: unknown[]; graph: Graph }>()
 
   /**
-   * A click on a one-view folder: when the graph shows all of its bookmarks on that view they are taken out again (with
-   * the definitions that came with them); otherwise the missing ones are added and the graph switches to the view. A
-   * folder that mixes views does nothing here (it only opens and closes). Returns what happened.
+   * What a graph tab draws: its own view and expressions, or, while the bookmark list is open, its bookmark view (the
+   * picked bookmarks of that view with their saved sliders), never mixed with the expressions.
    */
-  toggleFolderInGraph(graph: string, id: string): 'added' | 'removed' | null {
-    const bookmarks = this.bookmarks()
-    const mode = folderMode(bookmarks, id)
-    if (mode === null) return null
-    const items = folderItems(bookmarks, id)
-    const analyze = this.analyzer(mode)
-    if (this.folderInGraph(graph, id)) {
-      this.updateRows(graph, mode, (rows) => withoutBookmarks(analyze, rows, items))
-      return 'removed'
-    }
-    this.editGraph(graph, (current) => ({ ...current, mode, sheets: { ...current.sheets, [mode]: withTrailingRow(withBookmarks(analyze, current.sheets[mode], items)) } }))
-    return 'added'
+  shownGraph(id: string): Graph {
+    const graph = this.graph(id)
+    if (!this.snapshot.bookmarksOpen) return graph
+    const view = this.bookmarkView(id)
+    const key = [graph, this.snapshot.document.bookmarkViews?.[id], this.bookmarks().items, this.snapshot.engine]
+    const cached = this.shownCache.get(id)
+    if (cached && cached.key.every((part, index) => part === key[index])) return cached.graph
+    // Ids follow the bookmarks, so redrawing the same pick keeps its rows (and the canvas's samples) as they were.
+    const picked = withBookmarks(this.analyzer(view.mode), [], this.shownItems(id), (item, need) => `${item.id}${need < 0 ? '' : `-${need}`}`)
+    const rows = [...picked, { ...createRow(picked), id: `end${BOOKMARK_SLOT}` }]
+    const shown: Graph = { mode: view.mode, sheets: { ...graph.sheets, [view.mode]: rows }, units: graph.units }
+    this.shownCache.set(id, { key, graph: shown })
+    return shown
+  }
+
+  /** The camera slot of what a graph tab draws: its bookmark view keeps its own pan, zoom and orbit. */
+  shownSlot(id: string, mode: Mode): string {
+    return cameraKey(this.snapshot.bookmarksOpen ? `${id}${BOOKMARK_SLOT}` : id, mode)
   }
 
   /** Schedules the save of quiet edits. */
@@ -560,6 +617,9 @@ function withoutCollapsed(group: BookmarkGroup): BookmarkGroup {
   const { collapsed: _, ...rest } = group
   return rest
 }
+
+/** Appended to a graph id for the camera slots of its bookmark view (never saved: no graph has such an id). */
+const BOOKMARK_SLOT = '#bookmarks'
 
 /** The key of one graph's sheet in the session-only camera maps. */
 export const cameraKey = (graph: string, mode: Mode): string => `${graph}:${mode}`

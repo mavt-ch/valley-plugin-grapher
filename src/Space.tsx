@@ -5,7 +5,7 @@ import { SPACE, type Camera, type PlotEngine, type SpaceRecord } from './engine'
 import { Fit, Minus, Plus } from './icons'
 import { uiText } from './localization'
 import type { Row } from './model'
-import { cameraKey, getStore } from './store'
+import { getStore } from './store'
 import { noteCanvas } from './details'
 import { runFlow } from './animate'
 import { registerExporter, renderPng } from './exporting'
@@ -152,13 +152,14 @@ interface SpaceProps {
   rows: readonly Row[]
   engine: PlotEngine | null
   graph: string
+  /** The camera slot (`graph:mode`, or the bookmark view's own). */
+  slot: string
   units: AxisUnits
 }
 
 /** The 3D graph: drag to orbit, scroll or pinch to zoom; the kernel projects and orders everything per frame. */
-export const SpaceCanvas = ({ view, rows, engine, graph, units }: SpaceProps): ReactElement => {
+export const SpaceCanvas = ({ view, rows, engine, graph, slot, units }: SpaceProps): ReactElement => {
   const store = getStore()
-  const slot = cameraKey(graph, view.id)
   const wrapRef = React.useRef<HTMLDivElement>(null)
   const canvasRef = React.useRef<HTMLCanvasElement>(null)
   const sizeRef = React.useRef<Size>({ width: 0, height: 0 })

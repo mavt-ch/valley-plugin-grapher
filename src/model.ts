@@ -102,6 +102,15 @@ export interface Bookmarks {
   items: Bookmark[]
 }
 
+/**
+ * What a graph shows while its bookmark list is open, kept apart from its expressions: the view chosen there and the
+ * bookmarks picked to be shown (each view draws the picked bookmarks written for it).
+ */
+export interface BookmarkView {
+  mode: Mode
+  shown: string[]
+}
+
 export const MAX_BOOKMARKS = 500
 /** The most definitions one bookmark keeps. */
 export const MAX_BOOKMARK_NEEDS = 50
@@ -129,6 +138,8 @@ export interface GrapherDocument extends Graph {
   cameras?: Record<string, Record<string, number>>
   /** Bookmarked expressions in groups and subgroups (added later: a file without it gets the example bookmarks). */
   bookmarks?: Bookmarks
+  /** Each graph's bookmark view (see {@link BookmarkView}), by graph id. */
+  bookmarkViews?: Record<string, BookmarkView>
 }
 
 /** The graph id of the tab opened without an instance id. */
@@ -416,7 +427,7 @@ export function normalizeBookmarks(value: unknown): Bookmarks | null {
 /** Reads a stored `graphs.json`; throws when it is not a Grapher document, so the caller never overwrites it. */
 export function normalizeDocument(value: unknown): GrapherDocument {
   if (!value || typeof value !== 'object' || (value as { version?: unknown }).version !== 1) throw new Error('graphs.json is not a Grapher document (version 1).')
-  const record = value as { mode?: unknown; sheets?: unknown; units?: unknown; graphs?: unknown; tabs?: unknown; cameras?: unknown; notes?: unknown; bookmarks?: unknown }
+  const record = value as { mode?: unknown; sheets?: unknown; units?: unknown; graphs?: unknown; tabs?: unknown; cameras?: unknown; notes?: unknown; bookmarks?: unknown; bookmarkViews?: unknown }
   const stored = (record.graphs && typeof record.graphs === 'object' && !Array.isArray(record.graphs) ? record.graphs : {}) as Record<string, unknown>
   const graphs: Record<string, Graph> = {}
   for (const [id, graph] of Object.entries(stored).slice(0, MAX_GRAPHS)) {
@@ -433,7 +444,15 @@ export function normalizeDocument(value: unknown): GrapherDocument {
   const bookmarks = normalizeBookmarks(record.bookmarks)
   const notes = Object.fromEntries(Object.entries(record.notes && typeof record.notes === 'object' ? record.notes as Record<string, unknown> : {})
     .filter((entry): entry is [string, string] => known(entry[0]) && typeof entry[1] === 'string' && entry[1] !== '' && entry[1].length <= MAX_NOTE))
-  return { version: 1, ...normalizeGraph(record), graphs, ...(Object.keys(notes).length ? { notes } : {}), ...(Object.keys(tabs).length ? { tabs } : {}), ...(Object.keys(cameras).length ? { cameras } : {}), ...(bookmarks ? { bookmarks } : {}) }
+  const items = new Set(bookmarks?.items.map((item) => item.id) ?? [])
+  const bookmarkViews: Record<string, BookmarkView> = {}
+  for (const [id, entry] of Object.entries(record.bookmarkViews && typeof record.bookmarkViews === 'object' ? record.bookmarkViews as Record<string, unknown> : {})) {
+    if (!known(id) || !entry || typeof entry !== 'object') continue
+    const { mode, shown } = entry as Record<string, unknown>
+    if (!MODES.includes(mode as Mode)) continue
+    bookmarkViews[id] = { mode: mode as Mode, shown: [...new Set(Array.isArray(shown) ? shown.filter((item): item is string => typeof item === 'string' && items.has(item)) : [])] }
+  }
+  return { version: 1, ...normalizeGraph(record), graphs, ...(Object.keys(notes).length ? { notes } : {}), ...(Object.keys(tabs).length ? { tabs } : {}), ...(Object.keys(cameras).length ? { cameras } : {}), ...(bookmarks ? { bookmarks } : {}), ...(Object.keys(bookmarkViews).length ? { bookmarkViews } : {}) }
 }
 
 /** The range variable of a row: θ for polar curves, t for plane and space curves. */

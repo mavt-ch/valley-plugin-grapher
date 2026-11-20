@@ -3,7 +3,7 @@ import type { DragEvent, MouseEvent, ReactElement } from 'react'
 import { paletteCssValue } from '@valley/plugin-sdk/palette'
 import type { UiMenuItem } from '@valley/plugin-sdk'
 import { bookmarksIn, definedByText, filedIn, folderMode, groupCount, sameExpression, subgroups, type BookmarkDrop } from './bookmarks'
-import { Bookmark as BookmarkIcon, Check, ChevronDown, CollapseAll, ExpandAll, FolderIcon, FolderOpen, FolderPlus, More, NoteIcon, Pencil, Plus, TableIcon, Trash, X } from './icons'
+import { Bookmark as BookmarkIcon, Check, ChevronDown, CollapseAll, CopyPlus, Eye, EyeOff, ExpandAll, FolderIcon, FolderOpen, FolderPlus, More, NoteIcon, Pencil, TableIcon, Trash } from './icons'
 import { uiText } from './localization'
 import { INTEGRAL_AXES, MathText } from './MathText'
 import { BOOKMARK_GROUP_NAME_MAX, MAIN_GRAPH, type Bookmark, type BookmarkGroup, type Mode, type Row } from './model'
@@ -83,11 +83,12 @@ const needNames = (item: Bookmark): string[] => [...new Set((item.needs ?? []).m
 
 /**
  * The bookmark list, in place of the expressions while the header's bookmark is on: groups with one level of subgroups
- * and the bookmarks filed in them, like Map's Favorites. A click on a bookmark puts a copy into the focused graph (on the
- * bookmark's view, with the sliders saved with it) and a second click takes it out; the list stays open and ticks the
- * bookmarks the view shown holds. A folder whose bookmarks all belong to one view shows them all at once on a click (and
- * takes them out on the next); a folder that mixes views only opens and closes. Clicking a folder also points
- * Properties → Notes at its notes. Rows drag to another place or group, and the ⋯ button (or a right-click) has the rest.
+ * and the bookmarks filed in them, like Map's Favorites. While it is open the graph shows its bookmark view, never the
+ * expressions: a click on a bookmark shows it there (on the bookmark's view, with the sliders saved with it) and a second
+ * click hides it; the expressions stay as they are and come back when the list closes. A folder whose bookmarks all
+ * belong to one view shows them all at once on a click (and hides them on the next); a folder that mixes views only opens
+ * and closes. Clicking a folder also points Properties → Notes at its notes. Rows drag to another place or group, and the
+ * ⋯ button (or a right-click) has the rest, Copy to expressions among it.
  */
 export const BookmarkList = ({ graph, mode, renaming: initial, close }: { graph: string; mode: Mode; renaming?: string; close: () => void }): ReactElement => {
   const store = getStore()
@@ -112,7 +113,7 @@ export const BookmarkList = ({ graph, mode, renaming: initial, close }: { graph:
   }
   // A click puts the bookmark into the focused graph or takes it out again; the list stays open, and the row shows whether
   // the graph holds it.
-  const toggleInGraph = (item: Bookmark): void => { store.toggleBookmarkInGraph(graph, item.id) }
+  const toggleShown = (item: Bookmark): void => { store.toggleBookmarkShown(graph, item.id) }
   /** Opens Properties on the Notes tab of the focused graph tab, showing a folder's notes. */
   const openNotes = (group: BookmarkGroup): void => {
     store.showFolderNote(group.id)
@@ -191,11 +192,10 @@ export const BookmarkList = ({ graph, mode, renaming: initial, close }: { graph:
     event.preventDefault()
     event.stopPropagation()
     void api.ui.openMenu([
-      store.bookmarkInGraph(graph, item.id)
-        ? item.mode === mode
-          ? { id: 'remove', label: uiText('bookmarks.removeFromGraph'), icon: <X />, onSelect: () => toggleInGraph(item) }
-          : { id: 'show', label: uiText('bookmarks.showInGraph'), icon: <Check />, onSelect: () => toggleInGraph(item) }
-        : { id: 'insert', label: uiText('bookmarks.insert'), icon: <Plus />, onSelect: () => toggleInGraph(item) },
+      store.bookmarkShown(graph, item.id)
+        ? { id: 'hide', label: uiText('bookmarks.hide'), icon: <EyeOff />, onSelect: () => toggleShown(item) }
+        : { id: 'show', label: uiText('bookmarks.show'), icon: <Eye />, onSelect: () => toggleShown(item) },
+      { id: 'copy', label: uiText('bookmarks.toExpressions', { view: uiText(`mode.${item.mode}`) }), icon: <CopyPlus />, onSelect: () => { store.copyBookmarkToExpressions(graph, item.id) } },
       { id: 'move', label: uiText('bookmarks.move'), icon: <FolderIcon />, enabled: groups.length > 0, submenu: moveMenu(item) },
       { type: 'separator' },
       { id: 'delete', label: uiText('bookmarks.delete'), icon: <Trash />, danger: true, onSelect: () => store.deleteBookmark(item.id) }
@@ -224,18 +224,17 @@ export const BookmarkList = ({ graph, mode, renaming: initial, close }: { graph:
     const view = viewOf(item.mode)
     const ViewIcon = view.icon
     const viewName = uiText(`mode.${item.mode}`)
-    const held = store.bookmarkInGraph(graph, item.id)
-    // Ticked only while the view shown holds it, so ticks never stand on two views at once.
-    const selected = held && item.mode === mode
+    // Ticked only while the bookmark view shows it on the view it is on, so ticks never stand on two views at once.
+    const selected = store.bookmarkShown(graph, item.id)
     const name = item.row.table ? uiText('bookmarks.table', { count: item.row.table.cells.length }) : item.row.text
-    const hint = uiText(item.mode === mode ? (held ? 'bookmarks.hintRemove' : 'bookmarks.hintAdd') : held ? 'bookmarks.hintShow' : 'bookmarks.hintAddView', { view: viewName })
+    const hint = uiText(selected ? 'bookmarks.hintRemove' : item.mode === mode ? 'bookmarks.hintAdd' : 'bookmarks.hintAddView', { view: viewName })
     const needs = needNames(item)
     return (
       <div key={item.id} className={`grapher-bookmark-row${selected ? ' selected' : ''}${markClass(`bookmark:${item.id}`)}`} data-bookmark={item.id}
         style={{ ['--bookmark-depth' as string]: depth }} role="button" tabIndex={0} aria-pressed={selected}
         aria-label={uiText('bookmarks.itemNamed', { name })} {...api.ui.tooltip(hint)}
-        onClick={(event) => { settle(event); if (event.detail < 2) toggleInGraph(item) }}
-        onKeyDown={(event) => { if (event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); toggleInGraph(item) } }}
+        onClick={(event) => { settle(event); if (event.detail < 2) toggleShown(item) }}
+        onKeyDown={(event) => { if (event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); toggleShown(item) } }}
         onContextMenu={(event) => bookmarkMenuFor(event, item)}
         {...dragProps('bookmark', item.id)} {...dropProps('bookmark', item.id)}>
         <span className="grapher-bookmark-slot" />
@@ -257,11 +256,11 @@ export const BookmarkList = ({ graph, mode, renaming: initial, close }: { graph:
     }
     // A one-view folder shows (or hides) all of its bookmarks; a folder that mixes views only opens and closes.
     const only = folderMode(bookmarks, group.id)
-    const shown = only !== null && store.folderInGraph(graph, group.id)
+    const shown = only !== null && store.folderShown(graph, group.id)
     const activate = (): void => {
       if (only === null) { fold(); return }
       store.showFolderNote(group.id)
-      store.toggleFolderInGraph(graph, group.id)
+      store.toggleFolderShown(graph, group.id)
     }
     const OnlyIcon = only ? viewOf(only).icon : null
     const onlyName = only ? uiText(`mode.${only}`) : ''

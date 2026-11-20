@@ -5,8 +5,8 @@ import { NOTICE_SECONDS, onExportNotice, registerExporter, renderPng, renderSvg,
 import { MARKER, type Marker, type PlotEngine, type RowAnalysis, type SamplePath, type Viewport } from './engine'
 import { Fit, Minus, Plus } from './icons'
 import { uiText } from './localization'
-import { MAIN_GRAPH, graphOf, graphIdOf, unitsOf, type AxisUnits, type Row } from './model'
-import { cameraKey, getStore, useGrapher } from './store'
+import { MAIN_GRAPH, graphIdOf, unitsOf, type AxisUnits, type Row } from './model'
+import { getStore, useGrapher } from './store'
 import { noteCanvas } from './details'
 import { runFlow } from './animate'
 import { SpaceCanvas } from './Space'
@@ -63,15 +63,16 @@ interface CanvasProps {
   engine: PlotEngine | null
   /** The graph (tab) this canvas draws; each keeps its own view per sheet. */
   graph: string
+  /** The camera slot (`graph:mode`, or the bookmark view's own). */
+  slot: string
 }
 
 /**
  * The graph: drag to pan, scroll or pinch to zoom about the pointer, hover a graph to trace it. Sampling runs
  * in the Rust kernel whenever the view or the rows change; drawing reads colours from the theme each frame.
  */
-export const GraphCanvas = ({ view: plane, units, rows, analyses, engine, graph }: CanvasProps): ReactElement => {
+export const GraphCanvas = ({ view: plane, units, rows, analyses, engine, graph, slot }: CanvasProps): ReactElement => {
   const mode = plane.id
-  const slot = cameraKey(graph, mode)
   const store = getStore()
   const wrapRef = React.useRef<HTMLDivElement>(null)
   const canvasRef = React.useRef<HTMLCanvasElement>(null)
@@ -449,11 +450,14 @@ export const GraphCanvas = ({ view: plane, units, rows, analyses, engine, graph 
 export const GraphTab = ({ instanceId }: { instanceId?: string }): ReactElement => {
   const tab = instanceId || MAIN_GRAPH
   const { loaded, document, engine, problems } = useGrapher()
-  React.useEffect(() => { if (loaded) getStore().ensureGraph(tab) }, [loaded, tab])
-  // The tab shows its own graph (or, for a tab from before, the graph it was pointed at).
+  const store = getStore()
+  React.useEffect(() => { if (loaded) store.ensureGraph(tab) }, [loaded, tab])
+  // The tab shows its own graph (or, for a tab from before, the graph it was pointed at); while the bookmark list is
+  // open, that graph's bookmark view instead of its expressions.
   const id = graphIdOf(document, tab)
-  const graph = graphOf(document, id)
+  const graph = store.shownGraph(id)
   const mode = graph.mode
+  const slot = store.shownSlot(id, mode)
   const view = viewOf(mode)
   const rows = graph.sheets[mode]
   const analyses = React.useMemo(() => (engine ? engine.analyze(mode, rows) : []), [engine, mode, rows])
@@ -475,7 +479,7 @@ export const GraphTab = ({ instanceId }: { instanceId?: string }): ReactElement 
       </div>
       {engineProblem ? <p role="alert" className="grapher-alert">{uiText('problem.engine', { message: engineProblem.message })}</p> : null}
       <div className="grapher-stage">
-        {view.canvas === 'space' ? <SpaceCanvas view={view} rows={rows} engine={engine} graph={id} units={unitsOf(graph, mode)} /> : <GraphCanvas key={view.id} view={view} units={unitsOf(graph, mode)} rows={rows} analyses={analyses} engine={engine} graph={id} />}
+        {view.canvas === 'space' ? <SpaceCanvas key={slot} view={view} rows={rows} engine={engine} graph={id} slot={slot} units={unitsOf(graph, mode)} /> : <GraphCanvas key={slot} view={view} units={unitsOf(graph, mode)} rows={rows} analyses={analyses} engine={engine} graph={id} slot={slot} />}
       </div>
       {notice ? <p className={`grapher-export-notice${notice.ok ? '' : ' grapher-export-failed'}`} role="status">{notice.text}</p> : null}
     </div>

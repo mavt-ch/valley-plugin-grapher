@@ -167,8 +167,7 @@ const ViewButton = ({ mode, open, toggle }: { mode: Mode; open: boolean; toggle:
 }
 
 /** Every view as a full-width choice in place of the expressions; ⌘-click opens the view as a new graph in its own tab. */
-const ViewList = ({ graph, mode, close }: { graph: string; mode: Mode; close: () => void }): ReactElement => {
-  const store = getStore()
+const ViewList = ({ mode, pick, close }: { mode: Mode; pick: (mode: Mode) => void; close: () => void }): ReactElement => {
   const listRef = React.useRef<HTMLDivElement>(null)
   React.useEffect(() => { listRef.current?.querySelector<HTMLButtonElement>('[aria-checked="true"]')?.focus() }, [])
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
@@ -197,7 +196,7 @@ const ViewList = ({ graph, mode, close }: { graph: string; mode: Mode; close: ()
             className={checked ? 'grapher-view-option active' : 'grapher-view-option'}
             onClick={(event) => {
               if (api.ui.hasModKey(event)) openNewGraph(candidate)
-              else store.setMode(graph, candidate)
+              else pick(candidate)
               close()
             }}
           >
@@ -937,20 +936,30 @@ const BookmarksToggle = ({ open, toggle }: { open: boolean; toggle: () => void }
 /** Left sidebar: the focused graph's view button, axis labels, bookmarks and open button in the 38px header, then its expressions. */
 export const Sidebar = (): ReactElement => {
   const store = getStore()
-  const { loaded, document, active, tab, engine, problems } = useGrapher()
+  const { loaded, document, active, tab, engine, problems, bookmarksOpen } = useGrapher()
   const graph = graphOf(document, active)
-  const mode = graph.mode
-  const rows = graph.sheets[mode]
+  // The expressions' view, or, while the bookmark list is open, the bookmark view's own: the two never mix.
+  const mode = bookmarksOpen ? store.bookmarkView(active).mode : graph.mode
+  const rows = graph.sheets[graph.mode]
   const units = unitsOf(graph, mode)
   const [choosing, setChoosing] = React.useState(false)
-  // The bookmark list stays open across tabs: a bookmark is added to whichever graph is focused.
-  const [bookmarking, setBookmarking] = React.useState<{ renaming?: string } | null>(null)
+  // The bookmark list stays open across tabs; each graph shows its own bookmark view meanwhile.
+  const [renaming, setRenaming] = React.useState<string | undefined>(undefined)
+  const bookmarking = bookmarksOpen ? { renaming } : null
+  const setBookmarking = (value: { renaming?: string } | null): void => {
+    setRenaming(value?.renaming)
+    store.setBookmarksOpen(value !== null)
+  }
   React.useEffect(() => setChoosing(false), [active])
   const showBookmarks = (renaming?: string): void => {
     setChoosing(false)
     setBookmarking(renaming ? { renaming } : {})
   }
-  const analyses = React.useMemo(() => (engine ? engine.analyze(mode, rows) : []), [engine, mode, rows])
+  const pickView = (next: Mode): void => {
+    if (bookmarksOpen) store.setBookmarkViewMode(active, next)
+    else store.setMode(active, next)
+  }
+  const analyses = React.useMemo(() => (engine ? engine.analyze(graph.mode, rows) : []), [engine, graph.mode, rows])
   const editRow = (id: string) => (change: (row: Row) => Row): void => {
     store.updateRows(active, mode, (current) => current.map((row) => (row.id === id ? change(row) : row)))
   }
@@ -1022,7 +1031,7 @@ export const Sidebar = (): ReactElement => {
   return (
     <div className="grapher-panel">
       <div className="panel-header grapher-header">
-        <ViewButton mode={mode} open={choosing} toggle={() => { setBookmarking(null); setChoosing((open) => !open) }} />
+        <ViewButton mode={mode} open={choosing} toggle={() => setChoosing((open) => !open)} />
         {!choosing ? <UnitsSwitch graph={active} mode={mode} units={units} /> : null}
         {!choosing && loaded ? <BookmarksToggle open={bookmarking !== null} toggle={() => (bookmarking ? setBookmarking(null) : showBookmarks())} /> : null}
         <button
@@ -1041,7 +1050,7 @@ export const Sidebar = (): ReactElement => {
         <p key={problem.key} role="alert" className="grapher-alert">{uiText(problem.key, { message: problem.message })}</p>
       ))}
       {loaded && choosing ? (
-        <ViewList graph={active} mode={mode} close={() => setChoosing(false)} />
+        <ViewList mode={mode} pick={pickView} close={() => setChoosing(false)} />
       ) : loaded && bookmarking ? (
         <BookmarkList graph={active} mode={mode} renaming={bookmarking.renaming} close={() => setBookmarking(null)} />
       ) : loaded ? (

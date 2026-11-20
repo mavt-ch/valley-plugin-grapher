@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { createRow, defaultDocument, moveRow, normalizeDocument, unitsOf, withTrailingRow, type Bookmarks, type Row } from '../src/model'
-import { deleteGroup, filedIn, groupCount, moveBookmark, moveGroup, sameExpression } from '../src/bookmarks'
+import { COLORS, createRow, defaultDocument, moveRow, normalizeDocument, readColorOrder, unitsOf, withTrailingRow, type Bookmarks, type Row } from '../src/model'
+import { deleteGroup, definedByText, filedIn, folderMode, groupCount, moveBookmark, moveGroup, sameExpression } from '../src/bookmarks'
 import { parseMath, tokenizeMath } from '../src/MathText'
 import { MODES, viewOf } from '../src/views'
 import { parseBound, sliderText } from '../src/Sidebar'
@@ -268,5 +268,35 @@ describe('slider bounds', () => {
   it('accept partial typing only once it is a number', () => {
     expect(['', '-', '.', '0.', '-.', 'e'].map(parseBound)).toEqual([null, null, null, 0, null, null])
     expect(['0.5', '-3', '−2', '1,5', '.25', '1e3'].map(parseBound)).toEqual([0.5, -3, -2, 1.5, 0.25, 1000])
+  })
+})
+
+describe('saved bookmarks and colours', () => {
+  it('read the definitions saved with a bookmark and the notes of a folder, and drop what is not one', () => {
+    const row = createRow([], 'y = m x + c')
+    const stored = {
+      ...defaultDocument(),
+      bookmarks: {
+        groups: [{ id: 'group-a', name: 'Lines', note: 'Slope form' }, { id: 'group-b', name: 'Empty', note: 7 }],
+        items: [
+          { id: 'b-1', mode: 'cartesian', row, needs: [createRow([], 'm = 2'), createRow([], ''), 'junk', createRow([], 'c = 0')], group: 'group-a' },
+          { id: 'b-2', mode: 'polar', row: createRow([], 'r = 1'), group: 'group-a' }
+        ]
+      }
+    }
+    const read = normalizeDocument(JSON.parse(JSON.stringify(stored))).bookmarks!
+    expect(read.items[0].needs?.map((need) => need.text)).toEqual(['m = 2', 'c = 0'])
+    expect(read.items[1].needs).toBeUndefined()
+    expect(read.groups.map((group) => group.note ?? null)).toEqual(['Slope form', null])
+    expect(folderMode(read, 'group-a')).toBeNull()
+    expect(folderMode({ ...read, items: [read.items[0]] }, 'group-a')).toBe('cartesian')
+    expect(folderMode(read, 'group-b')).toBeNull()
+  })
+
+  it('name definitions from their text and keep only palette ids in the colour order', () => {
+    expect(['m = 1', 'f(x, y) = x y', 'y = 2x', 'r = 2', 'θ0 = 1', 'a == 1'].map((text) => definedByText(createRow([], text)))).toEqual(['m', 'f', null, null, 'θ0', null])
+    expect(readColorOrder(['cyan', 'cyan', 'Red!', 3, 'pink'])).toEqual(['cyan', 'pink'])
+    expect(readColorOrder([])).toEqual([...COLORS])
+    expect(readColorOrder('red')).toEqual([...COLORS])
   })
 })

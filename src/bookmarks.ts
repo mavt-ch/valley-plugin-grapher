@@ -1,4 +1,5 @@
-import { BOOKMARK_GROUP_NAME_MAX, type Bookmark, type BookmarkGroup, type Bookmarks, type Mode, type Row } from './model'
+import type { RowAnalysis } from './engine'
+import { BOOKMARK_GROUP_NAME_MAX, MAX_BOOKMARK_NEEDS, filled, rowId, type Bookmark, type BookmarkGroup, type Bookmarks, type Mode, type Row } from './model'
 
 /** Where a dragged bookmark or group lands: on a row's upper or lower half, inside a group, or at the end of the top level. */
 export type BookmarkDrop =
@@ -141,4 +142,113 @@ export function deleteGroup(bookmarks: Bookmarks, id: string): Bookmarks {
       return moved
     })
   }
+}
+
+/** The bookmarks of a group and of its subgroups, in list order. */
+export function folderItems(bookmarks: Bookmarks, id: string): Bookmark[] {
+  const ids = new Set([id, ...subgroups(bookmarks.groups, id).map((group) => group.id)])
+  return bookmarks.items.filter((item) => item.group !== undefined && ids.has(item.group))
+}
+
+/** The view every bookmark of a folder (subfolders included) belongs to, or null when the folder is empty or mixes views:
+ * only a one-view folder shows all of its bookmarks at once. */
+export function folderMode(bookmarks: Bookmarks, id: string): Mode | null {
+  const modes = new Set(folderItems(bookmarks, id).map((item) => item.mode))
+  return modes.size === 1 ? [...modes][0] : null
+}
+
+/** The engine's analysis of rows on one view (`null` before the engine has loaded). */
+export type Analyze = (rows: readonly Row[]) => RowAnalysis[]
+
+/** `name = …` or `name(args) = …` at the start of a row; reserved coordinate names define nothing. */
+const DEFINITION = /^\s*([\p{L}][\p{L}\p{N}_]*)\s*(?:\([^()=]*\))?\s*=(?!=)/u
+const COORDINATES = new Set(['x', 'y', 'z', 'r', 'θ', 't', 'ρ', 'φ', 'w'])
+
+/** The name a row's text defines, read from the text alone (for display, and for a definition that does not evaluate). */
+export function definedByText(row: Row): string | null {
+  const name = row.table ? undefined : DEFINITION.exec(row.text)?.[1]
+  return name && !COORDINATES.has(name) ? name : null
+}
+
+/** The name a definition row gives: a parameter (`m = 1`) or a function (`f(x) = …`). */
+function definedName(row: Row, analysis: RowAnalysis | undefined): string | null {
+  if (analysis && (analysis.kind === 'param' || analysis.kind === 'definition') && analysis.name) return analysis.name
+  return analysis?.kind === 'error' ? definedByText(row) : null
+}
+
+/** Every name the rows define, mapped to the first row that defines it. */
+function definitions(analyze: Analyze, rows: readonly Row[]): Map<string, Row> {
+  const names = new Map<string, Row>()
+  const analyses = analyze(rows)
+  rows.forEach((row, index) => {
+    if (!filled(row)) return
+    const name = definedName(row, analyses[index])
+    if (name && !names.has(name)) names.set(name, row)
+  })
+  return names
+}
+
+const missingNames = (analysis: RowAnalysis): string[] => [...(analysis.error?.missing ?? []), ...(analysis.missing ?? [])]
+
+/**
+ * The definitions an expression reads from its sheet, and the ones those read in turn: for `y = m·x + c` the sliders
+ * `m = …` and `c = …`. They are saved with the bookmark (in sheet order) so it draws on its own wherever it is shown.
+ */
+export function needsOf(analyze: Analyze, rows: readonly Row[], row: Row): Row[] {
+  const names = definitions(analyze, rows)
+  const picked: Row[] = []
+  for (let round = 0; round < MAX_BOOKMARK_NEEDS && picked.length < MAX_BOOKMARK_NEEDS; round++) {
+    const missing = new Set(analyze([row, ...picked]).flatMap(missingNames))
+    const found = [...missing].map((name) => names.get(name)).filter((need): need is Row => need !== undefined && need.id !== row.id && !picked.includes(need))
+    if (!found.length) break
+    picked.push(...found)
+  }
+  const order = new Map(rows.map((entry, index) => [entry.id, index]))
+  return picked
+    .sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0))
+    .slice(0, MAX_BOOKMARK_NEEDS)
+    .map((need) => ({ ...need, hidden: false }))
+}
+
+const holds = (rows: readonly Row[], row: Row): boolean => rows.some((entry) => filled(entry) && sameExpression(entry, row))
+
+/**
+ * A sheet's rows with bookmarks added: each expression the sheet does not hold yet, then the definitions it needs. A
+ * definition whose name the sheet already defines is not added again, so a slider of the graph keeps its value.
+ */
+export function withBookmarks(analyze: Analyze | null, rows: readonly Row[], items: readonly Bookmark[]): Row[] {
+  const next = [...rows]
+  while (next.length && !filled(next[next.length - 1])) next.pop()
+  for (const item of items) {
+    if (!holds(next, item.row)) next.push({ ...item.row, id: rowId(), hidden: false })
+    for (const need of item.needs ?? []) {
+      if (holds(next, need)) continue
+      const name = analyze ? definedName(need, analyze([need])[0]) : definedByText(need)
+      if (name && (analyze ? definitions(analyze, next).has(name) : next.some((entry) => definedByText(entry) === name))) continue
+      next.push({ ...need, id: rowId(), hidden: false })
+    }
+  }
+  return next
+}
+
+/**
+ * A sheet's rows with bookmarks taken out: their expressions, and each saved definition that came with them unless it
+ * was changed (a moved slider) or another row still reads it.
+ */
+export function withoutBookmarks(analyze: Analyze | null, rows: readonly Row[], items: readonly Bookmark[]): Row[] {
+  let next = rows.filter((row) => !(filled(row) && items.some((item) => sameExpression(row, item.row))))
+  if (!analyze) return next
+  for (const need of items.flatMap((item) => item.needs ?? []).reverse()) {
+    const at = next.findIndex((row) => filled(row) && sameExpression(row, need))
+    if (at < 0) continue
+    const name = definedName(need, analyze([need])[0])
+    const candidate = next.filter((_, index) => index !== at)
+    if (name === null || !analyze(candidate).some((analysis) => missingNames(analysis).includes(name))) next = candidate
+  }
+  return next
+}
+
+/** Whether a sheet holds the expression of every one of these bookmarks. */
+export function sheetHolds(rows: readonly Row[], items: readonly Bookmark[]): boolean {
+  return items.length > 0 && items.every((item) => holds(rows, item.row))
 }

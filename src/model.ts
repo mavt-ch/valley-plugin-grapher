@@ -80,6 +80,8 @@ export interface BookmarkGroup {
   parent?: string
   /** Closed in the bookmark list (absent means open). */
   collapsed?: boolean
+  /** The folder's notes, as written (shown in Properties → Notes). */
+  note?: string
 }
 
 /** A saved copy of an expression row and the view it was written for; it stays when the row is deleted from a graph. */
@@ -87,6 +89,9 @@ export interface Bookmark {
   id: string
   mode: Mode
   row: Row
+  /** The definitions the expression reads (sliders such as `m = 1`, functions such as `f(x) = …`), saved with it so
+   * it draws on its own; absent when it reads none. */
+  needs?: Row[]
   /** The group (or subgroup) it is filed in; absent means the top level. */
   group?: string
 }
@@ -98,6 +103,8 @@ export interface Bookmarks {
 }
 
 export const MAX_BOOKMARKS = 500
+/** The most definitions one bookmark keeps. */
+export const MAX_BOOKMARK_NEEDS = 50
 export const MAX_BOOKMARK_GROUPS = 200
 export const BOOKMARK_GROUP_NAME_MAX = 60
 
@@ -132,6 +139,26 @@ export const MAX_GRAPHS = 200
 const LEGACY_TRIG_EXAMPLES = ['sin(x)', 'cos(x)', 'y = A sin(k x)', 'A = 2', 'k = 0.5']
 
 export const COLORS = ['red', 'blue', 'green', 'purple', 'orange', 'magenta', 'cyan'] as const
+/** The most palette colours the colour order keeps. */
+export const MAX_COLORS = 64
+
+let order: readonly string[] = COLORS
+
+/** The palette colour ids new rows take, in order (Settings → Grapher → Colours; the default is {@link COLORS}). */
+export function colorOrder(): readonly string[] {
+  return order
+}
+
+/** Reads a saved colour order: palette ids, each once; anything else (or an empty list) is the default order. */
+export function readColorOrder(value: unknown): string[] {
+  if (!Array.isArray(value)) return [...COLORS]
+  const ids = [...new Set(value.filter((entry): entry is string => typeof entry === 'string' && /^[a-z0-9-]{1,64}$/.test(entry)))].slice(0, MAX_COLORS)
+  return ids.length ? ids : [...COLORS]
+}
+
+export function setColorOrder(value: unknown): void {
+  order = readColorOrder(value)
+}
 export const DEFAULT_SLIDER: Slider = { min: -10, max: 10, step: 0.1 }
 const LIMIT = 4096
 
@@ -144,8 +171,8 @@ export function rowId(): string {
 /** The first palette colour no row uses yet, else the next in turn. */
 export function nextColor(rows: readonly Row[]): string {
   const used = new Set(rows.filter(filled).map((row) => row.color))
-  const free = COLORS.map(paletteRef).find((color) => !used.has(color))
-  return free ?? paletteRef(COLORS[rows.length % COLORS.length])
+  const free = order.map(paletteRef).find((color) => !used.has(color))
+  return free ?? paletteRef(order[rows.length % order.length])
 }
 
 export function createRow(rows: readonly Row[], text = '', range: Partial<Pick<Row, 'from' | 'to' | 'from2' | 'to2' | 'floor'>> = {}): Row {
@@ -352,10 +379,16 @@ export function normalizeBookmarks(value: unknown): Bookmarks | null {
   const seen = new Set<string>()
   for (const entry of Array.isArray(record.groups) ? record.groups : []) {
     if (!entry || typeof entry !== 'object') continue
-    const { id, name, parent, collapsed } = entry as Record<string, unknown>
+    const { id, name, parent, collapsed, note } = entry as Record<string, unknown>
     if (typeof id !== 'string' || !id || id.length > 128 || seen.has(id) || typeof name !== 'string') continue
     seen.add(id)
-    groups.push({ id, name: name.slice(0, BOOKMARK_GROUP_NAME_MAX), ...(typeof parent === 'string' && parent ? { parent } : {}), ...(collapsed === true ? { collapsed: true } : {}) })
+    groups.push({
+      id,
+      name: name.slice(0, BOOKMARK_GROUP_NAME_MAX),
+      ...(typeof parent === 'string' && parent ? { parent } : {}),
+      ...(collapsed === true ? { collapsed: true } : {}),
+      ...(typeof note === 'string' && note ? { note: note.slice(0, MAX_NOTE) } : {})
+    })
     if (groups.length >= MAX_BOOKMARK_GROUPS) break
   }
   const top = new Set(groups.filter((group) => !group.parent).map((group) => group.id))
@@ -369,11 +402,12 @@ export function normalizeBookmarks(value: unknown): Bookmarks | null {
   const ids = new Set<string>()
   for (const entry of Array.isArray(record.items) ? record.items : []) {
     if (!entry || typeof entry !== 'object') continue
-    const { id, mode, row, group } = entry as Record<string, unknown>
+    const { id, mode, row, needs, group } = entry as Record<string, unknown>
     const read = readRows([row])?.[0]
     if (typeof id !== 'string' || !id || id.length > 128 || ids.has(id) || !MODES.includes(mode as Mode) || !read || !filled(read)) continue
     ids.add(id)
-    items.push({ id, mode: mode as Mode, row: { ...read, hidden: false }, ...(typeof group === 'string' && known.has(group) ? { group } : {}) })
+    const definitions = (readRows(Array.isArray(needs) ? needs.slice(0, MAX_BOOKMARK_NEEDS) : []) ?? []).filter(filled).map((need) => ({ ...need, hidden: false }))
+    items.push({ id, mode: mode as Mode, row: { ...read, hidden: false }, ...(definitions.length ? { needs: definitions } : {}), ...(typeof group === 'string' && known.has(group) ? { group } : {}) })
     if (items.length >= MAX_BOOKMARKS) break
   }
   return { groups: tree, items }

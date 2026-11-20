@@ -4,7 +4,7 @@ import { React, api } from './runtime'
 import { uiText } from './localization'
 import { exampleBookmarks } from './bookmarkExamples'
 import { loadPlotEngine, type Camera, type PlotEngine, type Viewport } from './engine'
-import { NO_BOOKMARKS, addGroup, bookmarkId, deleteGroup, filedIn, moveBookmark, moveGroup, sameExpression, type BookmarkDrop } from './bookmarks'
+import { NO_BOOKMARKS, addGroup, bookmarkId, deleteGroup, filedIn, folderItems, folderMode, moveBookmark, moveGroup, needsOf, sameExpression, sheetHolds, withBookmarks, withoutBookmarks, type Analyze, type BookmarkDrop } from './bookmarks'
 import { BOOKMARK_GROUP_NAME_MAX, MAIN_GRAPH, MAX_BOOKMARKS, MAX_BOOKMARK_GROUPS, MAX_GRAPHS, MAX_NOTE, MODES, defaultDocument, filled, defaultGraph, graphIdOf, graphIds, graphOf, normalizeDocument, rowId, withGraph, withTrailingRow, type AxisUnits, type BookmarkGroup, type Bookmarks, type Graph, type GrapherDocument, type Mode, type Row } from './model'
 
 /** The sheets live in `.valley/plugins/data/grapher/graphs.json`. */
@@ -27,6 +27,8 @@ export interface GrapherSnapshot {
   tab: string
   engine: PlotEngine | null
   problems: GrapherProblem[]
+  /** The bookmark folder whose notes Properties → Notes shows (the one clicked last in the open bookmark list), else null. */
+  noteFolder: string | null
 }
 
 const messageOf = (error: unknown): string => (error instanceof Error ? error.message : String(error))
@@ -37,7 +39,7 @@ const messageOf = (error: unknown): string => (error instanceof Error ? error.me
  * document is left untouched until the user repairs or removes it.
  */
 export class GrapherStore {
-  private snapshot: GrapherSnapshot = { loaded: false, document: defaultDocument(), active: MAIN_GRAPH, tab: MAIN_GRAPH, engine: null, problems: [] }
+  private snapshot: GrapherSnapshot = { loaded: false, document: defaultDocument(), active: MAIN_GRAPH, tab: MAIN_GRAPH, engine: null, problems: [], noteFolder: null }
   private readonly listeners = new Set<() => void>()
   private baseline: FileBaseline | null = null
   private written: string | null = null
@@ -300,14 +302,41 @@ export class GrapherStore {
     return this.bookmarks().groups.length < MAX_BOOKMARK_GROUPS
   }
 
-  /** Files a copy of an expression row in `group` (the top level when absent); an identical one already there is kept as it is. */
+  /** The engine's analysis on one view, or null before the engine has loaded. */
+  private analyzer(mode: Mode): Analyze | null {
+    const engine = this.snapshot.engine
+    return engine ? (rows) => engine.analyze(mode, rows) : null
+  }
+
+  /**
+   * Files a copy of an expression row in `group` (the top level when absent), with the definitions it reads from the
+   * focused graph's sheet (its sliders and functions); an identical one already there is kept as it is.
+   */
   addBookmark(mode: Mode, row: Row, group?: string): void {
     const bookmarks = this.bookmarks()
     if (!this.canBookmark() || !filled(row) || filedIn(bookmarks, mode, row).has(group ?? '')) return
     if (group && !bookmarks.groups.some((entry) => entry.id === group)) return
-    const { hidden: _, ...copy } = row
-    const item = { id: bookmarkId('b'), mode, row: { ...copy, hidden: false }, ...(group ? { group } : {}) }
+    const analyze = this.analyzer(mode)
+    const needs = analyze ? needsOf(analyze, this.graph(this.snapshot.active).sheets[mode], row) : []
+    const item = { id: bookmarkId('b'), mode, row: { ...row, hidden: false }, ...(needs.length ? { needs } : {}), ...(group ? { group } : {}) }
     this.setBookmarks({ ...bookmarks, items: [...bookmarks.items, item] })
+  }
+
+  /** The notes of a bookmark folder; saved like any edit, a moment after typing stops. */
+  setBookmarkGroupNote(id: string, text: string): void {
+    const bookmarks = this.bookmarks()
+    const group = bookmarks.groups.find((entry) => entry.id === id)
+    if (!group || (group.note ?? '') === text) return
+    this.setBookmarks({ ...bookmarks, groups: bookmarks.groups.map((entry) => {
+      if (entry.id !== id) return entry
+      const { note: _, ...rest } = entry
+      return text ? { ...rest, note: text.slice(0, MAX_NOTE) } : rest
+    }) })
+  }
+
+  /** Points Properties → Notes at a bookmark folder's notes; null goes back to the graph's notes. */
+  showFolderNote(id: string | null): void {
+    if (this.snapshot.noteFolder !== id) this.update({ noteFolder: id })
   }
 
   /** A new open group (a subgroup under `parent`); returns its id, or null when there is no room. */
@@ -387,22 +416,48 @@ export class GrapherStore {
       this.setMode(graph, item.mode)
       return 'shown'
     }
-    this.updateRows(graph, item.mode, (rows) => rows.filter((row) => !(filled(row) && sameExpression(row, item.row))))
+    const analyze = this.analyzer(item.mode)
+    this.updateRows(graph, item.mode, (rows) => withoutBookmarks(analyze, rows, [item]))
     return 'removed'
   }
 
-  /** Adds a copy of a bookmark to the end of a graph's sheet of the bookmark's view, switching the graph to that view;
-   * returns the new row's id. */
+  /** Adds a copy of a bookmark, with the definitions it needs that the sheet lacks, to the end of a graph's sheet of the
+   * bookmark's view, switching the graph to that view; returns the new row's id. */
   insertBookmark(graph: string, id: string): string | null {
     const item = this.bookmarks().items.find((entry) => entry.id === id)
     if (!item) return null
-    const row = { ...item.row, id: rowId(), hidden: false }
-    this.editGraph(graph, (current) => {
-      const rows = current.sheets[item.mode]
-      const kept = rows.length && !filled(rows[rows.length - 1]) ? rows.slice(0, -1) : rows
-      return { ...current, mode: item.mode, sheets: { ...current.sheets, [item.mode]: withTrailingRow([...kept, row]) } }
-    })
-    return row.id
+    const rows = this.graph(graph).sheets[item.mode]
+    const next = withBookmarks(this.analyzer(item.mode), rows, [item])
+    const added = next.find((row) => !rows.includes(row) && sameExpression(row, item.row))
+    this.editGraph(graph, (current) => ({ ...current, mode: item.mode, sheets: { ...current.sheets, [item.mode]: withTrailingRow(next) } }))
+    return added?.id ?? null
+  }
+
+  /** Whether a graph shows every bookmark of a one-view folder on that view right now. */
+  folderInGraph(graph: string, id: string): boolean {
+    const bookmarks = this.bookmarks()
+    const mode = folderMode(bookmarks, id)
+    const current = this.graph(graph)
+    return mode !== null && current.mode === mode && sheetHolds(current.sheets[mode], folderItems(bookmarks, id))
+  }
+
+  /**
+   * A click on a one-view folder: when the graph shows all of its bookmarks on that view they are taken out again (with
+   * the definitions that came with them); otherwise the missing ones are added and the graph switches to the view. A
+   * folder that mixes views does nothing here (it only opens and closes). Returns what happened.
+   */
+  toggleFolderInGraph(graph: string, id: string): 'added' | 'removed' | null {
+    const bookmarks = this.bookmarks()
+    const mode = folderMode(bookmarks, id)
+    if (mode === null) return null
+    const items = folderItems(bookmarks, id)
+    const analyze = this.analyzer(mode)
+    if (this.folderInGraph(graph, id)) {
+      this.updateRows(graph, mode, (rows) => withoutBookmarks(analyze, rows, items))
+      return 'removed'
+    }
+    this.editGraph(graph, (current) => ({ ...current, mode, sheets: { ...current.sheets, [mode]: withTrailingRow(withBookmarks(analyze, current.sheets[mode], items)) } }))
+    return 'added'
   }
 
   /** Schedules the save of quiet edits. */

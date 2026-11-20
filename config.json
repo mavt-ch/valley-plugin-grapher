@@ -6,6 +6,7 @@
     "left_sidebar": "grapher.sidebar",
     "main_workspace": "grapher.graph"
   },
+  "settingsView": "grapher.settings",
   "slotDefaults": {
     "left_sidebar": {
       "order": 95

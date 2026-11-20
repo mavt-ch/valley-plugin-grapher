@@ -151,8 +151,21 @@ export const More = (p: IconProps): ReactElement => (
   <Svg {...p}><circle cx="5" cy="12" r="1" /><circle cx="12" cy="12" r="1" /><circle cx="19" cy="12" r="1" /></Svg>
 )
 
+/** Lucide `folder`: a closed folder, as in Map's favourites. */
 export const FolderIcon = (p: IconProps): ReactElement => (
-  <Svg {...p}><path d="M3.5 7a1.5 1.5 0 0 1 1.5-1.5h4l2 2.5h8a1.5 1.5 0 0 1 1.5 1.5v8A1.5 1.5 0 0 1 19 19H5a1.5 1.5 0 0 1-1.5-1.5z" /></Svg>
+  <Svg {...p}><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z" /></Svg>
+)
+
+/** Lucide `folder-open`: an open folder, as in Map's favourites. */
+export const FolderOpen = (p: IconProps): ReactElement => (
+  <Svg {...p}><path d="m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2" /></Svg>
+)
+
+/** Material Icons `edit_note` (Google, Apache-2.0), filled: a folder with notes. */
+export const NoteIcon = ({ className }: IconProps): ReactElement => (
+  <svg className={className} width="1em" height="1em" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+    <path d="M3 10h11v2H3zm0-2h11V6H3zm0 8h7v-2H3zm15.01-3.13.71-.71a.996.996 0 0 1 1.41 0l.71.71c.39.39.39 1.02 0 1.41l-.71.71zm-.71.71-5.3 5.3V21h2.12l5.3-5.3z" />
+  </svg>
 )
 
 export const FolderPlus = (p: IconProps): ReactElement => (

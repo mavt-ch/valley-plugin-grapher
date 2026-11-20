@@ -7,9 +7,10 @@ import { Bookmark, BookmarkFilled, Check, ChevronDown, Eye, EyeOff, Grip, Pause,
 import { SliderAnimator, snap, startMotion } from './animate'
 import { uiText } from './localization'
 import { INTEGRAL_AXES, MathText } from './MathText'
-import { ANIMATION_SPEEDS, COLORS, DEFAULT_ANIMATION, DEFAULT_LEVELS, MAIN_GRAPH, MAX_LEVELS, MODES, createRow, createTable, filled, graphOf, moveRow, rangeVariable, unitsOf, type Animation, type AxisUnits, type Mode, type Row, type Table } from './model'
+import { ANIMATION_SPEEDS, DEFAULT_ANIMATION, colorOrder, DEFAULT_LEVELS, MAIN_GRAPH, MAX_LEVELS, MODES, createRow, createTable, filled, graphOf, moveRow, rangeVariable, unitsOf, type Animation, type AxisUnits, type Mode, type Row, type Table } from './model'
 import { getStore, useGrapher } from './store'
 import { BookmarkList, bookmarkMenu } from './BookmarkList'
+import { colorName } from './Settings'
 import { notePlaying } from './details'
 import { MAX_TABLE_ROWS, looksTabular, parseTable, type Cells, type PastedTable } from './table'
 import { formatComplex, formatLinear, formatNumber, formatPolar } from './ticks'
@@ -803,11 +804,11 @@ const ExpressionRow = (props: RowProps): ReactElement => {
       ...(trailing || !filled(row) ? [] : [bookmarkMenu(mode, row, props.showBookmarks), { type: 'separator' } as UiMenuItem]),
       { id: 'visibility', label: uiText(row.hidden ? 'row.show' : 'row.hide'), icon: row.hidden ? <Eye /> : <EyeOff />, onSelect: () => edit((current) => ({ ...current, hidden: !current.hidden })) },
       { type: 'separator' },
-      ...COLORS.map((id): UiMenuItem => ({
+      ...colorOrder().map((id): UiMenuItem => ({
         id: `color:${id}`,
         type: 'radio',
         checked: row.color === paletteRef(id),
-        label: uiText(`color.${id}`),
+        label: colorName(id),
         icon: <span className="grapher-menu-swatch" style={{ background: paletteCssValue(paletteRef(id)) }} />,
         onSelect: () => edit((current) => ({ ...current, color: paletteRef(id) }))
       })),

@@ -2,11 +2,12 @@ import { React, api } from './runtime'
 import type { DragEvent, MouseEvent, ReactElement } from 'react'
 import { paletteCssValue } from '@valley/plugin-sdk/palette'
 import type { UiMenuItem } from '@valley/plugin-sdk'
-import { bookmarksIn, filedIn, groupCount, sameExpression, subgroups, type BookmarkDrop } from './bookmarks'
-import { Bookmark as BookmarkIcon, Check, ChevronDown, CollapseAll, ExpandAll, FolderIcon, FolderPlus, More, Pencil, Plus, TableIcon, Trash, X } from './icons'
+import { bookmarksIn, definedByText, filedIn, folderMode, groupCount, sameExpression, subgroups, type BookmarkDrop } from './bookmarks'
+import { Bookmark as BookmarkIcon, Check, ChevronDown, CollapseAll, ExpandAll, FolderIcon, FolderOpen, FolderPlus, More, NoteIcon, Pencil, Plus, TableIcon, Trash, X } from './icons'
 import { uiText } from './localization'
 import { INTEGRAL_AXES, MathText } from './MathText'
-import { BOOKMARK_GROUP_NAME_MAX, type Bookmark, type BookmarkGroup, type Mode, type Row } from './model'
+import { BOOKMARK_GROUP_NAME_MAX, MAIN_GRAPH, type Bookmark, type BookmarkGroup, type Mode, type Row } from './model'
+import { NOTES_SEGMENT } from './Notes'
 import { getStore, useGrapher } from './store'
 import { viewOf } from './views'
 
@@ -77,16 +78,23 @@ const BookmarkContent = ({ item }: { item: Bookmark }): ReactElement => {
   return <MathText text={item.row.text} otherwise={uiText('math.otherwise')} axes={INTEGRAL_AXES[item.mode]} />
 }
 
+/** The names of the sliders and functions saved with a bookmark, shown after its expression. */
+const needNames = (item: Bookmark): string[] => [...new Set((item.needs ?? []).map(definedByText).filter((name): name is string => name !== null))]
+
 /**
  * The bookmark list, in place of the expressions while the header's bookmark is on: groups with one level of subgroups
  * and the bookmarks filed in them, like Map's Favorites. A click on a bookmark puts a copy into the focused graph (on the
- * bookmark's view) and a second click takes it out; the list stays open and ticks every bookmark the graph holds. Rows
- * drag to another place or group, and the ⋯ button (or a right-click) has the rest.
+ * bookmark's view, with the sliders saved with it) and a second click takes it out; the list stays open and ticks the
+ * bookmarks the view shown holds. A folder whose bookmarks all belong to one view shows them all at once on a click (and
+ * takes them out on the next); a folder that mixes views only opens and closes. Clicking a folder also points
+ * Properties → Notes at its notes. Rows drag to another place or group, and the ⋯ button (or a right-click) has the rest.
  */
 export const BookmarkList = ({ graph, mode, renaming: initial, close }: { graph: string; mode: Mode; renaming?: string; close: () => void }): ReactElement => {
   const store = getStore()
-  useGrapher()
+  const { tab, active } = useGrapher()
   const bookmarks = store.bookmarks()
+  // Properties → Notes follows the folder clicked last only while the list is open.
+  React.useEffect(() => () => store.showFolderNote(null), [store])
   const { groups, items } = bookmarks
   const [renaming, setRenaming] = React.useState<string | null>(initial ?? null)
   React.useEffect(() => { if (initial) setRenaming(initial) }, [initial])
@@ -105,6 +113,13 @@ export const BookmarkList = ({ graph, mode, renaming: initial, close }: { graph:
   // A click puts the bookmark into the focused graph or takes it out again; the list stays open, and the row shows whether
   // the graph holds it.
   const toggleInGraph = (item: Bookmark): void => { store.toggleBookmarkInGraph(graph, item.id) }
+  /** Opens Properties on the Notes tab of the focused graph tab, showing a folder's notes. */
+  const openNotes = (group: BookmarkGroup): void => {
+    store.showFolderNote(group.id)
+    api.workspace.showProperties(tab === MAIN_GRAPH ? store.forkGraph(active) : tab, { segmentId: NOTES_SEGMENT })
+  }
+  /** A mouse click leaves no focus ring behind; keyboard focus keeps it. */
+  const settle = (event: MouseEvent<HTMLElement>): void => { if (event.detail > 0) event.currentTarget.blur() }
 
   // ---- drag and drop ----
   const clear = (): void => { dragged.current = null; pending.current = null; setMark(null) }
@@ -192,6 +207,7 @@ export const BookmarkList = ({ graph, mode, renaming: initial, close }: { graph:
     void api.ui.openMenu([
       ...(!group.parent ? [{ id: 'subgroup', label: uiText('bookmarks.addSubgroup'), icon: <FolderPlus />, enabled: store.canAddBookmarkGroup(), onSelect: () => addGroup(group.id) }] : []),
       { id: 'rename', label: uiText('bookmarks.rename'), icon: <Pencil />, onSelect: () => setRenaming(group.id) },
+      { id: 'notes', label: uiText('bookmarks.notes'), icon: <NoteIcon />, onSelect: () => openNotes(group) },
       { type: 'separator' },
       { id: 'delete', label: uiText('bookmarks.deleteGroup'), description: uiText('bookmarks.deleteGroupHint'), icon: <Trash />, danger: true, onSelect: () => store.deleteBookmarkGroup(group.id) }
     ], menuTarget(event)).catch(() => {})
@@ -208,20 +224,24 @@ export const BookmarkList = ({ graph, mode, renaming: initial, close }: { graph:
     const view = viewOf(item.mode)
     const ViewIcon = view.icon
     const viewName = uiText(`mode.${item.mode}`)
-    const selected = store.bookmarkInGraph(graph, item.id)
+    const held = store.bookmarkInGraph(graph, item.id)
+    // Ticked only while the view shown holds it, so ticks never stand on two views at once.
+    const selected = held && item.mode === mode
     const name = item.row.table ? uiText('bookmarks.table', { count: item.row.table.cells.length }) : item.row.text
-    const hint = uiText(!selected ? 'bookmarks.hintAdd' : item.mode === mode ? 'bookmarks.hintRemove' : 'bookmarks.hintShow', { view: viewName })
+    const hint = uiText(item.mode === mode ? (held ? 'bookmarks.hintRemove' : 'bookmarks.hintAdd') : held ? 'bookmarks.hintShow' : 'bookmarks.hintAddView', { view: viewName })
+    const needs = needNames(item)
     return (
       <div key={item.id} className={`grapher-bookmark-row${selected ? ' selected' : ''}${markClass(`bookmark:${item.id}`)}`} data-bookmark={item.id}
         style={{ ['--bookmark-depth' as string]: depth }} role="button" tabIndex={0} aria-pressed={selected}
         aria-label={uiText('bookmarks.itemNamed', { name })} {...api.ui.tooltip(hint)}
-        onClick={() => toggleInGraph(item)}
+        onClick={(event) => { settle(event); if (event.detail < 2) toggleInGraph(item) }}
         onKeyDown={(event) => { if (event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); toggleInGraph(item) } }}
         onContextMenu={(event) => bookmarkMenuFor(event, item)}
         {...dragProps('bookmark', item.id)} {...dropProps('bookmark', item.id)}>
         <span className="grapher-bookmark-slot" />
         <span className="grapher-bookmark-swatch" style={{ ['--swatch' as string]: paletteCssValue(item.row.color) }} aria-hidden />
         <span className="grapher-bookmark-math"><BookmarkContent item={item} /></span>
+        {needs.length ? <span className="grapher-bookmark-needs" {...api.ui.tooltip(uiText('bookmarks.needs', { names: needs.join(', ') }))}>{needs.join(' · ')}</span> : null}
         {selected ? <Check className="grapher-bookmark-check" /> : null}
         <span className="grapher-bookmark-view" role="img" aria-label={viewName} data-other={item.mode !== mode || undefined}><ViewIcon /></span>
         {moreButton(uiText('bookmarks.more'), (event) => bookmarkMenuFor(event, item))}
@@ -231,17 +251,42 @@ export const BookmarkList = ({ graph, mode, renaming: initial, close }: { graph:
   const groupRows = (group: BookmarkGroup, depth: number): ReactElement[] => {
     const folded = group.collapsed === true
     const name = group.name || uiText('bookmarks.unnamed')
-    const toggle = (): void => store.setBookmarkGroupCollapsed(group.id, !folded)
+    const fold = (): void => {
+      store.showFolderNote(group.id)
+      store.setBookmarkGroupCollapsed(group.id, !folded)
+    }
+    // A one-view folder shows (or hides) all of its bookmarks; a folder that mixes views only opens and closes.
+    const only = folderMode(bookmarks, group.id)
+    const shown = only !== null && store.folderInGraph(graph, group.id)
+    const activate = (): void => {
+      if (only === null) { fold(); return }
+      store.showFolderNote(group.id)
+      store.toggleFolderInGraph(graph, group.id)
+    }
+    const OnlyIcon = only ? viewOf(only).icon : null
+    const onlyName = only ? uiText(`mode.${only}`) : ''
+    const hint = only === null ? undefined : uiText(shown ? 'bookmarks.folderHintRemove' : only === mode ? 'bookmarks.folderHintAdd' : 'bookmarks.folderHintAddView', { view: onlyName })
     const row = (
       <div key={group.id} className={`grapher-bookmark-row grapher-bookmark-group${markClass(`group:${group.id}`)}`} data-group={group.id}
+        data-view={only ?? undefined}
         style={{ ['--bookmark-depth' as string]: depth }} role="button" tabIndex={0} aria-expanded={!folded}
-        onClick={() => { if (renaming !== group.id) toggle() }}
-        onKeyDown={(event) => { if (event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); toggle() } }}
-        onDoubleClick={() => setRenaming(group.id)}
+        aria-pressed={only === null ? undefined : shown}
+        aria-label={uiText(only === null ? 'bookmarks.folderNamed' : 'bookmarks.folderNamedView', { name, view: onlyName })}
+        {...(hint ? api.ui.tooltip(hint) : {})}
+        onClick={(event) => { settle(event); if (renaming !== group.id && event.detail < 2) activate() }}
+        onKeyDown={(event) => {
+          if (event.target !== event.currentTarget) return
+          if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); activate() }
+          else if ((event.key === 'ArrowRight' && folded) || (event.key === 'ArrowLeft' && !folded)) { event.preventDefault(); fold() }
+        }}
         onContextMenu={(event) => groupMenuFor(event, group)}
         {...dragProps('group', group.id)} {...dropProps('group', group.id)}>
-        <span className="grapher-bookmark-slot grapher-bookmark-chevron" data-open={!folded || undefined}><ChevronDown /></span>
-        <FolderIcon className="grapher-bookmark-folder" />
+        <button type="button" className="grapher-bookmark-slot grapher-bookmark-chevron" data-open={!folded || undefined} tabIndex={-1}
+          aria-label={uiText(folded ? 'bookmarks.openFolder' : 'bookmarks.closeFolder', { name })}
+          onClick={(event) => { event.stopPropagation(); settle(event); fold() }} onDoubleClick={(event) => event.stopPropagation()}>
+          <ChevronDown />
+        </button>
+        {folded ? <FolderIcon className="grapher-bookmark-folder" /> : <FolderOpen className="grapher-bookmark-folder" />}
         {renaming === group.id ? (
           <input className="grapher-bookmark-name-field" autoFocus defaultValue={group.name} maxLength={BOOKMARK_GROUP_NAME_MAX} aria-label={uiText('bookmarks.groupName')}
             spellCheck={false} autoComplete="off"
@@ -256,6 +301,9 @@ export const BookmarkList = ({ graph, mode, renaming: initial, close }: { graph:
             }} />
         ) : <span className="grapher-bookmark-name">{name}</span>}
         {renaming !== group.id ? <>
+          {group.note ? <span className="grapher-bookmark-note" role="img" aria-label={uiText('bookmarks.hasNotes')} {...api.ui.tooltip(uiText('bookmarks.hasNotes'))}><NoteIcon /></span> : null}
+          {shown ? <Check className="grapher-bookmark-check" /> : null}
+          {OnlyIcon ? <span className="grapher-bookmark-view" role="img" aria-label={onlyName} data-other={only !== mode || undefined}><OnlyIcon /></span> : null}
           <span className="grapher-bookmark-count">{groupCount(bookmarks, group.id)}</span>
           {moreButton(uiText('bookmarks.groupMore', { name }), (event) => groupMenuFor(event, group))}
         </> : null}

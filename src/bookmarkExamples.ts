@@ -1,6 +1,6 @@
 import { paletteRef } from '@valley/plugin-sdk/palette'
 import { bookmarkId } from './bookmarks'
-import { COLORS, createRow, type Bookmark, type BookmarkGroup, type Bookmarks, type Mode, type Row } from './model'
+import { colorOrder, createRow, type Bookmark, type BookmarkGroup, type Bookmarks, type Mode, type Row } from './model'
 
 /** One example: its text, view and the row fields it needs (ranges, floor curves, flowing arrows). */
 type Example = [mode: Mode, text: string, fields?: Partial<Pick<Row, 'from' | 'to' | 'from2' | 'to2' | 'floor' | 'flow'>>]
@@ -57,7 +57,7 @@ export function exampleBookmarks(name: (key: string) => string): Bookmarks {
   const items: Bookmark[] = []
   const add = (examples: Example[], group: string): void => examples.forEach(([mode, text, fields = {}], index) => {
     const { flow, ...range } = fields
-    const row: Row = { ...createRow([], text, range), color: paletteRef(COLORS[index % COLORS.length]), ...(flow ? { flow: true } : {}) }
+    const row: Row = { ...createRow([], text, range), color: paletteRef(colorOrder()[index % colorOrder().length]), ...(flow ? { flow: true } : {}) }
     items.push({ id: bookmarkId('b'), mode, row, group })
   })
   for (const entry of EXAMPLES) {

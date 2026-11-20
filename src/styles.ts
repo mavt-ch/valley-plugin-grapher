@@ -93,6 +93,7 @@ const CSS = `
 .grapher-notes-action:hover { background:var(--hover-bg); color:var(--text-color); }
 .grapher-notes-bar { display:flex; align-items:center; gap:6px; flex:0 0 var(--app-bar-height); height:var(--app-bar-height);
   box-sizing:border-box; padding:0 var(--space-2) 0 var(--space-3); border-bottom:1px solid var(--border-light); }
+.grapher-notes-scope .grapher-unit { font-family:inherit; font-size:0.75rem; }
 .grapher-notes-icon { width:15px; height:15px; flex:0 0 15px; color:var(--text-secondary); }
 .grapher-notes-title { min-width:0; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; font-size:var(--smaller-font-size); font-weight:500; color:var(--text-color); }
 .grapher-notes-field, .grapher-notes-field:is(:hover, :focus, :focus-visible) { flex:1 1 auto; min-height:0; width:100%; box-sizing:border-box; margin:0;
@@ -229,10 +230,13 @@ button.grapher-handle:hover { color:var(--text-color); }
 .grapher-bookmark-tree { position:relative; flex:1 1 auto; min-height:40px; overflow-y:auto; padding:4px 0 24px; }
 .grapher-bookmark-row { position:relative; display:flex; align-items:center; gap:8px; min-width:0; min-height:32px; box-sizing:border-box;
   padding:2px 6px 2px calc(8px + var(--bookmark-depth, 0) * 16px); cursor:pointer; color:var(--text-color);
-  transition:background-color var(--duration-fast) var(--ease-out); }
+  -webkit-user-select:none; user-select:none; transition:background-color var(--duration-fast) var(--ease-out); }
+.grapher-bookmark-name-field { -webkit-user-select:text; user-select:text; }
 .grapher-bookmark-row:hover { background:var(--hover-bg); }
 .grapher-bookmark-row:focus-visible { outline:2px solid var(--accent-color); outline-offset:-2px; }
 .grapher-bookmark-slot { display:inline-flex; align-items:center; justify-content:center; flex:0 0 14px; width:14px; height:14px; margin-right:-4px; color:var(--text-tertiary); }
+button.grapher-bookmark-chevron { padding:0; border:none; border-radius:var(--radius-sm); background:transparent; font:inherit; cursor:pointer; }
+button.grapher-bookmark-chevron:hover { color:var(--text-color); }
 .grapher-bookmark-slot svg { width:12px; height:12px; transform:rotate(-90deg); transition:transform var(--duration-fast) var(--ease-out); }
 .grapher-bookmark-chevron[data-open] svg { transform:none; }
 .grapher-bookmark-folder { flex:0 0 15px; width:15px; height:15px; color:var(--text-secondary); }
@@ -241,9 +245,7 @@ button.grapher-handle:hover { color:var(--text-color); }
   box-shadow:none; background:transparent; color:var(--text-color); font:inherit; font-size:0.8125rem; font-weight:500; }
 .grapher-bookmark-count { flex:0 0 auto; font-size:0.6875rem; font-variant-numeric:tabular-nums; color:var(--text-tertiary); }
 .grapher-bookmark-swatch { flex:0 0 10px; width:10px; height:10px; box-sizing:border-box; border-radius:50%; border:2px solid var(--swatch); background:transparent; }
-/* A bookmark the focused graph holds: filled swatch, accent tint across the row and a tick. */
-.grapher-bookmark-row.selected { background:var(--accent-tint-bg); }
-.grapher-bookmark-row.selected:hover { background:color-mix(in srgb, var(--accent-tint-bg) 80%, var(--hover-bg)); }
+/* A bookmark the view shown holds: a filled swatch and a tick, never a highlighted row. */
 .grapher-bookmark-row.selected .grapher-bookmark-swatch { background:var(--swatch); }
 .grapher-bookmark-check { flex:0 0 14px; width:14px; height:14px; color:var(--accent-tint-text); }
 .grapher-bookmark-math { flex:1 1 auto; min-width:0; overflow:hidden; display:flex; align-items:center; }
@@ -251,6 +253,10 @@ button.grapher-handle:hover { color:var(--text-color); }
 .grapher-bookmark-table { display:inline-flex; align-items:center; gap:6px; font-size:0.8125rem; color:var(--text-secondary); }
 .grapher-bookmark-table svg { width:14px; height:14px; }
 .grapher-bookmark-view { display:inline-flex; flex:0 0 auto; color:var(--text-tertiary); }
+.grapher-bookmark-needs { flex:0 1 auto; min-width:0; max-width:40%; overflow:hidden; white-space:nowrap; text-overflow:ellipsis;
+  font-family:'Times New Roman', 'STIX Two Math', serif; font-style:italic; font-size:0.8125rem; color:var(--text-tertiary); }
+.grapher-bookmark-note { display:inline-flex; flex:0 0 auto; color:var(--text-tertiary); }
+.grapher-bookmark-note svg { width:14px; height:14px; }
 .grapher-bookmark-view svg { width:14px; height:14px; }
 .grapher-bookmark-more { display:inline-flex; align-items:center; justify-content:center; flex:0 0 24px; width:24px; height:24px; padding:0;
   border:none; border-radius:var(--radius-sm); background:transparent; color:var(--text-tertiary); cursor:pointer; opacity:0;
@@ -264,6 +270,22 @@ button.grapher-handle:hover { color:var(--text-color); }
 .grapher-bookmark-row.drop-after::before { bottom:0; transform:translateY(50%); }
 .grapher-bookmark-row.drop-inside, .grapher-bookmark-row.drop-inside:hover { background:var(--accent-tint-bg); box-shadow:inset 0 0 0 1px var(--accent-color); }
 .grapher-bookmark-tree.drop-root::after { content:''; position:absolute; left:8px; right:0; bottom:24px; height:2px; background:var(--accent-color); pointer-events:none; }
+
+.grapher-colors { display:flex; flex-direction:column; gap:2px; padding:4px 0; }
+.grapher-color-row { position:relative; display:flex; align-items:center; gap:8px; min-height:32px; padding:0 4px; border-radius:var(--radius-sm); }
+.grapher-color-row[data-drop-position='before']::before, .grapher-color-row[data-drop-position='after']::before { content:''; position:absolute; left:0; right:0; height:2px;
+  background:var(--accent-color); pointer-events:none; }
+.grapher-color-row[data-drop-position='before']::before { top:-1px; }
+.grapher-color-row[data-drop-position='after']::before { bottom:-1px; }
+.grapher-color-row[data-reorder-active] { opacity:0.5; }
+.grapher-color-grip { display:inline-flex; align-items:center; justify-content:center; flex:0 0 20px; width:20px; height:24px; padding:0; border:none;
+  background:transparent; color:var(--text-tertiary); cursor:grab; }
+.grapher-color-grip svg { width:14px; height:14px; }
+.grapher-color-dot { flex:0 0 12px; width:12px; height:12px; border-radius:50%; }
+.grapher-color-name { flex:1 1 auto; min-width:0; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; font-size:var(--smaller-font-size); color:var(--text-color); }
+.grapher-color-empty { color:var(--text-tertiary); }
+.grapher-color-select { flex:1 1 auto; min-width:0; display:flex; }
+.grapher-color-select .select-field { flex:1 1 auto; min-width:0; }
 
 .grapher-error { display:flex; flex-direction:column; gap:4px; font-size:var(--smaller-font-size); color:var(--danger-tint-text); }
 .grapher-chips { display:flex; flex-wrap:wrap; gap:4px; }

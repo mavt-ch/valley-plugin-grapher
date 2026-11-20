@@ -16,6 +16,8 @@ import { GraphTab } from './GraphView'
 import { REFERENCE_SEGMENT, Reference } from './Reference'
 import { EDIT_NOTE_ICON, NOTES_SEGMENT, Notes } from './Notes'
 import { getStore } from './store'
+import { COLOR_ORDER_SETTING, SettingsView } from './Settings'
+import { setColorOrder } from './model'
 import { provideGraphSurface } from './exporting'
 import { provideGraphDetails } from './details'
 
@@ -25,6 +27,10 @@ export function register(api: ValleyPluginApi): () => Promise<void> {
   const disposeStyles = injectStyles()
   api.registerView('grapher.sidebar', Sidebar)
   api.registerView('grapher.graph', GraphTab)
+  api.registerView('grapher.settings', SettingsView)
+  // New rows take their colours in the order chosen in Settings → Grapher.
+  setColorOrder(api.settings.get()[COLOR_ORDER_SETTING])
+  const offColors = api.settings.subscribe(() => setColorOrder(api.settings.get()[COLOR_ORDER_SETTING]))
   const store = getStore()
   // + in the tab strip of a Grapher tab opens another graph with its own sheets, on the focused graph's view.
   const offNewTab = api.workspace.registerNewTabHandler(({ paneId }) => openNewGraph(store.graph(store.getSnapshot().active).mode, paneId))
@@ -50,6 +56,7 @@ export function register(api: ValleyPluginApi): () => Promise<void> {
     offReference()
     offDetails()
     offNotes()
+    offColors()
     disposal = store.flush().catch(() => {}).finally(() => {
       store.dispose()
       disposeStyles()

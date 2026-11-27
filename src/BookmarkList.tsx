@@ -9,6 +9,7 @@ import { INTEGRAL_AXES, MathText } from './MathText'
 import { BOOKMARK_GROUP_NAME_MAX, MAIN_GRAPH, type Bookmark, type BookmarkGroup, type Mode, type Row } from './model'
 import { NOTES_SEGMENT } from './Notes'
 import { getStore, useGrapher } from './store'
+import { colorMenu } from './Settings'
 import { viewOf } from './views'
 
 type Dragged = { kind: 'bookmark' | 'group'; id: string }
@@ -98,6 +99,8 @@ export const BookmarkList = ({ graph, mode, renaming: initial, close }: { graph:
   React.useEffect(() => () => store.showFolderNote(null), [store])
   const { groups, items } = bookmarks
   const [renaming, setRenaming] = React.useState<string | null>(initial ?? null)
+  // The bookmark whose expression is being edited in place.
+  const [editing, setEditing] = React.useState<string | null>(null)
   React.useEffect(() => { if (initial) setRenaming(initial) }, [initial])
   const dragged = React.useRef<Dragged | null>(null)
   const pending = React.useRef<BookmarkDrop | null>(null)
@@ -196,6 +199,9 @@ export const BookmarkList = ({ graph, mode, renaming: initial, close }: { graph:
         ? { id: 'hide', label: uiText('bookmarks.hide'), icon: <EyeOff />, onSelect: () => toggleShown(item) }
         : { id: 'show', label: uiText('bookmarks.show'), icon: <Eye />, onSelect: () => toggleShown(item) },
       { id: 'copy', label: uiText('bookmarks.toExpressions', { view: uiText(`mode.${item.mode}`) }), icon: <CopyPlus />, onSelect: () => { store.copyBookmarkToExpressions(graph, item.id) } },
+      { type: 'separator' },
+      { id: 'edit', label: uiText('bookmarks.edit'), icon: <Pencil />, enabled: !item.row.table, onSelect: () => setEditing(item.id) },
+      colorMenu(item.row.color, (color) => store.updateBookmark(item.id, { color })),
       { id: 'move', label: uiText('bookmarks.move'), icon: <FolderIcon />, enabled: groups.length > 0, submenu: moveMenu(item) },
       { type: 'separator' },
       { id: 'delete', label: uiText('bookmarks.delete'), icon: <Trash />, danger: true, onSelect: () => store.deleteBookmark(item.id) }
@@ -229,21 +235,38 @@ export const BookmarkList = ({ graph, mode, renaming: initial, close }: { graph:
     const name = item.row.table ? uiText('bookmarks.table', { count: item.row.table.cells.length }) : item.row.text
     const hint = uiText(selected ? 'bookmarks.hintRemove' : item.mode === mode ? 'bookmarks.hintAdd' : 'bookmarks.hintAddView', { view: viewName })
     const needs = needNames(item)
+    const edited = editing === item.id
+    const finishEdit = (text: string | null): void => {
+      setEditing(null)
+      if (text !== null) store.updateBookmark(item.id, { text })
+    }
     return (
       <div key={item.id} className={`grapher-bookmark-row${selected ? ' selected' : ''}${markClass(`bookmark:${item.id}`)}`} data-bookmark={item.id}
         style={{ ['--bookmark-depth' as string]: depth }} role="button" tabIndex={0} aria-pressed={selected}
         aria-label={uiText('bookmarks.itemNamed', { name })} {...api.ui.tooltip(hint)}
-        onClick={(event) => { settle(event); if (event.detail < 2) toggleShown(item) }}
-        onKeyDown={(event) => { if (event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); toggleShown(item) } }}
+        onClick={(event) => { settle(event); if (!edited && event.detail < 2) toggleShown(item) }}
+        onKeyDown={(event) => { if (!edited && event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); toggleShown(item) } }}
         onContextMenu={(event) => bookmarkMenuFor(event, item)}
-        {...dragProps('bookmark', item.id)} {...dropProps('bookmark', item.id)}>
+        {...dragProps('bookmark', item.id)} draggable={!edited} {...dropProps('bookmark', item.id)}>
         <span className="grapher-bookmark-slot" />
         <span className="grapher-bookmark-swatch" style={{ ['--swatch' as string]: paletteCssValue(item.row.color) }} aria-hidden />
-        <span className="grapher-bookmark-math"><BookmarkContent item={item} /></span>
-        {needs.length ? <span className="grapher-bookmark-needs" {...api.ui.tooltip(uiText('bookmarks.needs', { names: needs.join(', ') }))}>{needs.join(' · ')}</span> : null}
-        {selected ? <Check className="grapher-bookmark-check" /> : null}
+        {edited ? (
+          <input className="grapher-bookmark-name-field grapher-bookmark-expression-field" autoFocus defaultValue={item.row.text} aria-label={uiText('bookmarks.expression')}
+            spellCheck={false} autoComplete="off"
+            onFocus={(event) => event.currentTarget.select()}
+            onClick={(event) => event.stopPropagation()}
+            onDoubleClick={(event) => event.stopPropagation()}
+            onBlur={(event) => finishEdit(event.currentTarget.value)}
+            onKeyDown={(event) => {
+              event.stopPropagation()
+              if (event.key === 'Enter') event.currentTarget.blur()
+              else if (event.key === 'Escape') { event.preventDefault(); finishEdit(null) }
+            }} />
+        ) : <span className="grapher-bookmark-math"><BookmarkContent item={item} /></span>}
+        {edited ? null : needs.length ? <span className="grapher-bookmark-needs" {...api.ui.tooltip(uiText('bookmarks.needs', { names: needs.join(', ') }))}>{needs.join(' · ')}</span> : null}
+        {selected && !edited ? <Check className="grapher-bookmark-check" /> : null}
         <span className="grapher-bookmark-view" role="img" aria-label={viewName} data-other={item.mode !== mode || undefined}><ViewIcon /></span>
-        {moreButton(uiText('bookmarks.more'), (event) => bookmarkMenuFor(event, item))}
+        {edited ? null : moreButton(uiText('bookmarks.more'), (event) => bookmarkMenuFor(event, item))}
       </div>
     )
   }
@@ -315,7 +338,7 @@ export const BookmarkList = ({ graph, mode, renaming: initial, close }: { graph:
   const allFolded = groups.length > 0 && groups.filter((group) => !group.parent || !groups.find((parent) => parent.id === group.parent)?.collapsed).every((group) => group.collapsed)
   const empty = !groups.length && !items.length
   return (
-    <div className="grapher-bookmarks" onKeyDown={(event) => { if (event.key === 'Escape' && !renaming) { event.preventDefault(); close() } }}>
+    <div className="grapher-bookmarks" onKeyDown={(event) => { if (event.key === 'Escape' && !renaming && !editing) { event.preventDefault(); close() } }}>
       <div className="grapher-bookmarks-bar">
         <span className="panel-title grapher-bookmarks-title">{uiText('bookmarks.title')}</span>
         <div className="panel-toolbar">

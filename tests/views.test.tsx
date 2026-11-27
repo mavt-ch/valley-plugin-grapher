@@ -1,7 +1,10 @@
 import React from 'react'
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { afterEach, beforeAll, describe, expect, it } from 'vitest'
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { createMockValleyApi, loadPackageWasm, type PackageWasmModule } from '@valley/plugin-testkit'
+import type { UiMenuItem } from '@valley/plugin-sdk'
+import { getStore } from '../src/store'
+import { SCALE_AXES } from '../src/model'
 import { pluginDataDirectoryPath } from '@valley/plugin-sdk/paths'
 import type { ValleyPluginManifest } from '@valley/plugin-sdk/types'
 import * as plugin from '../src/index'
@@ -64,6 +67,31 @@ describe('the sidebar', () => {
     expect(spaceReal.getAttribute('aria-checked')).toBe('true')
     fireEvent.click(screen.getByRole('radio', { name: /^Axes in multiples of π/ }))
     await waitFor(async () => expect(await mock.api.data.files.readText('graphs.json')).toContain('"space": "pi"'), { timeout: 2000 })
+  })
+
+  it('switches the Cartesian axes to logarithmic scales from the scale menu and keeps the labels for linear axes', async () => {
+    const mock = mount()
+    const openMenu = vi.spyOn(mock.api.ui, 'openMenu').mockResolvedValue(null)
+    render(<Sidebar />)
+    const button = await screen.findByRole('button', { name: 'Axis scale: Linear' })
+    expect(button.textContent).toBe('lin')
+    fireEvent.click(button)
+    const items = openMenu.mock.calls.at(-1)![0] as UiMenuItem[]
+    expect(items.map((item) => [item.id, item.label, item.checked])).toEqual([['scale:linear', 'Linear', true], ['scale:log-y', 'Logarithmic y', false], ['scale:log-x', 'Logarithmic x', false], ['scale:log', 'Log–log', false]])
+    await act(async () => { await items.find((item) => item.id === 'scale:log-y')!.onSelect!() })
+    expect(screen.getByRole('button', { name: 'Axis scale: Logarithmic y' }).textContent).toBe('log y')
+    await waitFor(async () => expect(JSON.parse((await mock.api.data.files.readText('graphs.json')) ?? '{}').scales).toEqual({ cartesian: 'log-y' }), { timeout: 2000 })
+    // The axis labels still switch, for the x-axis that stays linear.
+    expect(screen.getByRole('radio', { name: /^Axes in degrees/ })).toBeTruthy()
+    // Back to linear is stored as no entry; views without logarithmic axes show no scale button.
+    act(() => getStore().setScale('main', 'cartesian', 'linear'))
+    await waitFor(async () => expect(JSON.parse((await mock.api.data.files.readText('graphs.json')) ?? '{}').scales).toBeUndefined(), { timeout: 2000 })
+    await pick('Polar')
+    expect(await screen.findByDisplayValue('r = 1 + cos(θ)')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /^Axis scale/ })).toBeNull()
+    await pick('Parametric')
+    expect(await screen.findByRole('button', { name: 'Axis scale: Linear' })).toBeTruthy()
+    expect(SCALE_AXES.log).toBe(3)
   })
 
   it('offers sliders for undefined names and saves the sheet', async () => {

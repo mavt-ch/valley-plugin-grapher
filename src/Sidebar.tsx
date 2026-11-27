@@ -1,16 +1,17 @@
 import { React, api } from './runtime'
 import type { ClipboardEvent, KeyboardEvent, MouseEvent, PointerEvent, ReactElement } from 'react'
-import { paletteCssValue, paletteRef } from '@valley/plugin-sdk/palette'
+import { paletteCssValue } from '@valley/plugin-sdk/palette'
 import type { UiMenuItem } from '@valley/plugin-sdk'
+import { AXIS_UNITS, UNIT_GLYPHS } from './draw'
 import type { RowAnalysis } from './engine'
-import { Bookmark, BookmarkFilled, Check, ChevronDown, Eye, EyeOff, Grip, Pause, Play, Slider, TableIcon, Trash, Warning } from './icons'
+import { Bookmark, BookmarkFilled, Check, ChevronDown, Grip, Pause, Play, Slider, TableIcon, Trash, Warning } from './icons'
 import { SliderAnimator, snap, startMotion } from './animate'
 import { uiText } from './localization'
 import { INTEGRAL_AXES, MathText } from './MathText'
-import { ANIMATION_SPEEDS, DEFAULT_ANIMATION, colorOrder, DEFAULT_LEVELS, MAIN_GRAPH, MAX_LEVELS, MODES, createRow, createTable, filled, graphOf, moveRow, rangeVariable, unitsOf, type Animation, type AxisUnits, type Mode, type Row, type Table } from './model'
+import { ANIMATION_SPEEDS, DEFAULT_ANIMATION, DEFAULT_LEVELS, MAIN_GRAPH, MAX_LEVELS, MODES, createRow, createTable, filled, graphOf, moveRow, rangeVariable, scaleOf, unitsOf, AXIS_SCALES, type Animation, type AxisScale, type AxisUnits, type Mode, type Row, type Table } from './model'
 import { getStore, useGrapher } from './store'
 import { BookmarkList, bookmarkMenu } from './BookmarkList'
-import { colorName } from './Settings'
+import { colorMenu } from './Settings'
 import { notePlaying } from './details'
 import { MAX_TABLE_ROWS, looksTabular, parseTable, type Cells, type PastedTable } from './table'
 import { formatComplex, formatLinear, formatNumber, formatPolar } from './ticks'
@@ -213,12 +214,12 @@ const ViewList = ({ mode, pick, close }: { mode: Mode; pick: (mode: Mode) => voi
   )
 }
 
-/** Beside the open-graph button on every view: label the axes in real numbers or in multiples of π; only the labels change. */
+/** Beside the open-graph button on every view: label the axes in real numbers, multiples of π, degrees or scientific notation; only the labels change. */
 const UnitsSwitch = ({ graph, mode, units }: { graph: string; mode: Mode; units: AxisUnits }): ReactElement => {
   const store = getStore()
   return (
     <div className="grapher-units" role="radiogroup" aria-label={uiText('units.label')}>
-      {(['decimal', 'pi'] as const).map((candidate) => (
+      {AXIS_UNITS.map((candidate) => (
         <button
           key={candidate}
           type="button"
@@ -229,10 +230,43 @@ const UnitsSwitch = ({ graph, mode, units }: { graph: string; mode: Mode; units:
           {...api.ui.tooltip(uiText(`units.${candidate}`))}
           onClick={() => store.setUnits(graph, mode, candidate)}
         >
-          {candidate === 'pi' ? 'π' : 'ℝ'}
+          {UNIT_GLYPHS[candidate]}
         </button>
       ))}
     </div>
+  )
+}
+
+/** The text the scale button shows for each scale. */
+const SCALE_GLYPHS: Record<AxisScale, string> = { linear: 'lin', 'log-y': 'log y', 'log-x': 'log x', log: 'log' }
+
+/**
+ * Beside the axis labels on the views that offer it: linear axes, a logarithmic y- or x-axis (semi-log) or both
+ * (log–log), picked from a menu. The axis labels ℝ, π, ° and 10ⁿ keep labelling the axes that stay linear.
+ */
+const ScaleButton = ({ graph, mode, scale }: { graph: string; mode: Mode; scale: AxisScale }): ReactElement => {
+  const store = getStore()
+  const label = uiText('scale.label', { scale: uiText(`scale.${scale}`) })
+  return (
+    <button
+      type="button"
+      className={scale === 'linear' ? 'grapher-scale' : 'grapher-scale active'}
+      aria-haspopup="menu"
+      aria-label={label}
+      {...api.ui.tooltip(label)}
+      onClick={(event) => {
+        void api.ui.openMenu(AXIS_SCALES.map((candidate): UiMenuItem => ({
+          id: `scale:${candidate}`,
+          type: 'radio',
+          checked: candidate === scale,
+          label: uiText(`scale.${candidate}`),
+          description: uiText(`scale.${candidate}.hint`),
+          onSelect: () => store.setScale(graph, mode, candidate)
+        })), { anchor: event.currentTarget }).catch(() => {})
+      }}
+    >
+      {SCALE_GLYPHS[scale]}
+    </button>
   )
 }
 
@@ -796,21 +830,12 @@ const ExpressionRow = (props: RowProps): ReactElement => {
   const typeset = !editing && row.text.trim() !== ''
   const error = analysis?.kind === 'error' && analysis.error ? uiText(analysis.error.key, { name: analysis.error.param }) : null
   const color = paletteCssValue(row.color)
-  /** The row's menu, from its menu button or a right-click: Bookmark, the eye, the colours and Delete. */
+  /** The row's menu, from its menu button or a right-click: Bookmark, Change colour (a flyout of the palette) and Delete. */
   const openMenu = (event: MouseEvent<HTMLElement>, anchored = false): void => {
     event.preventDefault()
     const items: UiMenuItem[] = [
-      ...(trailing || !filled(row) ? [] : [bookmarkMenu(mode, row, props.showBookmarks), { type: 'separator' } as UiMenuItem]),
-      { id: 'visibility', label: uiText(row.hidden ? 'row.show' : 'row.hide'), icon: row.hidden ? <Eye /> : <EyeOff />, onSelect: () => edit((current) => ({ ...current, hidden: !current.hidden })) },
-      { type: 'separator' },
-      ...colorOrder().map((id): UiMenuItem => ({
-        id: `color:${id}`,
-        type: 'radio',
-        checked: row.color === paletteRef(id),
-        label: colorName(id),
-        icon: <span className="grapher-menu-swatch" style={{ background: paletteCssValue(paletteRef(id)) }} />,
-        onSelect: () => edit((current) => ({ ...current, color: paletteRef(id) }))
-      })),
+      ...(trailing || !filled(row) ? [] : [bookmarkMenu(mode, row, props.showBookmarks)]),
+      colorMenu(row.color, (color) => edit((current) => ({ ...current, color }))),
       ...(trailing ? [] : [
         { type: 'separator' } as UiMenuItem,
         { id: 'delete', label: uiText('row.delete'), icon: <Trash />, danger: true, onSelect: () => props.remove('next') }
@@ -942,6 +967,8 @@ export const Sidebar = (): ReactElement => {
   const mode = bookmarksOpen ? store.bookmarkView(active).mode : graph.mode
   const rows = graph.sheets[graph.mode]
   const units = unitsOf(graph, mode)
+  const scale = scaleOf(graph, mode)
+  const view = viewOf(mode)
   const [choosing, setChoosing] = React.useState(false)
   // The bookmark list stays open across tabs; each graph shows its own bookmark view meanwhile.
   const [renaming, setRenaming] = React.useState<string | undefined>(undefined)
@@ -1033,6 +1060,7 @@ export const Sidebar = (): ReactElement => {
       <div className="panel-header grapher-header">
         <ViewButton mode={mode} open={choosing} toggle={() => setChoosing((open) => !open)} />
         {!choosing ? <UnitsSwitch graph={active} mode={mode} units={units} /> : null}
+        {!choosing && view.canvas === 'plane' && view.logAxes ? <ScaleButton graph={active} mode={mode} scale={scale} /> : null}
         {!choosing && loaded ? <BookmarksToggle open={bookmarking !== null} toggle={() => (bookmarking ? setBookmarking(null) : showBookmarks())} /> : null}
         <button
           type="button"

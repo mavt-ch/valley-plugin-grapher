@@ -9,7 +9,7 @@ import { getStore } from './store'
 import { noteCanvas } from './details'
 import { runFlow } from './animate'
 import { registerExporter, renderPng } from './exporting'
-import { formatNumber, piTicks } from './ticks'
+import { degreeTicks, formatNumber, formatScientific, piTicks } from './ticks'
 import type { AxisUnits } from './model'
 import type { SpaceView } from './views'
 
@@ -122,7 +122,8 @@ export function drawSpace(ctx: CanvasRenderingContext2D, records: readonly Space
   }
   // The projection is orthographic, so a value's place on an axis is a straight interpolation between its ends.
   const decimalSpacing = records.filter((record) => record.kind === SPACE.tick && record.value > 0).reduce((least, record) => Math.min(least, record.value), Infinity)
-  const pi = units === 'pi' ? piTicks(range, Number.isFinite(decimalSpacing) ? decimalSpacing : range / 2) : null
+  const spacing = Number.isFinite(decimalSpacing) ? decimalSpacing : range / 2
+  const pi = units === 'pi' ? piTicks(range, spacing) : units === 'degrees' ? degreeTicks(range, spacing) : null
   for (const record of records) {
     if (record.kind === SPACE.axis && pi && record.points.length >= 4) {
       const [ax, ay, bx, by] = record.points
@@ -141,7 +142,7 @@ export function drawSpace(ctx: CanvasRenderingContext2D, records: readonly Space
       ctx.stroke()
     } else if (record.kind === SPACE.tick || record.kind === SPACE.axisName) {
       const name = record.kind === SPACE.axisName
-      const text = name ? axisNames[record.row] ?? '' : formatNumber(record.value, 6)
+      const text = name ? axisNames[record.row] ?? '' : units === 'scientific' ? formatScientific(record.value) : formatNumber(record.value, 6)
       label(text, record.points[0] + (name ? 0 : 4), record.points[1] + (name ? 0 : 3), name)
     }
   }

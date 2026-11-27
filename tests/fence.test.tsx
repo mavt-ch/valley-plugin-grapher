@@ -83,20 +83,22 @@ describe('the grapher block syntax', () => {
   it('defaults to the Cartesian view at the default height, with the view’s own axis labels', () => {
     expect(parseGrapherFence('y = x')).toMatchObject({ mode: 'cartesian', units: 'decimal', height: FENCE_HEIGHT.default, center: null, span: null })
     expect(parseGrapherFence('view: Polar\nr = 1').units).toBe('pi')
+    expect(parseGrapherFence('units: degrees\ny = sin(x)').units).toBe('degrees')
+    expect(parseGrapherFence('units: scientific\ny = x^2').units).toBe('scientific')
     expect(parseGrapherFence('view: complex 3d\nz').mode).toBe('complexSpace')
     expect(parseGrapherFence('height: 5000\ny = x').height).toBe(FENCE_HEIGHT.max)
     expect(parseGrapherFence('height: 20\ny = x').height).toBe(FENCE_HEIGHT.min)
   })
 
   it('names what it does not understand', () => {
-    const spec = parseGrapherFence('view: sideways\nunits: degrees\nspan: -1\ncenter: 1\ny = x ; dotted\na = 1 ; slider 5 .. 1\nb = 1 ; step 0')
+    const spec = parseGrapherFence('view: sideways\nunits: furlongs\nspan: -1\ncenter: 1\ny = x ; dotted\na = 1 ; slider 5 .. 1\nb = 1 ; step 0')
     expect(spec.mode).toBe('cartesian')
     expect(spec.problems).toEqual([
       { key: 'fence.unknownOption', args: { line: 5, option: 'dotted' } },
       { key: 'fence.badSlider', args: { line: 6 } },
       { key: 'fence.badStep', args: { line: 7 } },
       { key: 'fence.unknownView', args: { value: 'sideways' } },
-      { key: 'fence.unknownUnits', args: { value: 'degrees' } },
+      { key: 'fence.unknownUnits', args: { value: 'furlongs' } },
       { key: 'fence.badSetting', args: { key: 'center' } },
       { key: 'fence.badSetting', args: { key: 'span' } }
     ])
@@ -105,8 +107,22 @@ describe('the grapher block syntax', () => {
 
   it('opens a flat view on its centre with the span across the width', () => {
     const cartesian = viewOf('cartesian') as PlaneView
-    expect(fenceHome(cartesian, { center: [2, 3], span: 10 }, { width: 500, height: 300 })).toEqual({ cx: 2, cy: 3, scale: 50 })
-    expect(fenceHome(cartesian, { center: null, span: null }, { width: 500, height: 300 }).cx).toBe(0)
+    expect(fenceHome(cartesian, { center: [2, 3], span: 10, scale: 'linear' }, { width: 500, height: 300 })).toEqual({ cx: 2, cy: 3, scale: 50 })
+    expect(fenceHome(cartesian, { center: null, span: null, scale: 'linear' }, { width: 500, height: 300 }).cx).toBe(0)
+    // On a logarithmic axis the centre is a value whose logarithm the view keeps.
+    expect(fenceHome(cartesian, { center: [100, 3], span: 10, scale: 'log-x' }, { width: 500, height: 300 })).toEqual({ cx: 2, cy: 3, scale: 50, axes: 1 })
+    expect(fenceHome(cartesian, { center: null, span: null, scale: 'log' }, { width: 500, height: 300 })).toMatchObject({ cx: 1, cy: 1, axes: 3 })
+  })
+
+  it('reads a logarithmic scale on the views that have one', () => {
+    expect(parseGrapherFence('scale: log-y\ny = e^x').scale).toBe('log-y')
+    expect(parseGrapherFence('scale: log-log\ny = x^2').scale).toBe('log')
+    expect(parseGrapherFence('scale: semilog x\ny = ln(x)').scale).toBe('log-x')
+    expect(parseGrapherFence('y = x').scale).toBe('linear')
+    expect(parseGrapherFence('scale: cubic\ny = x').problems).toEqual([{ key: 'fence.unknownScale', args: { value: 'cubic' } }])
+    const polar = parseGrapherFence('view: polar\nscale: log\nr = 1')
+    expect(polar.scale).toBe('linear')
+    expect(polar.problems.map((problem) => problem.key)).toEqual(['fence.scaleView'])
   })
 
   it('ships examples that parse without problems and have their labels in every catalog', () => {

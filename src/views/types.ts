@@ -54,6 +54,8 @@ export interface PlaneView extends CommonView {
   units: AxisUnits
   /** Complex numbers as arrows from 0 and readouts as `a + bi`. */
   complex?: boolean
+  /** The header's scale menu offers logarithmic axes (semi-log and log–log). */
+  logAxes?: boolean
 }
 
 /** An orbiting 3D view inside a cube. */

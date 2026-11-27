@@ -21,5 +21,6 @@ export const parametric: PlaneView = {
   inserts: [sum('(sum(n, 1, 5, cos(n t) / n), sin t)', 'cos(n t) / n'), prod('(prod(n, 1, 2, t / n), sin t)', 't / n'), piecewise('({t < π: t, π}, sin t)', 't < π'), table],
   homeSpan: 10,
   grid: planeGrid(),
-  units: 'decimal'
+  units: 'decimal',
+  logAxes: true
 }

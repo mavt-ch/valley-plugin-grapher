@@ -98,7 +98,10 @@ describe('bookmarks', () => {
     // The arrow at the end of the row opens its menu, Bookmark first, anchored to the button.
     fireEvent.click(screen.getByRole('button', { name: 'Menu for expression 1' }))
     const menu = lastMenu(openMenu)
-    expect(menu.items().map((item) => item.id ?? item.type)).toEqual(['bookmark', 'separator', 'visibility', 'separator', 'color:red', 'color:blue', 'color:green', 'color:purple', 'color:orange', 'color:magenta', 'color:cyan', 'separator', 'delete'])
+    // Bookmark, Change color (a flyout of the palette) and Delete; the eye is the swatch at the start of the row.
+    expect(menu.items().map((item) => item.id ?? item.type)).toEqual(['bookmark', 'color', 'separator', 'delete'])
+    expect(menu.find('color').label).toBe('Change color')
+    expect(menu.find('color').submenu!.map((item) => item.id)).toEqual(['color:red', 'color:blue', 'color:green', 'color:purple', 'color:orange', 'color:magenta', 'color:cyan'])
     expect(openMenu.mock.calls.at(-1)![1]).toHaveProperty('anchor')
     expect(menu.find('bookmark').submenu!.map((item) => item.id ?? item.type)).toEqual(['bookmark:', 'separator', 'bookmark:new-group'])
     await menu.select('bookmark', 'bookmark:')
@@ -156,6 +159,32 @@ describe('bookmarks', () => {
     await lastMenu(openMenu).select('copy')
     expect(expressions()).toEqual([...before.slice(0, -1), 'y = x^2 - 2', ''])
     expect(drawn()).toEqual(['y = x^2 - 2', ''])
+
+    // The bookmark's own colour and expression change from its menu; the expressions keep theirs.
+    const sheetColor = store.graph('main').sheets.cartesian.at(-2)!.color
+    fireEvent.click(screen.getByRole('button', { name: 'More' }))
+    expect(lastMenu(openMenu).items().map((item) => item.id ?? item.type)).toEqual(['hide', 'copy', 'separator', 'edit', 'color', 'move', 'separator', 'delete'])
+    await lastMenu(openMenu).select('color', 'color:orange')
+    expect(store.bookmarks().items[0].row.color).toBe(paletteRef('orange'))
+    expect(store.graph('main').sheets.cartesian.at(-2)!.color).toBe(sheetColor)
+    fireEvent.click(screen.getByRole('button', { name: 'More' }))
+    await lastMenu(openMenu).select('edit')
+    const field = screen.getByRole('textbox', { name: 'Expression' })
+    expect(field.ownerDocument.activeElement).toBe(field)
+    fireEvent.change(field, { target: { value: 'y = x^3' } })
+    fireEvent.keyDown(field, { key: 'Escape' })
+    expect(store.bookmarks().items[0].row.text).toBe('y = x^2 - 2')
+    expect(screen.getByRole('button', { name: 'Bookmarks' }).getAttribute('aria-pressed')).toBe('true')
+    fireEvent.click(screen.getByRole('button', { name: 'More' }))
+    await lastMenu(openMenu).select('edit')
+    fireEvent.change(screen.getByRole('textbox', { name: 'Expression' }), { target: { value: '  y = x^3  ' } })
+    fireEvent.keyDown(screen.getByRole('textbox', { name: 'Expression' }), { key: 'Enter' })
+    expect(store.bookmarks().items[0].row.text).toBe('y = x^3')
+    expect(drawn()).toEqual(['y = x^3', ''])
+    expect(expressions()).toEqual([...before.slice(0, -1), 'y = x^2 - 2', ''])
+    // An emptied expression is refused.
+    act(() => store.updateBookmark(store.bookmarks().items[0].id, { text: '  ' }))
+    expect(store.bookmarks().items[0].row.text).toBe('y = x^3')
   })
 
   it('file into a new group from the row menu, nest one subgroup level and move up when a group is deleted', async () => {
@@ -368,7 +397,7 @@ describe('bookmarks', () => {
     expect(createRow([]).color).toBe(paletteRef('cyan'))
     expect(createRow([{ ...createRow([], 'y = x') }]).color).toBe(paletteRef('red'))
     fireEvent.click(screen.getByRole('button', { name: 'Menu for expression 1' }))
-    expect(lastMenu(openMenu).items().filter((item) => item.id?.startsWith('color:')).map((item) => item.id)).toEqual(['color:cyan', 'color:red'])
+    expect(lastMenu(openMenu).find('color').submenu!.map((item) => item.id)).toEqual(['color:cyan', 'color:red'])
 
     // The settings list removes, adds and resets.
     render(<SettingsView />)

@@ -24,6 +24,14 @@ const CSS = `
 .grapher-unit:hover { color:var(--text-color); }
 .grapher-unit.active { background:var(--surface-color-alt); color:var(--text-color); box-shadow:0 0 0 1px var(--border-light); }
 .grapher-unit:focus-visible { outline:2px solid var(--accent-color); outline-offset:-2px; }
+/* The scale menu button beside the axis labels: the same pill, its text tinted while an axis is logarithmic. */
+.grapher-scale { display:inline-flex; align-items:center; justify-content:center; flex:0 0 auto; min-width:30px; height:24px; padding:0 6px;
+  box-sizing:border-box; border:none; border-radius:var(--radius-sm); background:var(--container-color-light); color:var(--text-secondary);
+  font-family:'Times New Roman', 'STIX Two Math', serif; font-size:0.8125rem; line-height:1; white-space:nowrap; cursor:pointer; -webkit-app-region:no-drag;
+  transition:color var(--duration-fast) var(--ease-out); }
+.grapher-scale:hover { color:var(--text-color); }
+.grapher-scale.active { color:var(--accent-tint-text); }
+.grapher-scale:focus-visible { outline:2px solid var(--accent-color); outline-offset:-2px; }
 
 /* The views, in place of the expressions while the view button is open. */
 .grapher-views { flex:1 1 auto; min-height:0; overflow-y:auto; display:flex; flex-direction:column; gap:1px; padding:6px; }
@@ -243,6 +251,7 @@ button.grapher-bookmark-chevron:hover { color:var(--text-color); }
 .grapher-bookmark-name { flex:1 1 auto; min-width:0; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; font-size:0.8125rem; font-weight:500; }
 .grapher-bookmark-name-field, .grapher-bookmark-name-field:is(:focus, :focus-visible) { flex:1 1 auto; min-width:0; height:24px; padding:0; border:none; outline:none;
   box-shadow:none; background:transparent; color:var(--text-color); font:inherit; font-size:0.8125rem; font-weight:500; }
+.grapher-bookmark-expression-field, .grapher-bookmark-expression-field:is(:focus, :focus-visible) { font-family:var(--mono-font); font-weight:400; }
 .grapher-bookmark-count { flex:0 0 auto; font-size:0.6875rem; font-variant-numeric:tabular-nums; color:var(--text-tertiary); }
 .grapher-bookmark-swatch { flex:0 0 10px; width:10px; height:10px; box-sizing:border-box; border-radius:50%; border:2px solid var(--swatch); background:transparent; }
 /* A bookmark the view shown holds: a filled swatch and a tick, never a highlighted row. */

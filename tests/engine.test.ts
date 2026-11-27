@@ -32,6 +32,22 @@ describe('the plot kernel through api.wasm', () => {
     expect(analyses[8].name).toBe('f')
   })
 
+  it('samples and marks on logarithmic axes as the canvas maps them', async () => {
+    const { toScreenX, toScreenY } = await import('../src/draw')
+    const view = { cx: 1, cy: 1, scale: 20, axes: 3 }
+    const size = { width: 400, height: 300 }
+    const paths = engine.sample('cartesian', sheet('y = x^2'), size.width, size.height, view)
+    expect(paths).toHaveLength(1)
+    const { points } = paths[0]
+    for (let i = 0; i < points.length; i += STRIDE) {
+      expect(points[i]).toBeCloseTo(toScreenX(view, size, points[i + 2]), 6)
+      expect(points[i + 1]).toBeCloseTo(toScreenY(view, size, points[i + 3]), 6)
+    }
+    // y = x² meets y = 4x at x = 4 on log–log axes; x = 0 is off the scale.
+    const crossing = engine.markers('cartesian', sheet('y = x^2', 'y = 4x'), 0, size.width, size.height, { ...view, cx: 0.5 })
+    expect(crossing.filter((marker) => marker.kind & MARKER.intersection).map((marker) => marker.x)).toEqual([expect.closeTo(4, 9)])
+  })
+
   it('samples a function in screen and world coordinates and traces it exactly', () => {
     const rows = sheet('y = x^2')
     const paths = engine.sample('cartesian', rows, 400, 300, { cx: 0, cy: 0, scale: 20 })

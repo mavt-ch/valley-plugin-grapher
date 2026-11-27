@@ -1,4 +1,5 @@
 import { normalizePaletteValue, paletteRef } from '@valley/plugin-sdk/palette'
+import { AXIS_UNITS } from './draw'
 import { MAX_TABLE_ROWS, type Cells } from './table'
 import { MODES, viewOf, type AxisUnits, type Example, type Mode } from './views'
 
@@ -123,7 +124,15 @@ export interface Graph {
   sheets: Record<Mode, Row[]>
   /** Axis labels chosen with the header switch, per plane view; a view not listed uses its own default. */
   units: Partial<Record<Mode, AxisUnits>>
+  /** Logarithmic axes chosen in the header's scale menu, per view that offers them; a view not listed is linear. */
+  scales?: Partial<Record<Mode, AxisScale>>
 }
+
+/** Linear axes, a logarithmic x- or y-axis (semi-log) or both (log–log). */
+export type AxisScale = 'linear' | 'log-x' | 'log-y' | 'log'
+export const AXIS_SCALES: readonly AxisScale[] = ['linear', 'log-y', 'log-x', 'log']
+/** A scale as the kernel's axes bits: 1 for a logarithmic x-axis, 2 for y. */
+export const SCALE_AXES: Record<AxisScale, number> = { linear: 0, 'log-x': 1, 'log-y': 2, log: 3 }
 
 /** The main graph sits at the top level (the tab opened without an instance); every other tab keeps its own in `graphs`. */
 export interface GrapherDocument extends Graph {
@@ -246,14 +255,23 @@ export function graphIdOf(document: GrapherDocument, tab: string): string {
 
 /** Replaces one graph and leaves every other tab's graph as it was. */
 export function withGraph(document: GrapherDocument, id: string, graph: Graph): GrapherDocument {
-  const { mode, sheets, units } = graph
-  return id === MAIN_GRAPH ? { ...document, mode, sheets, units } : { ...document, graphs: { ...document.graphs, [id]: { mode, sheets, units } } }
+  const { mode, sheets, units, scales } = graph
+  const own = { mode, sheets, units, ...(scales && Object.keys(scales).length ? { scales } : {}) }
+  if (id !== MAIN_GRAPH) return { ...document, graphs: { ...document.graphs, [id]: own } }
+  const { scales: _previous, ...rest } = document
+  return { ...rest, ...own }
 }
 
 /** The axis labels a view shows: the user's choice, else the view's default (decimal for 3D views). */
 export function unitsOf(graph: Graph, mode: Mode): AxisUnits {
   const view = viewOf(mode)
   return graph.units[mode] ?? (view.canvas === 'plane' ? view.units : 'decimal')
+}
+
+/** The axis scale a view shows: the user's choice where the view offers logarithmic axes, else linear. */
+export function scaleOf(graph: Graph, mode: Mode): AxisScale {
+  const view = viewOf(mode)
+  return view.canvas === 'plane' && view.logAxes ? graph.scales?.[mode] ?? 'linear' : 'linear'
 }
 
 /** Moves the row at `from` into the gap before row `to` (gaps 0…length); other rows keep their order. */
@@ -354,7 +372,7 @@ export function readRows(stored: unknown): Row[] | null {
   return rows
 }
 
-function normalizeGraph(record: { mode?: unknown; sheets?: unknown; units?: unknown }): Graph {
+function normalizeGraph(record: { mode?: unknown; sheets?: unknown; units?: unknown; scales?: unknown }): Graph {
   const sheets = (record.sheets && typeof record.sheets === 'object' ? record.sheets : {}) as Record<string, unknown>
   const graph = defaultGraph()
   for (const mode of MODES) {
@@ -363,7 +381,13 @@ function normalizeGraph(record: { mode?: unknown; sheets?: unknown; units?: unkn
   }
   const units = (record.units && typeof record.units === 'object' ? record.units : {}) as Record<string, unknown>
   for (const mode of MODES) {
-    if (units[mode] === 'decimal' || units[mode] === 'pi') graph.units[mode] = units[mode]
+    if (AXIS_UNITS.includes(units[mode] as AxisUnits)) graph.units[mode] = units[mode] as AxisUnits
+  }
+  const scales = (record.scales && typeof record.scales === 'object' ? record.scales : {}) as Record<string, unknown>
+  for (const mode of MODES) {
+    const scale = scales[mode] as AxisScale
+    const view = viewOf(mode)
+    if (scale !== 'linear' && AXIS_SCALES.includes(scale) && view.canvas === 'plane' && view.logAxes) graph.scales = { ...graph.scales, [mode]: scale }
   }
   // The trigonometric sheet is now the Cartesian one with π axes: its own rows join Cartesian, its examples do not.
   const trig = (readRows(sheets.trig) ?? []).filter(filled)
@@ -427,7 +451,7 @@ export function normalizeBookmarks(value: unknown): Bookmarks | null {
 /** Reads a stored `graphs.json`; throws when it is not a Grapher document, so the caller never overwrites it. */
 export function normalizeDocument(value: unknown): GrapherDocument {
   if (!value || typeof value !== 'object' || (value as { version?: unknown }).version !== 1) throw new Error('graphs.json is not a Grapher document (version 1).')
-  const record = value as { mode?: unknown; sheets?: unknown; units?: unknown; graphs?: unknown; tabs?: unknown; cameras?: unknown; notes?: unknown; bookmarks?: unknown; bookmarkViews?: unknown }
+  const record = value as { mode?: unknown; sheets?: unknown; units?: unknown; scales?: unknown; graphs?: unknown; tabs?: unknown; cameras?: unknown; notes?: unknown; bookmarks?: unknown; bookmarkViews?: unknown }
   const stored = (record.graphs && typeof record.graphs === 'object' && !Array.isArray(record.graphs) ? record.graphs : {}) as Record<string, unknown>
   const graphs: Record<string, Graph> = {}
   for (const [id, graph] of Object.entries(stored).slice(0, MAX_GRAPHS)) {

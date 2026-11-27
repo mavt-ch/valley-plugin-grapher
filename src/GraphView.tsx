@@ -1,11 +1,11 @@
 import { React } from './runtime'
 import type { KeyboardEvent, PointerEvent, ReactElement } from 'react'
-import { drawHover, drawLabel, drawMarkers, findHit, formatPoint, paintPlane, readTheme, toScreenX, toScreenY, toWorldX, toWorldY, type Hover, type Size, type Theme } from './draw'
+import { axisX, axisY, drawHover, drawLabel, drawMarkers, findHit, formatPoint, paintPlane, pixelsX, pixelsY, readTheme, toScreenX, toScreenY, type Hover, type Size, type Theme } from './draw'
 import { NOTICE_SECONDS, onExportNotice, registerExporter, renderPng, renderSvg, type ExportNotice } from './exporting'
 import { MARKER, type Marker, type PlotEngine, type RowAnalysis, type SamplePath, type Viewport } from './engine'
 import { Fit, Minus, Plus } from './icons'
 import { uiText } from './localization'
-import { MAIN_GRAPH, graphIdOf, unitsOf, type AxisUnits, type Row } from './model'
+import { MAIN_GRAPH, SCALE_AXES, graphIdOf, scaleOf, unitsOf, type AxisScale, type AxisUnits, type Row } from './model'
 import { getStore, useGrapher } from './store'
 import { noteCanvas } from './details'
 import { runFlow } from './animate'
@@ -43,21 +43,31 @@ interface Placed {
   pinned: boolean
 }
 
-export function homeView(view: PlaneView, size: Size): Viewport {
+/** The axis coordinate a fresh logarithmic axis is centred on: 10, so a fresh view runs from about 0.03 to 3000. */
+const LOG_HOME = 1
+
+/** A fresh view; `axes` (the kernel's bits) makes x and y logarithmic, each centred on 10. */
+export function homeView(view: PlaneView, size: Size, axes = 0): Viewport {
   const span = view.homeSpan
-  return { cx: 0, cy: 0, scale: Math.max(MIN_SCALE, Math.min(size.width / span, size.height / (span * 0.6))) }
+  const scale = Math.max(MIN_SCALE, Math.min(size.width / span, size.height / (span * 0.6)))
+  return { cx: axes & 1 ? LOG_HOME : 0, cy: axes & 2 ? LOG_HOME : 0, scale, ...(axes ? { axes } : {}) }
 }
 
+/** The view zoomed by `factor` about the screen point (px, py), which stays over the same value (in axis coordinates,
+ * so a logarithmic axis zooms about the decade under the pointer). */
 function zoomed(view: Viewport, size: Size, factor: number, px: number, py: number): Viewport {
   const scale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, view.scale * factor))
-  const wx = toWorldX(view, size, px)
-  const wy = toWorldY(view, size, py)
-  return { scale, cx: wx - (px - size.width / 2) / scale, cy: wy + (py - size.height / 2) / scale }
+  const ax = axisX(view, size, px)
+  const ay = axisY(view, size, py)
+  const next = { ...view, scale }
+  return { ...next, cx: ax - (px - size.width / 2) / pixelsX(next), cy: ay + (py - size.height / 2) / pixelsY(next) }
 }
 
 interface CanvasProps {
   view: PlaneView
   units: AxisUnits
+  /** Linear or logarithmic axes; a saved view drawn for other axes starts afresh. */
+  scale?: AxisScale
   rows: readonly Row[]
   analyses: readonly RowAnalysis[]
   engine: PlotEngine | null
@@ -74,7 +84,8 @@ interface CanvasProps {
  * The graph: drag to pan, scroll or pinch to zoom about the pointer, hover a graph to trace it. Sampling runs
  * in the Rust kernel whenever the view or the rows change; drawing reads colours from the theme each frame.
  */
-export const GraphCanvas = ({ view: plane, units, rows, analyses, engine, graph, slot, embedded }: CanvasProps): ReactElement => {
+export const GraphCanvas = ({ view: plane, units, scale = 'linear', rows, analyses, engine, graph, slot, embedded }: CanvasProps): ReactElement => {
+  const axes = SCALE_AXES[scale]
   const mode = plane.id
   const store = getStore()
   const wrapRef = React.useRef<HTMLDivElement>(null)
@@ -87,8 +98,8 @@ export const GraphCanvas = ({ view: plane, units, rows, analyses, engine, graph,
   const pointerRef = React.useRef<{ x: number; y: number } | null>(null)
   const dragRef = React.useRef<{ id: number; x: number; y: number; view: Viewport } | null>(null)
   const frameRef = React.useRef<{ id: number | null; resample: boolean }>({ id: null, resample: true })
-  const inputs = React.useRef({ plane, units, mode, slot, rows, analyses, engine, embedded })
-  inputs.current = { plane, units, mode, slot, rows, analyses, engine, embedded }
+  const inputs = React.useRef({ plane, units, axes, mode, slot, rows, analyses, engine, embedded })
+  inputs.current = { plane, units, axes, mode, slot, rows, analyses, engine, embedded }
   /** Markers: computed per row on demand and kept until the next resample (pan, zoom, any row or slider change). */
   const generationRef = React.useRef(0)
   const markersRef = React.useRef<{ generation: number; rows: Map<number, Marker[]> }>({ generation: -1, rows: new Map() })
@@ -148,7 +159,7 @@ export const GraphCanvas = ({ view: plane, units, rows, analyses, engine, graph,
       let distance = PIN_FOLLOW
       for (const marker of markersOf(row)) {
         if (marker.kind !== pin.kind || marker.other !== other) continue
-        const away = Math.hypot((marker.x - pin.x) * view.scale, (marker.y - pin.y) * view.scale)
+        const away = Math.hypot(toScreenX(view, size, marker.x) - toScreenX(view, size, pin.x), toScreenY(view, size, marker.y) - toScreenY(view, size, pin.y))
         if (away < distance) [best, distance] = [marker, away]
       }
       if (!best) continue
@@ -176,7 +187,7 @@ export const GraphCanvas = ({ view: plane, units, rows, analyses, engine, graph,
         if (Number.isFinite(wy)) return { row: hit.row, sx: hit.sx, sy: toScreenY(view, size, wy), wx: hit.wx, wy, parameter: null }
       } else {
         const wx = engine.evaluate(mode, rows, hit.row, hit.wy)
-        if (Number.isFinite(wx)) return { row: hit.row, sx: (wx - view.cx) * view.scale + size.width / 2, sy: hit.sy, wx, wy: hit.wy, parameter: null }
+        if (Number.isFinite(wx)) return { row: hit.row, sx: toScreenX(view, size, wx), sy: hit.sy, wx, wy: hit.wy, parameter: null }
       }
     }
     const parameter = analysis?.kind === 'polar' ? { name: 'θ', value: hit.parameter }
@@ -210,8 +221,10 @@ export const GraphCanvas = ({ view: plane, units, rows, analyses, engine, graph,
   const prepare = React.useCallback((): void => {
     const frame = frameRef.current
     const size = sizeRef.current
-    const { plane, mode, rows, engine, embedded } = inputs.current
-    const view = viewRef.current ?? (viewRef.current = embedded?.home?.(size) ?? homeView(plane, size))
+    const { plane, axes, mode, rows, engine, embedded } = inputs.current
+    // A view saved for other axes (linear while the scale is now logarithmic, or the other way) starts afresh.
+    if (viewRef.current && (viewRef.current.axes ?? 0) !== axes) viewRef.current = null
+    const view = viewRef.current ?? (viewRef.current = embedded?.home?.(size) ?? homeView(plane, size, axes))
     if (!embedded) noteCanvas(inputs.current.slot, { size, view, pins: pinsRef.current.length })
     if (!frame.resample) return
     frame.resample = false
@@ -281,6 +294,7 @@ export const GraphCanvas = ({ view: plane, units, rows, analyses, engine, graph,
 
   React.useEffect(() => { invalidate(true) }, [rows, engine, invalidate])
   React.useEffect(() => { invalidate(false) }, [units, invalidate])
+  React.useEffect(() => { invalidate(true) }, [axes, invalidate])
 
   // A visible vector field set to flow resamples the graph with the time, for as long as one is shown.
   const flowing = rows.some((row, index) => row.flow === true && !row.hidden && analyses[index]?.kind === 'field')
@@ -357,7 +371,7 @@ export const GraphCanvas = ({ view: plane, units, rows, analyses, engine, graph,
     const drag = dragRef.current
     if (drag && drag.id === event.pointerId) {
       const { view } = drag
-      setView({ ...view, cx: view.cx - (at.x - drag.x) / view.scale, cy: view.cy + (at.y - drag.y) / view.scale })
+      setView({ ...view, cx: view.cx - (at.x - drag.x) / pixelsX(view), cy: view.cy + (at.y - drag.y) / pixelsY(view) })
       return
     }
     invalidate(false)
@@ -401,20 +415,20 @@ export const GraphCanvas = ({ view: plane, units, rows, analyses, engine, graph,
   }
 
   const reset = (): void => {
-    const { embedded, plane, slot } = inputs.current
+    const { embedded, plane, slot, axes } = inputs.current
     if (!embedded) delete store.viewports[slot]
-    setView(embedded?.home?.(sizeRef.current) ?? homeView(plane, sizeRef.current))
+    setView(embedded?.home?.(sizeRef.current) ?? homeView(plane, sizeRef.current, axes))
   }
 
   const onKeyDown = (event: KeyboardEvent<HTMLCanvasElement>): void => {
     const current = viewRef.current
     if (!current) return
-    const pan = 60 / current.scale
+    const [panX, panY] = [60 / pixelsX(current), 60 / pixelsY(current)]
     const moves: Record<string, () => void> = {
-      ArrowLeft: () => setView({ ...current, cx: current.cx - pan }),
-      ArrowRight: () => setView({ ...current, cx: current.cx + pan }),
-      ArrowUp: () => setView({ ...current, cy: current.cy + pan }),
-      ArrowDown: () => setView({ ...current, cy: current.cy - pan }),
+      ArrowLeft: () => setView({ ...current, cx: current.cx - panX }),
+      ArrowRight: () => setView({ ...current, cx: current.cx + panX }),
+      ArrowUp: () => setView({ ...current, cy: current.cy + panY }),
+      ArrowDown: () => setView({ ...current, cy: current.cy - panY }),
       '+': () => zoomBy(1.5),
       '=': () => zoomBy(1.5),
       '-': () => zoomBy(1 / 1.5),
@@ -488,7 +502,7 @@ export const GraphTab = ({ instanceId }: { instanceId?: string }): ReactElement 
       </div>
       {engineProblem ? <p role="alert" className="grapher-alert">{uiText('problem.engine', { message: engineProblem.message })}</p> : null}
       <div className="grapher-stage">
-        {view.canvas === 'space' ? <SpaceCanvas key={slot} view={view} rows={rows} engine={engine} graph={id} slot={slot} units={unitsOf(graph, mode)} /> : <GraphCanvas key={slot} view={view} units={unitsOf(graph, mode)} rows={rows} analyses={analyses} engine={engine} graph={id} slot={slot} />}
+        {view.canvas === 'space' ? <SpaceCanvas key={slot} view={view} rows={rows} engine={engine} graph={id} slot={slot} units={unitsOf(graph, mode)} /> : <GraphCanvas key={slot} view={view} units={unitsOf(graph, mode)} scale={scaleOf(graph, mode)} rows={rows} analyses={analyses} engine={engine} graph={id} slot={slot} />}
       </div>
       {notice ? <p className={`grapher-export-notice${notice.ok ? '' : ' grapher-export-failed'}`} role="status">{notice.text}</p> : null}
     </div>

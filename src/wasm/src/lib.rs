@@ -1,6 +1,7 @@
 //! Grapher's plotting kernel. JavaScript writes the active sheet's rows into the buffer `plot_input(len)`
 //! returns, calls `plot_analyze(mode)` and reads the per-row outcomes from `plot_text()`; then, once per
-//! viewport, `plot_sample(width, height, cx, cy, scale)` fills the `f64` path stream at `plot_samples()` and
+//! viewport, `plot_sample(width, height, cx, cy, scale, axes)` (axes: bit 1 a logarithmic x-axis, bit 2 a logarithmic
+//! y-axis, whose centre coordinates are then base-10 logarithms) fills the `f64` path stream at `plot_samples()` and
 //! `plot_eval(row, value)` traces a function under the pointer, and `plot_markers(row, …)` finds the zeros, extrema and
 //! intersections of a curve y = f(x) for the same viewport. A 3D or complex 3D sheet renders with
 //! `plot_space(width, height, yaw, pitch, range)` into the same `plot_samples()` buffer; `plot_flow(time)` sets the time
@@ -93,12 +94,17 @@ pub extern "C" fn plot_flow(time: f64) {
 
 /// Samples the analysed sheet for a viewport of `width` × `height` CSS pixels centred on (`cx`, `cy`) at
 /// `scale` pixels per unit; the number of `f64` values written.
+/// The viewport `plot_sample` and `plot_markers` take; `axes` bit 1 makes x logarithmic, bit 2 y.
+fn view(width: f64, height: f64, cx: f64, cy: f64, scale: f64, axes: u32) -> View {
+    View { width, height, cx, cy, scale, log_x: axes & 1 != 0, log_y: axes & 2 != 0 }
+}
+
 #[unsafe(no_mangle)]
-pub extern "C" fn plot_sample(width: f64, height: f64, cx: f64, cy: f64, scale: f64) -> u32 {
+pub extern "C" fn plot_sample(width: f64, height: f64, cx: f64, cy: f64, scale: f64, axes: u32) -> u32 {
     let data = SHEET.with(|current| match current.borrow_mut().as_mut() {
         Some(sheet) => {
             sheet.time = TIME.with(std::cell::Cell::get);
-            sample::sample(sheet, View { width, height, cx, cy, scale })
+            sample::sample(sheet, view(width, height, cx, cy, scale, axes))
         }
         None => Vec::new(),
     });
@@ -139,9 +145,9 @@ pub extern "C" fn plot_eval(row: u32, value: f64) -> f64 {
 /// kind (bits 1 zero, 2 minimum, 4 maximum, 8 intersection) and the other curve's row (−1 for none), written to the
 /// `plot_samples()` buffer; the number of values written.
 #[unsafe(no_mangle)]
-pub extern "C" fn plot_markers(row: u32, width: f64, height: f64, cx: f64, cy: f64, scale: f64) -> u32 {
+pub extern "C" fn plot_markers(row: u32, width: f64, height: f64, cx: f64, cy: f64, scale: f64, axes: u32) -> u32 {
     let data: Vec<f64> = SHEET.with(|current| match current.borrow_mut().as_mut() {
-        Some(sheet) => markers::markers(sheet, View { width, height, cx, cy, scale }, row as usize)
+        Some(sheet) => markers::markers(sheet, view(width, height, cx, cy, scale, axes), row as usize)
             .into_iter()
             .flat_map(|marker| [marker.x, marker.y, f64::from(marker.kind), marker.other.map_or(-1.0, |other| other as f64)])
             .collect(),

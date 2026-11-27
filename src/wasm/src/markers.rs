@@ -181,9 +181,10 @@ fn scan(finder: &mut Finder, f: &Expr, g: Option<Partner>, xs: &[f64], fs: &[f64
         let same = |pieces: &[(f64, f64)]| piece(pieces, a).is_some_and(|p| piece(pieces, b) == Some(p));
         same(own) && g.is_none_or(|partner| same(partner.pieces))
     };
-    // Half a pixel in world units: a refined root must come this close to zero, or it was a jump.
-    let tolerance = 0.5 / view.scale;
-    let flat = view.height / view.scale * 1e-10;
+    // Half a pixel in world units: a refined root must come this close to zero, or it was a jump. On a logarithmic y-axis
+    // half a pixel is a share of the value there, and a zero is never on the scale.
+    let pixel = |x: f64, finder: &mut Finder| if view.log_y { 0.5 * std::f64::consts::LN_10 / view.ky() * finder.at(f, x).abs() } else { 0.5 / view.ky() };
+    let flat = |x: f64, finder: &mut Finder| if view.log_y { finder.at(f, x).abs() * 1e-10 } else { view.height / view.ky() * 1e-10 };
     let push = |found: &mut Vec<Marker>, finder: &mut Finder, x: f64, kind: u32| {
         let y = finder.at(f, x);
         if y.is_finite() && found.len() < MOST {
@@ -191,7 +192,11 @@ fn scan(finder: &mut Finder, f: &Expr, g: Option<Partner>, xs: &[f64], fs: &[f64
         }
     };
     let root_kind = if g.is_some() { INTERSECTION } else { ZERO };
+    let roots = g.is_some() || !view.log_y;
     for i in 0..xs.len().saturating_sub(1) {
+        if !roots {
+            break;
+        }
         if finder.budget == 0 || found.len() >= MOST {
             return;
         }
@@ -205,7 +210,7 @@ fn scan(finder: &mut Finder, f: &Expr, g: Option<Partner>, xs: &[f64], fs: &[f64
             push(found, finder, a, root_kind);
         } else if (ha < 0.0) != (hb < 0.0) && ha != 0.0 && hb != 0.0
             && let Some(x) = finder.bisect(f, partner, (a, b), ha)
-            && finder.gap(f, partner, x).abs() <= tolerance
+            && finder.gap(f, partner, x).abs() <= pixel(x, finder)
         {
             push(found, finder, x, root_kind);
         }
@@ -225,9 +230,10 @@ fn scan(finder: &mut Finder, f: &Expr, g: Option<Partner>, xs: &[f64], fs: &[f64
         }
         let Some(x) = finder.extremum(f, partner, (xs[i - 1], xs[i + 1]), maximum) else { continue };
         let h = finder.gap(f, partner, x);
+        let level = flat(x, finder);
         if g.is_none() {
-            push(found, finder, x, if maximum { MAXIMUM } else { MINIMUM } | if h.abs() <= flat { ZERO } else { 0 });
-        } else if h.abs() <= flat {
+            push(found, finder, x, if maximum { MAXIMUM } else { MINIMUM } | if roots && h.abs() <= level { ZERO } else { 0 });
+        } else if h.abs() <= level {
             // Curves that touch without crossing: an intersection where f − g has an extremum at zero.
             push(found, finder, x, INTERSECTION);
         }
@@ -238,7 +244,7 @@ fn scan(finder: &mut Finder, f: &Expr, g: Option<Partner>, xs: &[f64], fs: &[f64
 fn merge(found: Vec<Marker>, view: View) -> Vec<Marker> {
     let mut kept: Vec<Marker> = Vec::with_capacity(found.len());
     for marker in found {
-        let near = |other: &Marker| other.other == marker.other && ((other.x - marker.x) * view.scale).abs() < 1.0 && ((other.y - marker.y) * view.scale).abs() < 1.0;
+        let near = |other: &Marker| other.other == marker.other && (view.sx(other.x) - view.sx(marker.x)).abs() < 1.0 && (view.sy(other.y) - view.sy(marker.y)).abs() < 1.0;
         match kept.iter_mut().find(|other| near(other)) {
             Some(other) => other.kind |= marker.kind,
             None => kept.push(marker),
@@ -270,8 +276,8 @@ fn search(sheet: &mut Sheet, view: View, row: usize, budget: usize) -> Vec<Marke
     let own = pieces(sheet, view, row);
     let theirs: Vec<Vec<(f64, f64)>> = partners.iter().map(|(index, _)| pieces(sheet, view, *index)).collect();
     let n = GRID.min((view.width / 2.0).ceil() as usize).max(16);
-    let (lo, hi) = (view.wx(0.0), view.wx(view.width));
-    let xs: Vec<f64> = (0..=n).map(|i| lo + (hi - lo) * i as f64 / n as f64).collect();
+    // Evenly spaced on the screen, so a logarithmic x-axis is searched evenly in its decades.
+    let xs: Vec<f64> = (0..=n).map(|i| view.wx(view.width * i as f64 / n as f64)).collect();
     let Sheet { env, functions, .. } = sheet;
     let mut finder = Finder { env: env.as_mut_slice(), functions: functions.as_slice(), budget };
     let fs: Vec<f64> = xs.iter().map(|&x| finder.at(&f, x)).collect();
@@ -293,7 +299,7 @@ mod tests {
     use crate::sheet::{Mode, RowInput, analyze};
     use std::f64::consts::PI;
 
-    const VIEW: View = View { width: 400.0, height: 300.0, cx: 0.0, cy: 0.0, scale: 20.0 };
+    const VIEW: View = View::linear(400.0, 300.0, 0.0, 0.0, 20.0);
 
     fn found(texts: &[&str], row: usize, view: View) -> Vec<Marker> {
         let inputs: Vec<RowInput> = texts.iter().map(|text| RowInput { text: text.to_string(), ..RowInput::default() }).collect();
@@ -302,6 +308,19 @@ mod tests {
 
     fn of(markers: &[Marker], kind: u32) -> Vec<f64> {
         markers.iter().filter(|marker| marker.kind & kind != 0).map(|marker| marker.x).collect()
+    }
+
+    #[test]
+    fn markers_on_logarithmic_axes() {
+        // On a logarithmic y-axis no zero is marked, but extrema and intersections are.
+        let semi = View { log_y: true, ..VIEW };
+        let wave = found(&["y = 2 + sin(x)"], 0, semi);
+        assert!(of(&wave, ZERO).is_empty(), "{wave:?}");
+        assert!(of(&wave, MAXIMUM).iter().any(|x| (x - PI / 2.0).abs() < 1e-6), "{wave:?}");
+        // On log-log axes x² and 4x cross at x = 4, found among the decades.
+        let both = View { log_x: true, log_y: true, cx: 0.5, cy: 1.0, ..VIEW };
+        let crossing = of(&found(&["y = x^2", "y = 4x"], 0, both), INTERSECTION);
+        assert!(crossing.iter().any(|x| (x - 4.0).abs() < 1e-9), "{crossing:?}");
     }
 
     #[test]

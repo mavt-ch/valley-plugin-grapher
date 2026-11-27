@@ -176,3 +176,101 @@ export function piTicks(range: number, spacing: number): AxisLabel[] {
   for (let k = -count; k <= count; k++) if (k !== 0) labels.push({ value: k * step, text: formatPi(k * n, d) })
   return labels
 }
+
+/** Label steps in degrees with the minor divisions between labels. */
+const DEGREE_STEPS: readonly [number, number][] = [
+  [1, 5], [5, 5], [15, 3], [30, 3], [45, 3], [90, 3], [180, 4], [360, 4], [720, 4], [1800, 5], [3600, 4], [9000, 5], [18000, 5]
+]
+
+/** A whole number of degrees as text: `0°`, `90°`, `−180°`, `1080°`. */
+export function formatDegrees(degrees: number): string {
+  const rounded = Math.round(degrees * 1e6) / 1e6
+  if (rounded === 0) return '0°'
+  return `${rounded < 0 ? MINUS : ''}${formatNumber(Math.abs(rounded), 6)}°`
+}
+
+/** An axis whose values are radians, labelled in degrees (90° at π/2, 180° at π). */
+export function degreeAxis(lo: number, hi: number, scale: number): Axis {
+  const perDegree = Math.PI / 180
+  const choice = DEGREE_STEPS.find(([degrees]) => degrees * perDegree * scale >= MIN_LABEL_PX)
+  // Far in, 1° labels are too sparse to read a position from; far out, they are just big numbers.
+  if (!choice || (choice === DEGREE_STEPS[0] && perDegree * scale > 6 * MIN_LABEL_PX)) return decimalAxis(lo, hi, scale)
+  const [degrees, divisions] = choice
+  const step = degrees * perDegree
+  const grid = lines(lo, hi, step / divisions, divisions)
+  const labels: AxisLabel[] = []
+  for (const line of grid) {
+    if (!line.major) continue
+    const k = Math.round(line.value / step)
+    if (k !== 0) labels.push({ value: line.value, text: formatDegrees(k * degrees) })
+  }
+  return { lines: grid, labels, step }
+}
+
+/** Degree labels for an axis from −range to range, about as far apart as `spacing`; the 3D view places them. */
+export function degreeTicks(range: number, spacing: number): AxisLabel[] {
+  const perDegree = Math.PI / 180
+  const [degrees] = DEGREE_STEPS.find(([candidate]) => candidate * perDegree >= spacing * 0.6) ?? DEGREE_STEPS[DEGREE_STEPS.length - 1]
+  const step = degrees * perDegree
+  const count = Math.floor(range / step + 1e-9)
+  if (count > 200) return []
+  const labels: AxisLabel[] = []
+  for (let k = -count; k <= count; k++) if (k !== 0) labels.push({ value: k * step, text: formatDegrees(k * degrees) })
+  return labels
+}
+
+const SUPERSCRIPT: Record<string, string> = { '-': '⁻', '0': '⁰', '1': '¹', '2': '²', '3': '³', '4': '⁴', '5': '⁵', '6': '⁶', '7': '⁷', '8': '⁸', '9': '⁹' }
+
+/** A number in scientific notation: `5·10⁻¹`, `10³`, `−2.5·10⁴`, `0`, and `2` for `2·10⁰`; `digits` bounds the mantissa's decimals. */
+export function formatScientific(value: number, digits = 3): string {
+  if (!Number.isFinite(value) || value === 0) return formatNumber(value)
+  let exponent = Math.floor(Math.log10(Math.abs(value)))
+  let mantissa = Number((Math.abs(value) / 10 ** exponent).toFixed(digits))
+  if (mantissa >= 10) { mantissa /= 10; exponent += 1 }
+  if (exponent === 0) return formatNumber(value < 0 ? -mantissa : mantissa, digits)
+  const power = `10${String(exponent).split('').map((char) => SUPERSCRIPT[char]).join('')}`
+  return `${value < 0 ? MINUS : ''}${mantissa === 1 ? '' : `${formatNumber(mantissa, digits)}·`}${power}`
+}
+
+/** Decimal grid lines with every label in scientific notation. */
+export function scientificAxis(lo: number, hi: number, scale: number): Axis {
+  const axis = decimalAxis(lo, hi, scale)
+  return { ...axis, labels: axis.labels.map((label) => ({ ...label, text: formatScientific(label.value) })) }
+}
+
+/** Decades between labels on a logarithmic axis, and the multiples of 10ⁿ labelled between decades when it is wide. */
+const DECADE_STEPS = [1, 2, 5, 10, 20, 50, 100, 200, 500] as const
+
+/**
+ * A logarithmic axis between the axis coordinates `lo` and `hi` (base-10 logarithms) at `pixels` per decade: a major line
+ * at every labelled decade, minor lines at the other decades or, while a decade is wide enough, at its 2 to 9 multiples;
+ * far in, the 2 and 5 multiples (then all of them) are labelled too. Line values are the axis's own values (10ⁿ).
+ */
+export function logAxis(lo: number, hi: number, pixels: number): Axis {
+  if (!(hi > lo) || !(pixels > 0) || !Number.isFinite(lo) || !Number.isFinite(hi)) return { lines: [], labels: [], step: 1 }
+  const every = DECADE_STEPS.find((step) => step * pixels >= MIN_LABEL_PX) ?? DECADE_STEPS[DECADE_STEPS.length - 1]
+  const first = Math.floor(lo)
+  const last = Math.ceil(hi)
+  if (last - first > MAX_LINES * every) return { lines: [], labels: [], step: every }
+  const multiples = pixels >= 40 && every === 1
+  const labelled = pixels >= 6 * MIN_LABEL_PX ? [2, 3, 4, 5, 6, 7, 8, 9] : pixels >= 3 * MIN_LABEL_PX ? [2, 5] : []
+  const lines: GridLine[] = []
+  const labels: AxisLabel[] = []
+  const inside = (coordinate: number): boolean => coordinate >= lo && coordinate <= hi
+  for (let k = first; k <= last; k++) {
+    const decade = 10 ** k
+    if (inside(k)) {
+      const major = k % every === 0
+      lines.push({ value: decade, major })
+      if (major) labels.push({ value: decade, text: formatScientific(decade) })
+    }
+    if (!multiples) continue
+    for (let m = 2; m <= 9; m++) {
+      const coordinate = k + Math.log10(m)
+      if (!inside(coordinate)) continue
+      lines.push({ value: m * decade, major: false })
+      if (labelled.includes(m)) labels.push({ value: m * decade, text: formatScientific(m * decade) })
+    }
+  }
+  return { lines, labels, step: every }
+}

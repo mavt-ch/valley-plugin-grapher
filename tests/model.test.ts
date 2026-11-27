@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { COLORS, createRow, defaultDocument, moveRow, normalizeDocument, readColorOrder, unitsOf, withTrailingRow, type Bookmarks, type Row } from '../src/model'
+import { COLORS, createRow, defaultDocument, moveRow, normalizeDocument, readColorOrder, scaleOf, unitsOf, withTrailingRow, type Bookmarks, type Row } from '../src/model'
 import { deleteGroup, definedByText, filedIn, folderMode, groupCount, moveBookmark, moveGroup, sameExpression } from '../src/bookmarks'
 import { parseMath, tokenizeMath } from '../src/MathText'
 import { MODES, viewOf } from '../src/views'
@@ -60,6 +60,13 @@ describe('sheets', () => {
     expect(older.mode).toBe('space')
     expect(older.sheets.space[0]).toMatchObject({ id: 'a', text: 'z = x y', from: '', to: '', from2: '', to2: '' })
     expect(unitsOf(older, 'space')).toBe('pi')
+    const labelled = normalizeDocument({ version: 1, mode: 'cartesian', sheets: {}, units: { cartesian: 'degrees', polar: 'scientific', space: 'furlongs' } })
+    expect([unitsOf(labelled, 'cartesian'), unitsOf(labelled, 'polar'), unitsOf(labelled, 'space')]).toEqual(['degrees', 'scientific', 'decimal'])
+    // Logarithmic axes are kept on the views that offer them only.
+    const scaled = normalizeDocument({ version: 1, mode: 'cartesian', sheets: {}, scales: { cartesian: 'log-y', parametric: 'log', polar: 'log', complex: 'log-x' }, graphs: { tab: { mode: 'cartesian', sheets: {}, scales: { cartesian: 'spiral' } } } })
+    expect([scaleOf(scaled, 'cartesian'), scaleOf(scaled, 'parametric'), scaleOf(scaled, 'polar'), scaleOf(scaled, 'complex')]).toEqual(['log-y', 'log', 'linear', 'linear'])
+    expect(scaled.scales).toEqual({ cartesian: 'log-y', parametric: 'log' })
+    expect(scaleOf(scaled.graphs.tab, 'cartesian')).toBe('linear')
     expect(older.sheets.cylindrical.map((row) => row.text)).toEqual(['r = 1 + cos(φ)', 'z = φ / 2', ''])
     expect(older.sheets.cylindrical[0]).toMatchObject({ from: '', to: '', from2: '-4', to2: '0' })
     expect(older.graphs.tab.sheets.cylindrical).toHaveLength(3)

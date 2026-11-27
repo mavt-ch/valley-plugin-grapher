@@ -25,5 +25,6 @@ export const cartesian: PlaneView = {
   inserts: [sum('sum(n, 1, 5, x^n / n)', 'x^n / n'), prod('prod(n, 1, 3, x - n)', 'x - n'), integral, derivative, tangent, piecewise('{x < 0: -x, x^2}', 'x < 0'), field, levels, table],
   homeSpan: 20,
   grid: planeGrid(),
-  units: 'decimal'
+  units: 'decimal',
+  logAxes: true
 }

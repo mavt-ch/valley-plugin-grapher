@@ -5,7 +5,7 @@ import { uiText } from './localization'
 import { exampleBookmarks } from './bookmarkExamples'
 import { loadPlotEngine, type Camera, type PlotEngine, type Viewport } from './engine'
 import { NO_BOOKMARKS, addGroup, bookmarkId, deleteGroup, filedIn, folderItems, folderMode, moveBookmark, moveGroup, needsOf, sameExpression, withBookmarks, type Analyze, type BookmarkDrop } from './bookmarks'
-import { BOOKMARK_GROUP_NAME_MAX, MAIN_GRAPH, MAX_BOOKMARKS, MAX_BOOKMARK_GROUPS, MAX_GRAPHS, MAX_NOTE, MODES, createRow, defaultDocument, filled, defaultGraph, graphIdOf, graphIds, graphOf, normalizeDocument, rowId, withGraph, withTrailingRow, type AxisUnits, type Bookmark, type BookmarkGroup, type BookmarkView, type Bookmarks, type Graph, type GrapherDocument, type Mode, type Row } from './model'
+import { BOOKMARK_GROUP_NAME_MAX, MAIN_GRAPH, MAX_BOOKMARKS, MAX_BOOKMARK_GROUPS, MAX_GRAPHS, MAX_NOTE, MODES, createRow, defaultDocument, filled, defaultGraph, graphIdOf, graphIds, graphOf, normalizeDocument, rowId, withGraph, withTrailingRow, type AxisScale, type AxisUnits, type Bookmark, type BookmarkGroup, type BookmarkView, type Bookmarks, type Graph, type GrapherDocument, type Mode, type Row } from './model'
 
 /** The sheets live in `.valley/plugins/data/grapher/graphs.json`. */
 export const GRAPHS_FILE = 'graphs.json'
@@ -200,7 +200,7 @@ export class GrapherStore {
     if (!this.snapshot.loaded || id === MAIN_GRAPH || document.graphs[id] || document.tabs?.[id]) return
     const main = graphOf(document, MAIN_GRAPH)
     const mode = MODES.includes(id as Mode) ? (id as Mode) : main.mode
-    this.change(withGraph(document, id, { mode, sheets: main.sheets, units: main.units }))
+    this.change(withGraph(document, id, { mode, sheets: main.sheets, units: main.units, scales: main.scales }))
   }
 
   /**
@@ -221,7 +221,7 @@ export class GrapherStore {
   /** A copy of one graph under a new id (the id of the tab that will show it); returns the id. */
   forkGraph(from: string): string {
     const source = this.graph(from)
-    return this.addGraph({ mode: source.mode, sheets: source.sheets, units: source.units })
+    return this.addGraph({ mode: source.mode, sheets: source.sheets, units: source.units, scales: source.scales })
   }
 
   /** A fresh graph with the example sheets, for a new tab; returns its id. */
@@ -230,9 +230,9 @@ export class GrapherStore {
   }
 
   /** A new graph on `mode` holding `rows` (a ```grapher``` block opened in Grapher); its other views keep their examples. */
-  createGraphWith(mode: Mode, rows: readonly Row[], units: AxisUnits): string {
+  createGraphWith(mode: Mode, rows: readonly Row[], units: AxisUnits, scale: AxisScale = 'linear'): string {
     const graph = defaultGraph(mode)
-    return this.addGraph({ ...graph, sheets: { ...graph.sheets, [mode]: withTrailingRow(rows.map((row) => ({ ...row, id: rowId() }))) }, units: { [mode]: units } })
+    return this.addGraph({ ...graph, sheets: { ...graph.sheets, [mode]: withTrailingRow(rows.map((row) => ({ ...row, id: rowId() }))) }, units: { [mode]: units }, ...(scale !== 'linear' ? { scales: { [mode]: scale } } : {}) })
   }
 
   /** Stores a graph for a new tab. At `MAX_GRAPHS` the graphs of tabs that are no longer open make room, oldest first. */
@@ -252,7 +252,7 @@ export class GrapherStore {
   /** The saved 2D views and 3D cameras of a loaded file become the session's, so a restart opens where it was left. */
   private adoptCameras(document: GrapherDocument): void {
     for (const [key, camera] of Object.entries(document.cameras ?? {})) {
-      if ('scale' in camera) this.viewports[key] = { cx: camera.cx, cy: camera.cy, scale: camera.scale }
+      if ('scale' in camera) this.viewports[key] = { cx: camera.cx, cy: camera.cy, scale: camera.scale, ...(camera.axes ? { axes: camera.axes } : {}) }
       else this.cameras[key] = { yaw: camera.yaw, pitch: camera.pitch, range: camera.range }
     }
   }
@@ -283,6 +283,16 @@ export class GrapherStore {
 
   setUnits(id: string, mode: Mode, units: AxisUnits): void {
     this.editGraph(id, (graph) => (graph.units[mode] === units ? null : { ...graph, units: { ...graph.units, [mode]: units } }))
+  }
+
+  /** Linear or logarithmic axes on one view of a graph; linear is the default, so it is stored as no entry. */
+  setScale(id: string, mode: Mode, scale: AxisScale): void {
+    this.editGraph(id, (graph) => {
+      if ((graph.scales?.[mode] ?? 'linear') === scale) return null
+      const { [mode]: _previous, ...others } = graph.scales ?? {}
+      const scales = scale === 'linear' ? others : { ...others, [mode]: scale }
+      return { ...graph, scales }
+    })
   }
 
   /** `quiet` applies the edit at once but leaves saving to {@link commit}: an animated slider changes its row every frame
@@ -330,6 +340,28 @@ export class GrapherStore {
     const needs = analyze ? needsOf(analyze, this.graph(this.snapshot.active).sheets[mode], row) : []
     const item = { id: bookmarkId('b'), mode, row: { ...row, hidden: false }, ...(needs.length ? { needs } : {}), ...(group ? { group } : {}) }
     this.setBookmarks({ ...bookmarks, items: [...bookmarks.items, item] })
+  }
+
+  /**
+   * Changes a bookmark's colour or expression. A changed expression keeps the definitions saved with it and takes any
+   * new one it reads from the focused graph's sheet; an empty expression is refused.
+   */
+  updateBookmark(id: string, change: { color?: string; text?: string }): void {
+    const bookmarks = this.bookmarks()
+    const item = bookmarks.items.find((entry) => entry.id === id)
+    if (!item) return
+    const text = change.text?.trim()
+    if (text !== undefined && (!text || item.row.table)) return
+    const row: Row = { ...item.row, ...(change.color !== undefined ? { color: change.color } : {}), ...(text !== undefined ? { text } : {}) }
+    if (row.color === item.row.color && row.text === item.row.text) return
+    let next: Bookmark = { ...item, row }
+    if (row.text !== item.row.text) {
+      const analyze = this.analyzer(item.mode)
+      const needs = analyze ? needsOf(analyze, [...(item.needs ?? []), ...this.graph(this.snapshot.active).sheets[item.mode]], row) : item.needs ?? []
+      const { needs: _old, ...rest } = next
+      next = needs.length ? { ...rest, needs } : rest
+    }
+    this.setBookmarks({ ...bookmarks, items: bookmarks.items.map((entry) => (entry.id === id ? next : entry)) }, uiText(text !== undefined ? 'bookmarks.undo.edit' : 'bookmarks.undo.color'))
   }
 
   /** The notes of a bookmark folder; saved like any edit, a moment after typing stops. */
@@ -520,7 +552,7 @@ export class GrapherStore {
     // Ids follow the bookmarks, so redrawing the same pick keeps its rows (and the canvas's samples) as they were.
     const picked = withBookmarks(this.analyzer(view.mode), [], this.shownItems(id), (item, need) => `${item.id}${need < 0 ? '' : `-${need}`}`)
     const rows = [...picked, { ...createRow(picked), id: `end${BOOKMARK_SLOT}` }]
-    const shown: Graph = { mode: view.mode, sheets: { ...graph.sheets, [view.mode]: rows }, units: graph.units }
+    const shown: Graph = { mode: view.mode, sheets: { ...graph.sheets, [view.mode]: rows }, units: graph.units, scales: graph.scales }
     this.shownCache.set(id, { key, graph: shown })
     return shown
   }

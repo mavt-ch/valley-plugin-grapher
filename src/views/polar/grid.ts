@@ -1,5 +1,5 @@
 import { axes, haloText, labels, toScreenX, toScreenY, toWorldX, type GridPainter, type Size } from '../../draw'
-import { decimalAxis, decimalStep, formatNumber, formatPi } from '../../ticks'
+import { decimalAxis, decimalStep, formatDegrees, formatNumber, formatPi, formatScientific } from '../../ticks'
 
 /** Where a ray from the origin leaves the view (inset for its label), or null when it misses it. */
 function rayExit(ox: number, oy: number, dx: number, dy: number, size: Size): [number, number] | null {
@@ -19,7 +19,7 @@ function rayExit(ox: number, oy: number, dx: number, dy: number, size: Size): [n
   return exit > enter && Number.isFinite(exit) ? [ox + dx * exit, oy + dy * exit] : null
 }
 
-/** Circles at the decimal steps, rays every π/12 labelled every π/6, as fractions of π or as decimal radians. */
+/** Circles at the decimal steps, rays every π/12 labelled every π/6, as fractions of π, degrees or decimal radians. */
 export const polarGrid: GridPainter = (ctx, view, size, theme, units) => {
   ctx.fillStyle = theme.background
   ctx.fillRect(0, 0, size.width, size.height)
@@ -65,14 +65,14 @@ export const polarGrid: GridPainter = (ctx, view, size, theme, units) => {
   const radii = decimalAxis(lo, hi, view.scale)
   // Radii read as distances; the outermost ones would sit under the 0 and π angle labels.
   const clear = (label: { value: number }): boolean => { const sx = toScreenX(view, size, label.value); return sx > 44 && sx < size.width - 44 }
-  labels(ctx, { ...radii, labels: radii.labels.filter(clear).map((label) => ({ ...label, text: formatNumber(Math.abs(label.value), 6) })) }, null, view, size, theme)
+  labels(ctx, { ...radii, labels: radii.labels.filter(clear).map((label) => ({ ...label, text: units === 'scientific' ? formatScientific(Math.abs(label.value)) : formatNumber(Math.abs(label.value), 6) })) }, null, view, size, theme)
   ctx.textAlign = 'center'
   ctx.textBaseline = 'middle'
   for (let k = 0; k < 12; k++) {
     const angle = (k * Math.PI) / 6
     const at = rayExit(ox, oy, Math.cos(angle), -Math.sin(angle), size)
     // The 0 and π labels sit just above the horizontal axis, not on its line.
-    const text = units === 'pi' ? formatPi(k, 6) : formatNumber((k * Math.PI) / 6, 2)
+    const text = units === 'pi' ? formatPi(k, 6) : units === 'degrees' ? formatDegrees(k * 30) : formatNumber((k * Math.PI) / 6, 2)
     if (at) haloText(ctx, theme, text, at[0], k % 6 === 0 ? at[1] - 9 : at[1])
   }
 }

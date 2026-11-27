@@ -65,10 +65,13 @@ export interface SamplePath {
 }
 
 export interface Viewport {
+  /** The centre in axis coordinates: the value on a linear axis, its base-10 logarithm on a logarithmic one. */
   cx: number
   cy: number
-  /** Pixels per unit on both axes. */
+  /** Pixels per unit on both axes; a logarithmic axis spans `scale · LOG_DECADE` pixels per decade. */
   scale: number
+  /** Logarithmic axes as bits, as the kernel takes them: 1 for x, 2 for y; absent means both linear. */
+  axes?: number
 }
 
 /** The orbiting camera of a 3D sheet: the visible world is the cube [-range, range]³. */
@@ -116,11 +119,11 @@ interface PlotExports {
   plot_input(len: number): number
   plot_analyze(mode: number): number
   plot_text(): number
-  plot_sample(width: number, height: number, cx: number, cy: number, scale: number): number
+  plot_sample(width: number, height: number, cx: number, cy: number, scale: number, axes: number): number
   plot_samples(): number
   plot_eval(row: number, value: number): number
   plot_space(width: number, height: number, yaw: number, pitch: number, range: number): number
-  plot_markers(row: number, width: number, height: number, cx: number, cy: number, scale: number): number
+  plot_markers(row: number, width: number, height: number, cx: number, cy: number, scale: number, axes: number): number
   plot_flow(time: number): void
 }
 
@@ -243,7 +246,7 @@ export function createPlotEngine(exports: PlotExports, memory: WebAssembly.Memor
     sample(mode, rows, width, height, view, time = 0) {
       load(mode, rows)
       exports.plot_flow(time)
-      const count = exports.plot_sample(width, height, view.cx, view.cy, view.scale)
+      const count = exports.plot_sample(width, height, view.cx, view.cy, view.scale, view.axes ?? 0)
       const at = exports.plot_samples()
       return decodePaths(new Float64Array(memory.buffer, at, count).slice())
     },
@@ -260,7 +263,7 @@ export function createPlotEngine(exports: PlotExports, memory: WebAssembly.Memor
     },
     markers(mode, rows, row, width, height, view) {
       load(mode, rows)
-      const count = exports.plot_markers(row, width, height, view.cx, view.cy, view.scale)
+      const count = exports.plot_markers(row, width, height, view.cx, view.cy, view.scale, view.axes ?? 0)
       return decodeMarkers(new Float64Array(memory.buffer, exports.plot_samples(), count).slice())
     }
   }

@@ -1,6 +1,6 @@
 import { readPaletteColor } from '@valley/plugin-sdk/palette'
 import type { SamplePath, Viewport } from './engine'
-import { decimalAxis, formatComplex, formatImaginary, formatNumber, piAxis, type Axis } from './ticks'
+import { decimalAxis, degreeAxis, formatComplex, formatImaginary, formatNumber, logAxis, piAxis, scientificAxis, type Axis } from './ticks'
 
 /** Values per sampled point in the kernel's path stream: screen x, screen y, world x, world y, parameter. */
 export const STRIDE = 5
@@ -81,10 +81,28 @@ export const formatPoint = (x: number, y: number): string => `(${formatNumber(x)
 const CLAMP = 1e5
 export const clamp = (value: number): number => Math.max(-CLAMP, Math.min(CLAMP, value))
 
-export const toScreenX = (view: Viewport, size: Size, x: number): number => (x - view.cx) * view.scale + size.width / 2
-export const toScreenY = (view: Viewport, size: Size, y: number): number => size.height / 2 - (y - view.cy) * view.scale
-export const toWorldX = (view: Viewport, size: Size, sx: number): number => (sx - size.width / 2) / view.scale + view.cx
-export const toWorldY = (view: Viewport, size: Size, sy: number): number => view.cy - (sy - size.height / 2) / view.scale
+/** Pixels a decade of a logarithmic axis spans per pixel a unit of a linear axis does (the kernel's `DECADE`). */
+export const LOG_DECADE = 4
+
+export const logX = (view: Viewport): boolean => ((view.axes ?? 0) & 1) !== 0
+export const logY = (view: Viewport): boolean => ((view.axes ?? 0) & 2) !== 0
+/** Pixels per axis unit: per unit on a linear axis, per decade on a logarithmic one. */
+export const pixelsX = (view: Viewport): number => (logX(view) ? view.scale * LOG_DECADE : view.scale)
+export const pixelsY = (view: Viewport): number => (logY(view) ? view.scale * LOG_DECADE : view.scale)
+/** A value's axis coordinate (its base-10 logarithm on a logarithmic axis, NaN at or below zero there) and back. */
+const toAxis = (log: boolean, value: number): number => (!log ? value : value > 0 ? Math.log10(value) : Number.NaN)
+const fromAxis = (log: boolean, coordinate: number): number => (log ? 10 ** coordinate : coordinate)
+/** The axis coordinate under a screen position. */
+export const axisX = (view: Viewport, size: Size, sx: number): number => (sx - size.width / 2) / pixelsX(view) + view.cx
+export const axisY = (view: Viewport, size: Size, sy: number): number => view.cy - (sy - size.height / 2) / pixelsY(view)
+
+export const toScreenX = (view: Viewport, size: Size, x: number): number => (toAxis(logX(view), x) - view.cx) * pixelsX(view) + size.width / 2
+export const toScreenY = (view: Viewport, size: Size, y: number): number => size.height / 2 - (toAxis(logY(view), y) - view.cy) * pixelsY(view)
+export const toWorldX = (view: Viewport, size: Size, sx: number): number => fromAxis(logX(view), axisX(view, size, sx))
+export const toWorldY = (view: Viewport, size: Size, sy: number): number => fromAxis(logY(view), axisY(view, size, sy))
+/** Where the axes cross on the screen; a logarithmic axis has no zero, so the other axis's labels go to the edge. */
+const originX = (view: Viewport, size: Size): number => (logX(view) ? Number.NEGATIVE_INFINITY : toScreenX(view, size, 0))
+const originY = (view: Viewport, size: Size): number => (logY(view) ? Number.POSITIVE_INFINITY : toScreenY(view, size, 0))
 
 /** Colours come from the app's design tokens, read at draw time so a theme change repaints correctly. */
 export function readTheme(element: HTMLElement): Theme {
@@ -138,23 +156,27 @@ export function haloText(ctx: CanvasRenderingContext2D, theme: Theme, text: stri
 }
 
 export function axes(ctx: CanvasRenderingContext2D, view: Viewport, size: Size, theme: Theme): void {
-  const ox = crisp(toScreenX(view, size, 0))
-  const oy = crisp(toScreenY(view, size, 0))
+  const ox = crisp(originX(view, size))
+  const oy = crisp(originY(view, size))
   ctx.strokeStyle = theme.axis
   ctx.lineWidth = 1
   ctx.beginPath()
-  ctx.moveTo(0, oy)
-  ctx.lineTo(size.width, oy)
-  ctx.moveTo(ox, 0)
-  ctx.lineTo(ox, size.height)
+  if (Number.isFinite(oy)) {
+    ctx.moveTo(0, oy)
+    ctx.lineTo(size.width, oy)
+  }
+  if (Number.isFinite(ox)) {
+    ctx.moveTo(ox, 0)
+    ctx.lineTo(ox, size.height)
+  }
   ctx.stroke()
 }
 
 /** Labels sit beside their axis, or pinned to the nearest edge when the axis is out of view. */
 export function labels(ctx: CanvasRenderingContext2D, x: Axis, y: Axis | null, view: Viewport, size: Size, theme: Theme): void {
   ctx.font = theme.font
-  const ox = toScreenX(view, size, 0)
-  const oy = toScreenY(view, size, 0)
+  const ox = originX(view, size)
+  const oy = originY(view, size)
   const top = Math.max(4, Math.min(size.height - 16, oy + 5))
   ctx.textAlign = 'center'
   ctx.textBaseline = 'top'
@@ -188,8 +210,22 @@ export function labels(ctx: CanvasRenderingContext2D, x: Axis, y: Axis | null, v
   }
 }
 
-/** Axis labels in decimal numbers or in fractions and multiples of π. */
-export type AxisUnits = 'decimal' | 'pi'
+/** Axis labels: decimal numbers, fractions and multiples of π, degrees (the values stay radians) or scientific notation. */
+export type AxisUnits = 'decimal' | 'pi' | 'degrees' | 'scientific'
+
+/** Every label choice, in the header switch's order. */
+export const AXIS_UNITS: readonly AxisUnits[] = ['decimal', 'pi', 'degrees', 'scientific']
+
+/** The switch's glyph for a label choice. */
+export const UNIT_GLYPHS: Record<AxisUnits, string> = { decimal: 'ℝ', pi: 'π', degrees: '°', scientific: '10ⁿ' }
+
+/** The horizontal axis in the chosen units; π and degrees label angles in radians. */
+export function horizontalAxis(lo: number, hi: number, scale: number, units: AxisUnits): Axis {
+  if (units === 'pi') return piAxis(lo, hi, scale)
+  if (units === 'degrees') return degreeAxis(lo, hi, scale)
+  if (units === 'scientific') return scientificAxis(lo, hi, scale)
+  return decimalAxis(lo, hi, scale)
+}
 
 /** Paints a view's background grid, axes and labels. */
 export type GridPainter = (ctx: CanvasRenderingContext2D, view: Viewport, size: Size, theme: Theme, units: AxisUnits) => void
@@ -199,14 +235,17 @@ export interface PlaneGridOptions {
   imaginary?: boolean
 }
 
-/** A rectangular grid; `units` labels the x-axis in decimals or in multiples of π. */
+/** A rectangular grid; `units` labels a linear x-axis (and in scientific notation a linear y-axis too); a logarithmic
+ * axis has a line at every decade, labelled 10ⁿ, with the 2 to 9 multiples between while there is room. */
 export const planeGrid = ({ imaginary = false }: PlaneGridOptions = {}): GridPainter => (ctx, view, size, theme, units) => {
   ctx.fillStyle = theme.background
   ctx.fillRect(0, 0, size.width, size.height)
-  const lo = toWorldX(view, size, 0)
-  const hi = toWorldX(view, size, size.width)
-  const x = units === 'pi' ? piAxis(lo, hi, view.scale) : decimalAxis(lo, hi, view.scale)
-  const real = decimalAxis(toWorldY(view, size, size.height), toWorldY(view, size, 0), view.scale)
+  const x = logX(view)
+    ? logAxis(axisX(view, size, 0), axisX(view, size, size.width), pixelsX(view))
+    : horizontalAxis(toWorldX(view, size, 0), toWorldX(view, size, size.width), view.scale, units)
+  const real = logY(view)
+    ? logAxis(axisY(view, size, size.height), axisY(view, size, 0), pixelsY(view))
+    : (units === 'scientific' ? scientificAxis : decimalAxis)(toWorldY(view, size, size.height), toWorldY(view, size, 0), view.scale)
   const y = imaginary ? { ...real, labels: real.labels.map((label) => ({ ...label, text: formatImaginary(label.text) })) } : real
   ctx.lineWidth = 1
   ctx.strokeStyle = theme.minor

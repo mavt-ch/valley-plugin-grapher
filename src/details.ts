@@ -1,9 +1,9 @@
 import { WORKSPACE_DETAILS_V1, type ValleyPluginApi, type WorkspaceDetailsSnapshot } from '@valley/plugin-sdk'
 import { pluginDataDirectoryPath } from '@valley/plugin-sdk/paths'
-import { toWorldX, toWorldY, type Size } from './draw'
+import { UNIT_GLYPHS, toWorldX, toWorldY, type Size } from './draw'
 import type { Camera, Viewport } from './engine'
 import { uiText } from './localization'
-import { MAIN_GRAPH, filled, unitsOf } from './model'
+import { MAIN_GRAPH, filled, scaleOf, unitsOf } from './model'
 import { GRAPHS_FILE, type GrapherStore } from './store'
 import { formatNumber } from './ticks'
 import { viewOf } from './views'
@@ -72,7 +72,7 @@ export function graphDetails(store: GrapherStore, instanceId: string | undefined
       expressions: text(hidden ? uiText('details.hidden', { count: rows.length, hidden }) : String(rows.length)),
       sliders: text(sliders ? String(sliders) : ''),
       tables: text(tables.length ? uiText('details.points', { count: tables.length, points }) : ''),
-      units: text(view.canvas === 'plane' ? (unitsOf(graph, mode) === 'pi' ? 'π' : 'ℝ') : ''),
+      units: text(view.canvas === 'plane' ? [UNIT_GLYPHS[unitsOf(graph, mode)], ...(scaleOf(graph, mode) === 'linear' ? [] : [uiText(`scale.${scaleOf(graph, mode)}`)])].join(' · ') : ''),
       range: text(range),
       camera: text(camera),
       pins: text(canvas?.pins ? String(canvas.pins) : ''),

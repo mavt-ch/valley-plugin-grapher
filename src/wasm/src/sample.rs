@@ -59,28 +59,69 @@ const JUMP: f64 = 1.5;
 /// Off-screen margin beyond which detail is not needed.
 const MARGIN: f64 = 64.0;
 
+/// How many pixels a decade of a logarithmic axis spans, in pixels per unit of a linear one: at the same zoom a decade is
+/// as long as four units, so a fresh view shows about five decades across.
+pub const DECADE: f64 = 4.0;
+
 #[derive(Clone, Copy, Debug)]
 pub struct View {
     pub width: f64,
     pub height: f64,
+    /// The centre in axis coordinates: the value on a linear axis, its base-10 logarithm on a logarithmic one.
     pub cx: f64,
     pub cy: f64,
-    /// Pixels per unit, the same on both axes.
+    /// Pixels per unit, the same on both axes; a logarithmic axis spans `scale · DECADE` pixels per decade.
     pub scale: f64,
+    pub log_x: bool,
+    pub log_y: bool,
+}
+
+/// A value's axis coordinate: itself, or its base-10 logarithm on a logarithmic axis (NaN at or below zero there).
+fn axis(log: bool, value: f64) -> f64 {
+    if !log {
+        value
+    } else if value > 0.0 {
+        value.log10()
+    } else {
+        f64::NAN
+    }
+}
+
+fn unaxis(log: bool, coordinate: f64) -> f64 {
+    if log { 10_f64.powf(coordinate) } else { coordinate }
 }
 
 impl View {
+    /// A view with linear axes.
+    #[cfg(test)]
+    pub const fn linear(width: f64, height: f64, cx: f64, cy: f64, scale: f64) -> View {
+        View { width, height, cx, cy, scale, log_x: false, log_y: false }
+    }
+    /// Pixels per axis unit along x and along y.
+    pub fn kx(&self) -> f64 {
+        if self.log_x { self.scale * DECADE } else { self.scale }
+    }
+    pub fn ky(&self) -> f64 {
+        if self.log_y { self.scale * DECADE } else { self.scale }
+    }
     pub fn sx(&self, x: f64) -> f64 {
-        (x - self.cx) * self.scale + self.width / 2.0
+        (axis(self.log_x, x) - self.cx) * self.kx() + self.width / 2.0
     }
     pub fn sy(&self, y: f64) -> f64 {
-        self.height / 2.0 - (y - self.cy) * self.scale
+        self.height / 2.0 - (axis(self.log_y, y) - self.cy) * self.ky()
     }
     pub fn wx(&self, sx: f64) -> f64 {
-        (sx - self.width / 2.0) / self.scale + self.cx
+        unaxis(self.log_x, (sx - self.width / 2.0) / self.kx() + self.cx)
     }
     pub fn wy(&self, sy: f64) -> f64 {
-        self.cy - (sy - self.height / 2.0) / self.scale
+        unaxis(self.log_y, self.cy - (sy - self.height / 2.0) / self.ky())
+    }
+    /// The point halfway between two values on the screen: their mean, or their geometric mean on a logarithmic axis.
+    pub fn mid_x(&self, a: f64, b: f64) -> f64 {
+        if self.log_x { (a * b).sqrt() } else { 0.5 * (a + b) }
+    }
+    pub fn mid_y(&self, a: f64, b: f64) -> f64 {
+        if self.log_y { (a * b).sqrt() } else { 0.5 * (a + b) }
     }
     fn valid(&self) -> bool {
         self.width > 0.0 && self.height > 0.0 && self.scale > 0.0 && [self.width, self.height, self.cx, self.cy, self.scale].iter().all(|v| v.is_finite())
@@ -157,8 +198,13 @@ impl Graph<'_> {
         if along_x { self.view.sy(value) } else { self.view.sx(value) }
     }
 
+    /// Whether a value of a function lands on the screen's scale (finite, and above zero on a logarithmic axis).
+    fn drawable(&self, along_x: bool, value: f64) -> bool {
+        self.value_px(along_x, value).is_finite()
+    }
+
     fn function_point(&mut self, along_x: bool, p: f64, v: f64) {
-        if !v.is_finite() {
+        if !self.drawable(along_x, v) {
             self.out.end();
             return;
         }
@@ -170,14 +216,17 @@ impl Graph<'_> {
         let view = self.view;
         let span = if along_x { view.width } else { view.height };
         let n = (span.ceil() as usize + 4).min(20_000);
-        let (lo, hi) = if along_x { (view.wx(-2.0), view.wx(span + 2.0)) } else { (view.wy(span + 2.0), view.wy(-2.0)) };
+        // Evenly spaced on the screen, so a logarithmic axis is sampled evenly in its decades.
+        let at_px = |i: usize| {
+            let px = -2.0 + (span + 4.0) * i as f64 / n as f64;
+            if along_x { view.wx(px) } else { view.wy(span - px) }
+        };
         let slot = if along_x { X } else { Y };
-        let step = (hi - lo) / n as f64;
-        let mut p0 = lo;
+        let mut p0 = at_px(0);
         let mut v0 = self.at(expr, slot, p0);
         self.function_point(along_x, p0, v0);
         for i in 1..=n {
-            let p1 = lo + step * i as f64;
+            let p1 = at_px(i);
             let v1 = self.at(expr, slot, p1);
             self.refine_function(expr, along_x, slot, (p0, v0), (p1, v1), 0);
             (p0, v0) = (p1, v1);
@@ -186,7 +235,7 @@ impl Graph<'_> {
     }
 
     fn refine_function(&mut self, expr: &Expr, along_x: bool, slot: usize, a: (f64, f64), b: (f64, f64), depth: u32) {
-        let (finite_a, finite_b) = (a.1.is_finite(), b.1.is_finite());
+        let (finite_a, finite_b) = (self.drawable(along_x, a.1), self.drawable(along_x, b.1));
         if !finite_a && !finite_b {
             self.out.end();
             return;
@@ -205,9 +254,9 @@ impl Graph<'_> {
             self.function_point(along_x, b.0, b.1);
             return;
         }
-        let pm = 0.5 * (a.0 + b.0);
+        let pm = if along_x { self.view.mid_x(a.0, b.0) } else { self.view.mid_y(a.0, b.0) };
         let vm = self.at(expr, slot, pm);
-        if finite_a && finite_b && vm.is_finite() {
+        if finite_a && finite_b && self.drawable(along_x, vm) {
             let (s0, s1, sm) = (self.value_px(along_x, a.1), self.value_px(along_x, b.1), self.value_px(along_x, vm));
             let limit = if along_x { self.view.height } else { self.view.width };
             let off = (s0 < -MARGIN && s1 < -MARGIN && sm < -MARGIN) || (s0 > limit + MARGIN && s1 > limit + MARGIN && sm > limit + MARGIN);
@@ -240,11 +289,11 @@ impl Graph<'_> {
     }
 
     fn curve_point(&mut self, p: f64, q: (f64, f64)) {
-        if !(q.0.is_finite() && q.1.is_finite()) {
+        let (sx, sy) = self.screen(q);
+        if !(q.0.is_finite() && q.1.is_finite() && sx.is_finite() && sy.is_finite()) {
             self.out.end();
             return;
         }
-        let (sx, sy) = self.screen(q);
         self.out.push(sx, sy, q.0, q.1, p);
     }
 
@@ -267,7 +316,8 @@ impl Graph<'_> {
     }
 
     fn refine_curve(&mut self, curve: Curve, a: (f64, (f64, f64)), b: (f64, (f64, f64)), depth: u32) {
-        let finite = |q: (f64, f64)| q.0.is_finite() && q.1.is_finite();
+        let view = self.view;
+        let finite = |q: (f64, f64)| q.0.is_finite() && q.1.is_finite() && view.sx(q.0).is_finite() && view.sy(q.1).is_finite();
         let (finite_a, finite_b) = (finite(a.1), finite(b.1));
         if !finite_a && !finite_b {
             self.out.end();
@@ -308,31 +358,34 @@ impl Graph<'_> {
 
     /// The region between g(x) and the x-axis over [a, b] within the view, one sample per pixel: a polygon per stretch
     /// where g is finite, closed along the axis.
+    /// On a logarithmic y-axis, where the x-axis cannot be shown, the region closes along the bottom of the view.
     fn area(&mut self, expr: &Expr, from: f64, to: f64) {
         let view = self.view;
         let (lo, hi) = (from.min(to).max(view.wx(-MARGIN)), from.max(to).min(view.wx(view.width + MARGIN)));
-        if hi <= lo {
+        if hi.partial_cmp(&lo) != Some(std::cmp::Ordering::Greater) {
             return;
         }
-        let n = ((hi - lo) * view.scale).ceil().clamp(1.0, 20_000.0) as usize;
+        let base = if view.log_y { view.wy(view.height + MARGIN) } else { 0.0 };
+        let (start, end) = (view.sx(lo), view.sx(hi));
+        let n = (end - start).ceil().clamp(1.0, 20_000.0) as usize;
         let mut last: Option<f64> = None;
         for i in 0..=n {
-            let x = lo + (hi - lo) * i as f64 / n as f64;
+            let x = if i == n { hi } else { view.wx(start + (end - start) * i as f64 / n as f64) };
             let y = self.at(expr, X, x);
-            if y.is_finite() {
+            if view.sy(y).is_finite() {
                 if last.is_none() {
                     self.out.begin(REGION);
-                    self.world_point(x, 0.0);
+                    self.world_point(x, base);
                 }
                 self.world_point(x, y);
                 last = Some(x);
             } else if let Some(end) = last.take() {
-                self.world_point(end, 0.0);
+                self.world_point(end, base);
                 self.out.end();
             }
         }
         if let Some(end) = last {
-            self.world_point(end, 0.0);
+            self.world_point(end, base);
             self.out.end();
         }
     }
@@ -340,6 +393,27 @@ impl Graph<'_> {
     /// The tangent line across the view (cut to the view's height, so a steep line keeps its slope) and its point of contact.
     fn tangent(&mut self, slope: f64, intercept: f64, (x, y): (f64, f64)) {
         let view = self.view;
+        if view.log_x || view.log_y {
+            // The line bends on a logarithmic axis: sampled every two pixels, broken where it leaves the scale.
+            let n = ((view.width + 2.0 * MARGIN) / 2.0).ceil() as usize;
+            for i in 0..=n {
+                let wx = view.wx(-MARGIN + 2.0 * i as f64);
+                let wy = slope * wx + intercept;
+                let sy = view.sy(wy);
+                if sy.is_finite() && sy.abs() < 1e6 {
+                    self.out.push(view.sx(wx), sy, wx, wy, wx);
+                } else {
+                    self.out.end();
+                }
+            }
+            self.out.end();
+            if view.sx(x).is_finite() && view.sy(y).is_finite() {
+                self.out.begin(POINT);
+                self.world_point(x, y);
+                self.out.end();
+            }
+            return;
+        }
         let (mut lo, mut hi) = (view.wx(-MARGIN), view.wx(view.width + MARGIN));
         if slope != 0.0 {
             let (a, b) = ((view.wy(view.height + MARGIN) - intercept) / slope, (view.wy(-MARGIN) - intercept) / slope);
@@ -362,7 +436,7 @@ impl Graph<'_> {
     /// run of consecutive points in the order given; a row without a point breaks the line.
     fn table(&mut self, points: &[[f64; 2]], connect: bool) {
         let view = self.view;
-        let given = |point: &[f64; 2]| point[0].is_finite() && point[1].is_finite();
+        let given = |point: &[f64; 2]| point[0].is_finite() && point[1].is_finite() && view.sx(point[0]).is_finite() && view.sy(point[1]).is_finite();
         if connect {
             for (index, point) in points.iter().enumerate() {
                 if given(point) {
@@ -389,36 +463,43 @@ impl Graph<'_> {
     /// cycle and starts again, each at its own point of the cycle (see `flow_phase`).
     fn field(&mut self, p: &Expr, q: &Expr, flow: Option<(f64, usize)>) {
         let view = self.view;
-        let mut step = nice_near(view.width / (ARROWS_ACROSS * view.scale));
+        let (kx, ky) = (view.kx(), view.ky());
+        // The lattice is laid in axis coordinates (decades on a logarithmic axis), so it keeps its places while panning.
+        let (mut step_x, mut step_y) = (nice_near(view.width / (ARROWS_ACROSS * kx)), nice_near(view.width / (ARROWS_ACROSS * ky)));
         let span = |lo: f64, hi: f64, step: f64| ((lo / step).ceil() as i64, (hi / step).floor() as i64);
-        let (mut columns, mut rows) = (span(view.wx(0.0), view.wx(view.width), step), span(view.wy(view.height), view.wy(0.0), step));
+        let (ax0, ax1) = (view.cx - view.width / (2.0 * kx), view.cx + view.width / (2.0 * kx));
+        let (ay0, ay1) = (view.cy - view.height / (2.0 * ky), view.cy + view.height / (2.0 * ky));
+        let (mut columns, mut rows) = (span(ax0, ax1, step_x), span(ay0, ay1, step_y));
         while ((columns.1 - columns.0 + 1).max(0) * (rows.1 - rows.0 + 1).max(0)) as usize > ARROW_BUDGET {
-            step *= 2.0;
-            columns = span(view.wx(0.0), view.wx(view.width), step);
-            rows = span(view.wy(view.height), view.wy(0.0), step);
+            step_x *= 2.0;
+            step_y *= 2.0;
+            columns = span(ax0, ax1, step_x);
+            rows = span(ay0, ay1, step_y);
         }
         let mut arrows = Vec::new();
         for j in rows.0..=rows.1 {
             for i in columns.0..=columns.1 {
-                let (wx, wy) = (i as f64 * step, j as f64 * step);
+                let (wx, wy) = (unaxis(view.log_x, i as f64 * step_x), unaxis(view.log_y, j as f64 * step_y));
                 self.env[X] = wx;
                 self.env[Y] = wy;
                 let (fx, fy) = (eval(p, self.env, self.functions), eval(q, self.env, self.functions));
                 let magnitude = fx.hypot(fy);
                 if magnitude.is_finite() && magnitude > 0.0 {
-                    arrows.push((wx, wy, fx / magnitude, fy / magnitude, magnitude));
+                    arrows.push((i, j, wx, wy, fx / magnitude, fy / magnitude, magnitude));
                 }
             }
         }
-        let mut magnitudes: Vec<f64> = arrows.iter().map(|arrow| arrow.4).collect();
+        let mut magnitudes: Vec<f64> = arrows.iter().map(|arrow| arrow.6).collect();
         let Some(reference) = percentile(&mut magnitudes, 0.9) else { return };
-        let cell = step * view.scale;
-        for (wx, wy, ux, uy, magnitude) in arrows {
+        let cell = (step_x * kx).min(step_y * ky);
+        for (i, j, wx, wy, ux, uy, magnitude) in arrows {
             let mut grown = 1.0;
             let (mut wx, mut wy, mut ux, mut uy, mut magnitude) = (wx, wy, ux, uy, magnitude);
             if let Some((time, row)) = flow {
-                let phase = flow_phase(time, &[row as i64, (wx / step).round() as i64, (wy / step).round() as i64]);
+                let phase = flow_phase(time, &[row as i64, i, j]);
                 grown = flow_size(phase);
+                // A lattice cell in world units at the arrow's point: the step itself on linear axes.
+                let step = (view.wx(view.sx(wx) + cell) - wx).abs().min((view.wy(view.sy(wy) - cell) - wy).abs());
                 // The reference magnitude crosses FLOW_REACH cells per cycle; stronger arrows are no faster, so none
                 // overtakes the lattice.
                 let velocity = |graph: &mut Self, x: f64, y: f64| -> Option<[f64; 2]> {
@@ -444,15 +525,14 @@ impl Graph<'_> {
             }
             let relative = (magnitude / reference).min(1.0);
             let half = 0.5 * ARROW_REACH * cell * relative * grown;
-            if half < 1.0 {
+            let (sx, sy) = (view.sx(wx), view.sy(wy));
+            if half < 1.0 || !(sx.is_finite() && sy.is_finite()) {
                 continue;
             }
-            let (sx, sy) = (view.sx(wx), view.sy(wy));
             let (dx, dy) = (ux * half, -uy * half);
-            let world = half / view.scale;
             self.out.begin(ARROW);
-            self.out.push(sx - dx, sy - dy, wx - ux * world, wy - uy * world, magnitude);
-            self.out.push(sx + dx, sy + dy, wx + ux * world, wy + uy * world, relative);
+            self.out.push(sx - dx, sy - dy, view.wx(sx - dx), view.wy(sy - dy), magnitude);
+            self.out.push(sx + dx, sy + dy, view.wx(sx + dx), view.wy(sy + dy), relative);
             self.out.end();
         }
     }
@@ -773,9 +853,12 @@ pub fn sample(sheet: &mut Sheet, view: View) -> Vec<f64> {
             Plot::Polar { r, from, to } => graph.curve(Curve::Polar(r), *from, *to),
             Plot::Curve { x, y, from, to } => graph.curve(Curve::Pair(x, y), *from, *to),
             Plot::Point { x, y } | Plot::ComplexPoint { re: x, im: y, .. } => {
-                graph.out.begin(POINT);
-                graph.out.push(view.sx(*x), view.sy(*y), *x, *y, 0.0);
-                graph.out.end();
+                let (sx, sy) = (view.sx(*x), view.sy(*y));
+                if sx.is_finite() && sy.is_finite() {
+                    graph.out.begin(POINT);
+                    graph.out.push(sx, sy, *x, *y, 0.0);
+                    graph.out.end();
+                }
             }
             Plot::Implicit(field) => graph.implicit(field),
             Plot::Field { x, y } => graph.field(x, y, row.flow.then_some((time, index))),
@@ -830,7 +913,7 @@ mod tests {
     use super::*;
     use crate::sheet::{DEFAULT_LEVELS, Mode, RowInput, analyze};
 
-    const VIEW: View = View { width: 400.0, height: 300.0, cx: 0.0, cy: 0.0, scale: 20.0 };
+    const VIEW: View = View::linear(400.0, 300.0, 0.0, 0.0, 20.0);
 
     struct Path {
         row: usize,
@@ -864,6 +947,40 @@ mod tests {
             assert!((point[3] - point[2] * point[2]).abs() < 1e-9);
             assert!((point[0] - VIEW.sx(point[2])).abs() < 1e-9);
         }
+    }
+
+    #[test]
+    fn logarithmic_axes_map_decades_evenly_and_sample_evenly_on_the_screen() {
+        // Log-log around x = 10, y = 10: 80 px per decade.
+        let view = View { log_x: true, log_y: true, cx: 1.0, cy: 1.0, ..VIEW };
+        assert!((view.sx(10.0) - 200.0).abs() < 1e-9 && (view.sx(100.0) - 280.0).abs() < 1e-9 && (view.wx(120.0) - 1.0).abs() < 1e-12);
+        assert!(view.sx(0.0).is_nan() && view.sy(-1.0).is_nan());
+        // A power law is a straight line: y = x² rises two decades per decade.
+        let found = paths(Mode::Cartesian, &["x^2"], view);
+        assert_eq!(found.len(), 1);
+        let points = &found[0].points;
+        let gaps: Vec<f64> = points.windows(2).map(|pair| pair[1][0] - pair[0][0]).collect();
+        assert!(gaps.iter().all(|gap| *gap > 0.0 && *gap <= 1.0 + 1e-9), "samples stay at most a pixel apart on the screen");
+        for point in points {
+            let expected = view.sy(point[2] * point[2]);
+            assert!((point[1] - expected).abs() < 1e-6);
+            assert!((point[1] - (70.0 - 2.0 * (point[0] - 200.0))).abs() < 1e-6);
+        }
+        // Values at or below zero are off the scale: sin(x) splits into its positive humps on a logarithmic y-axis.
+        let semi = View { log_y: true, cy: 0.0, ..VIEW };
+        let humps = paths(Mode::Cartesian, &["sin(x)"], semi);
+        assert!(humps.len() >= 3, "{}", humps.len());
+        assert!(humps.iter().flat_map(|path| &path.points).all(|point| point[3] > 0.0 && point[1].is_finite()));
+        // The area under a curve closes along the bottom of the view; a point at x ≤ 0 is not drawn on a logarithmic x-axis.
+        let area = paths(Mode::Cartesian, &["int(x, 1, 2)"], semi);
+        let region = area.iter().find(|path| path.kind == REGION).expect("a region");
+        assert!(region.points.iter().any(|point| (point[1] - (semi.height + MARGIN)).abs() < 1e-6));
+        let logx = View { log_x: true, cx: 0.0, ..VIEW };
+        assert!(paths(Mode::Cartesian, &["(-1, 2)"], logx).is_empty());
+        assert_eq!(paths(Mode::Cartesian, &["(1, 2)"], logx).len(), 1);
+        // Implicit curves and tangents still draw: the unit circle's right half lies at x > 0.
+        assert!(!paths(Mode::Cartesian, &["x^2 + y^2 = 1"], View { scale: 100.0, ..logx }).is_empty());
+        assert!(!paths(Mode::Cartesian, &["tangent(x^2, 1)"], logx).is_empty());
     }
 
     #[test]

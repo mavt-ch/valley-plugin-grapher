@@ -3,7 +3,8 @@
  *
  *   ```grapher
  *   view: polar             (cartesian | polar | parametric | 3d | cylindrical | spherical | complex | complex-3d)
- *   units: pi               (decimal | pi: the axis labels of a flat view)
+ *   units: pi               (decimal | pi | degrees | scientific: the axis labels)
+ *   scale: log-y            (linear | log-x | log-y | log: logarithmic axes; Cartesian and parametric views)
  *   height: 320             (pixels, 160 to 800)
  *   center: 0, 0            (flat views: the point in the middle)
  *   span: 12                (flat views: the units across the width)
@@ -23,7 +24,7 @@ import { DEFAULT_PALETTE, paletteRef } from '@valley/plugin-sdk/palette'
 import codeBlockExamples from './codeBlockExamples.json'
 import { React, api } from './runtime'
 import { uiText } from './localization'
-import { DEFAULT_ANIMATION, createRow, filled, type AxisUnits, type Mode, type Row } from './model'
+import { DEFAULT_ANIMATION, SCALE_AXES, createRow, filled, type AxisScale, type AxisUnits, type Mode, type Row } from './model'
 import { MODES, viewOf, type PlaneView, type SpaceView } from './views'
 import { getStore, useGrapher } from './store'
 import { GraphCanvas, homeView } from './GraphView'
@@ -45,6 +46,7 @@ export interface FenceProblem {
 export interface GrapherFenceSpec {
   mode: Mode
   units: AxisUnits
+  scale: AxisScale
   height: number
   center: readonly [number, number] | null
   span: number | null
@@ -64,8 +66,15 @@ const VIEW_NAMES: Record<string, Mode> = {
   'complex-space': 'complexSpace'
 }
 
+const SCALE_NAMES: Record<string, AxisScale> = {
+  linear: 'linear', lin: 'linear',
+  'log-x': 'log-x', logx: 'log-x', 'semilog-x': 'log-x', 'semi-log-x': 'log-x',
+  'log-y': 'log-y', logy: 'log-y', 'semilog-y': 'log-y', 'semi-log-y': 'log-y', semilog: 'log-y', 'semi-log': 'log-y',
+  log: 'log', 'log-log': 'log', loglog: 'log'
+}
+
 const PALETTE_IDS = new Set(DEFAULT_PALETTE.map((color) => color.id))
-const SETTING = /^\s*(view|units|height|center|span|range)\s*:\s*(.*?)\s*$/i
+const SETTING = /^\s*(view|units|scale|height|center|span|range)\s*:\s*(.*?)\s*$/i
 const RANGE = /^(?:[\p{L}][\p{L}\p{N}_]*\s*[=:]\s*)?(.+?)\s*(?:\.\.|…)\s*(.+)$/u
 const SLIDER = /^slider\s*:?\s*(.+?)\s*(?:\.\.|…)\s*(.+)$/i
 const STEP = /^step\s*:?\s*(.+)$/i
@@ -139,6 +148,8 @@ export function parseGrapherFence(code: string): GrapherFenceSpec {
   if (settings.units !== undefined) {
     const value = settings.units.toLowerCase()
     if (value === 'pi' || value === 'π') units = 'pi'
+    else if (value === 'degrees' || value === 'degree' || value === 'deg' || value === '°') units = 'degrees'
+    else if (value === 'scientific' || value === 'sci') units = 'scientific'
     else if (value === 'decimal') units = 'decimal'
     else problems.push({ key: 'fence.unknownUnits', args: { value: settings.units } })
   }
@@ -154,18 +165,32 @@ export function parseGrapherFence(code: string): GrapherFenceSpec {
     if (parts.length === 2 && parts[0] !== null && parts[1] !== null) center = [parts[0], parts[1]]
     else problems.push({ key: 'fence.badSetting', args: { key: 'center' } })
   }
+  let scale: AxisScale = 'linear'
+  if (settings.scale !== undefined) {
+    const named = SCALE_NAMES[settings.scale.toLowerCase().replace(/[\s_–]+/g, '-')]
+    if (!named) problems.push({ key: 'fence.unknownScale', args: { value: settings.scale } })
+    else if (named !== 'linear' && !(view.canvas === 'plane' && view.logAxes)) problems.push({ key: 'fence.scaleView', args: { view: uiText(`mode.${mode}`) } })
+    else scale = named
+  }
   const span = settings.span === undefined ? null : positive(settings.span)
   if (settings.span !== undefined && span === null) problems.push({ key: 'fence.badSetting', args: { key: 'span' } })
   const range = settings.range === undefined ? null : positive(settings.range)
   if (settings.range !== undefined && range === null) problems.push({ key: 'fence.badSetting', args: { key: 'range' } })
   if (!rows.some(filled)) problems.push({ key: 'fence.empty', args: {} })
-  return { mode, units, height, center, span, range, rows, lines, problems }
+  return { mode, units, scale, height, center, span, range, rows, lines, problems }
 }
 
-/** The view a flat block opens on: its centre, and its span across the width (else the view's own home). */
-export function fenceHome(view: PlaneView, spec: Pick<GrapherFenceSpec, 'center' | 'span'>, size: Size): Viewport {
-  const home = spec.span !== null && size.width > 0 ? { cx: 0, cy: 0, scale: size.width / spec.span } : homeView(view, size)
-  return spec.center ? { ...home, cx: spec.center[0], cy: spec.center[1] } : home
+/** The view a flat block opens on: its centre, and its span across the width (else the view's own home); on a
+ * logarithmic axis the centre is a value above zero and the span counts as on a linear axis (four units a decade). */
+export function fenceHome(view: PlaneView, spec: Pick<GrapherFenceSpec, 'center' | 'span' | 'scale'>, size: Size): Viewport {
+  const axes = SCALE_AXES[spec.scale]
+  const fresh = homeView(view, size, axes)
+  const home = spec.span !== null && size.width > 0 ? { ...fresh, scale: size.width / spec.span } : fresh
+  if (!spec.center) return home
+  const [x, y] = spec.center
+  const cx = axes & 1 ? (x > 0 ? Math.log10(x) : home.cx) : x
+  const cy = axes & 2 ? (y > 0 ? Math.log10(y) : home.cy) : y
+  return { ...home, cx, cy }
 }
 
 /** A slider of the block: the play button, the bar and the value; it changes the block's rows only, never a file. */
@@ -233,14 +258,14 @@ export const GrapherFence: FC<{ code: string }> = ({ code }) => {
   const [rows, setRows] = React.useState(spec.rows)
   React.useEffect(() => setRows(spec.rows), [spec])
   const slot = React.useMemo(() => `#fence-${++fences}`, [])
-  const { mode, units } = spec
+  const { mode, units, scale } = spec
   const view = viewOf(mode)
   const analyses = React.useMemo((): RowAnalysis[] => (engine ? engine.analyze(mode, rows) : []), [engine, mode, rows])
   const plane = React.useMemo(() => (view.canvas === 'plane' ? { home: (size: Size) => fenceHome(view, spec, size) } : undefined), [view, spec])
   const space = React.useMemo((): SpaceView | null => (view.canvas === 'space' ? (spec.range !== null ? { ...view, homeRange: spec.range } : view) : null), [view, spec])
   const setText = (id: string, text: string): void => setRows((current) => current.map((row) => (row.id === id && row.text !== text ? { ...row, text } : row)))
   const open = (): void => {
-    const id = getStore().createGraphWith(mode, spec.rows, units)
+    const id = getStore().createGraphWith(mode, spec.rows, units, scale)
     api.workspace.openMainTab({ instanceId: id, title: uiText('graph.title'), newTab: true })
   }
   const engineProblem = problems.find((problem) => problem.key === 'problem.engine')
@@ -258,7 +283,7 @@ export const GrapherFence: FC<{ code: string }> = ({ code }) => {
       <div className="grapher-fence-stage" style={{ height: spec.height }}>
         {space
           ? <SpaceCanvas key={mode} view={space} rows={rows} engine={engine} graph={slot} slot={slot} units={units} embedded />
-          : <GraphCanvas key={mode} view={view as PlaneView} units={units} rows={rows} analyses={analyses} engine={engine} graph={slot} slot={slot} embedded={plane} />}
+          : <GraphCanvas key={mode} view={view as PlaneView} units={units} scale={scale} rows={rows} analyses={analyses} engine={engine} graph={slot} slot={slot} embedded={plane} />}
       </div>
       {rows.map((row, index) => {
         const analysis = analyses[index]

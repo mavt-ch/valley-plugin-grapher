@@ -373,7 +373,6 @@ button.grapher-bookmark-chevron:hover { color:var(--text-color); }
 .grapher-hint-link { padding:0; border:none; background:none; color:var(--accent-tint-text); font:inherit; cursor:pointer; }
 .grapher-hint-link:hover { text-decoration:underline; }
 .grapher-hint-link:focus-visible { outline:2px solid var(--accent-color); outline-offset:1px; border-radius:var(--radius-sm); }
-.grapher-menu-swatch { display:inline-block; width:12px; height:12px; border-radius:50%; }
 
 /* ---- the graph tab ---- */
 .grapher-topbar { position:relative; display:flex; align-items:center; box-sizing:border-box; height:var(--app-bar-height);

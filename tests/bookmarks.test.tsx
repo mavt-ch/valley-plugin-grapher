@@ -1,4 +1,5 @@
 import React from 'react'
+import { renderToStaticMarkup } from 'react-dom/server'
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { createMockValleyApi, loadPackageWasm, type PackageWasmModule } from '@valley/plugin-testkit'
@@ -102,6 +103,12 @@ describe('bookmarks', () => {
     expect(menu.items().map((item) => item.id ?? item.type)).toEqual(['bookmark', 'color', 'separator', 'delete'])
     expect(menu.find('color').label).toBe('Change color')
     expect(menu.find('color').submenu!.map((item) => item.id)).toEqual(['color:red', 'color:blue', 'color:green', 'color:purple', 'color:orange', 'color:magenta', 'color:cyan'])
+    // Every colour carries its dot as one plain <svg> (the host paints only that form with the menu), filled with a colour.
+    for (const item of [menu.find('color'), ...menu.find('color').submenu!]) {
+      const markup = renderToStaticMarkup(item.icon as React.ReactElement)
+      expect(markup).toMatch(/^<svg[^>]*><circle [^>]*fill="[^"]+"[^>]*><\/circle><\/svg>$/)
+      expect(markup).not.toContain('fill=""')
+    }
     expect(openMenu.mock.calls.at(-1)![1]).toHaveProperty('anchor')
     expect(menu.find('bookmark').submenu!.map((item) => item.id ?? item.type)).toEqual(['bookmark:', 'separator', 'bookmark:new-group'])
     await menu.select('bookmark', 'bookmark:')

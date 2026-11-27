@@ -1,7 +1,7 @@
 import { React, api } from './runtime'
 import type { ReactElement } from 'react'
 import type { UiMenuItem } from '@valley/plugin-sdk'
-import { paletteCssValue, paletteRef, runtimePaletteSnapshot, subscribeRuntimePalette } from '@valley/plugin-sdk/palette'
+import { paletteCssValue, paletteRef, readPaletteColor, runtimePaletteSnapshot, subscribeRuntimePalette } from '@valley/plugin-sdk/palette'
 import { Grip, Plus, X } from './icons'
 import { uiText } from './localization'
 import { COLORS, colorOrder, readColorOrder } from './model'
@@ -9,18 +9,26 @@ import { COLORS, colorOrder, readColorOrder } from './model'
 /** The plugin setting that holds the colour order (palette ids). */
 export const COLOR_ORDER_SETTING = 'colors'
 
+/**
+ * A colour dot for a menu row: one plain `<svg>` filled with the resolved colour, which the host paints with the menu
+ * itself (any other icon element is drawn as a small plugin view that may not appear in a flyout).
+ */
+export const MenuSwatch = ({ color }: { color: string }): ReactElement => (
+  <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6" fill={readPaletteColor(color)} /></svg>
+)
+
 /** Change color: a flyout of the palette colours in the chosen order, the current one ticked; its icon is the current colour. */
 export function colorMenu(current: string, pick: (color: string) => void): UiMenuItem {
   return {
     id: 'color',
     label: uiText('row.changeColor'),
-    icon: <span className="grapher-menu-swatch" style={{ background: paletteCssValue(current) }} />,
+    icon: <MenuSwatch color={current} />,
     submenu: colorOrder().map((id): UiMenuItem => ({
       id: `color:${id}`,
       type: 'radio',
       checked: current === paletteRef(id),
       label: colorName(id),
-      icon: <span className="grapher-menu-swatch" style={{ background: paletteCssValue(paletteRef(id)) }} />,
+      icon: <MenuSwatch color={paletteRef(id)} />,
       onSelect: () => pick(paletteRef(id))
     }))
   }

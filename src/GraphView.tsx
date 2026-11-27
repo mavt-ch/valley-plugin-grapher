@@ -10,6 +10,7 @@ import { getStore, useGrapher } from './store'
 import { noteCanvas } from './details'
 import { runFlow } from './animate'
 import { SpaceCanvas } from './Space'
+import { AxisControls } from './AxisControls'
 import { viewOf, type PlaneView } from './views'
 
 const MIN_SCALE = 1e-3
@@ -464,6 +465,7 @@ export const GraphCanvas = ({ view: plane, units, scale = 'linear', rows, analys
         <button type="button" className="grapher-zoom-button" onClick={() => zoomBy(1.5)} aria-label={uiText('zoom.in')} title={uiText('zoom.in')}><Plus /></button>
         <button type="button" className="grapher-zoom-button" onClick={() => zoomBy(1 / 1.5)} aria-label={uiText('zoom.out')} title={uiText('zoom.out')}><Minus /></button>
         <button type="button" className="grapher-zoom-button" onClick={reset} aria-label={uiText('zoom.reset')} title={uiText('zoom.reset')}><Fit /></button>
+        {embedded ? null : <AxisControls graph={graph} mode={mode} units={units} scale={plane.logAxes ? scale : undefined} />}
       </div>
     </div>
   )

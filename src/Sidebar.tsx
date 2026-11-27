@@ -2,13 +2,12 @@ import { React, api } from './runtime'
 import type { ClipboardEvent, KeyboardEvent, MouseEvent, PointerEvent, ReactElement } from 'react'
 import { paletteCssValue } from '@valley/plugin-sdk/palette'
 import type { UiMenuItem } from '@valley/plugin-sdk'
-import { AXIS_UNITS, UNIT_GLYPHS } from './draw'
 import type { RowAnalysis } from './engine'
 import { Bookmark, BookmarkFilled, Check, ChevronDown, Grip, Pause, Play, Slider, TableIcon, Trash, Warning } from './icons'
 import { SliderAnimator, snap, startMotion } from './animate'
 import { uiText } from './localization'
 import { INTEGRAL_AXES, MathText } from './MathText'
-import { ANIMATION_SPEEDS, DEFAULT_ANIMATION, DEFAULT_LEVELS, MAIN_GRAPH, MAX_LEVELS, MODES, createRow, createTable, filled, graphOf, moveRow, rangeVariable, scaleOf, unitsOf, AXIS_SCALES, type Animation, type AxisScale, type AxisUnits, type Mode, type Row, type Table } from './model'
+import { ANIMATION_SPEEDS, DEFAULT_ANIMATION, DEFAULT_LEVELS, MAIN_GRAPH, MAX_LEVELS, MODES, createRow, createTable, filled, graphOf, moveRow, rangeVariable, type Animation, type Mode, type Row, type Table } from './model'
 import { getStore, useGrapher } from './store'
 import { BookmarkList, bookmarkMenu } from './BookmarkList'
 import { colorMenu } from './Settings'
@@ -211,62 +210,6 @@ const ViewList = ({ mode, pick, close }: { mode: Mode; pick: (mode: Mode) => voi
         )
       })}
     </div>
-  )
-}
-
-/** Beside the open-graph button on every view: label the axes in real numbers, multiples of π, degrees or scientific notation; only the labels change. */
-const UnitsSwitch = ({ graph, mode, units }: { graph: string; mode: Mode; units: AxisUnits }): ReactElement => {
-  const store = getStore()
-  return (
-    <div className="grapher-units" role="radiogroup" aria-label={uiText('units.label')}>
-      {AXIS_UNITS.map((candidate) => (
-        <button
-          key={candidate}
-          type="button"
-          role="radio"
-          aria-checked={units === candidate}
-          className={units === candidate ? 'grapher-unit active' : 'grapher-unit'}
-          aria-label={uiText(`units.${candidate}`)}
-          {...api.ui.tooltip(uiText(`units.${candidate}`))}
-          onClick={() => store.setUnits(graph, mode, candidate)}
-        >
-          {UNIT_GLYPHS[candidate]}
-        </button>
-      ))}
-    </div>
-  )
-}
-
-/** The text the scale button shows for each scale. */
-const SCALE_GLYPHS: Record<AxisScale, string> = { linear: 'lin', 'log-y': 'log y', 'log-x': 'log x', log: 'log' }
-
-/**
- * Beside the axis labels on the views that offer it: linear axes, a logarithmic y- or x-axis (semi-log) or both
- * (log–log), picked from a menu. The axis labels ℝ, π, ° and 10ⁿ keep labelling the axes that stay linear.
- */
-const ScaleButton = ({ graph, mode, scale }: { graph: string; mode: Mode; scale: AxisScale }): ReactElement => {
-  const store = getStore()
-  const label = uiText('scale.label', { scale: uiText(`scale.${scale}`) })
-  return (
-    <button
-      type="button"
-      className={scale === 'linear' ? 'grapher-scale' : 'grapher-scale active'}
-      aria-haspopup="menu"
-      aria-label={label}
-      {...api.ui.tooltip(label)}
-      onClick={(event) => {
-        void api.ui.openMenu(AXIS_SCALES.map((candidate): UiMenuItem => ({
-          id: `scale:${candidate}`,
-          type: 'radio',
-          checked: candidate === scale,
-          label: uiText(`scale.${candidate}`),
-          description: uiText(`scale.${candidate}.hint`),
-          onSelect: () => store.setScale(graph, mode, candidate)
-        })), { anchor: event.currentTarget }).catch(() => {})
-      }}
-    >
-      {SCALE_GLYPHS[scale]}
-    </button>
   )
 }
 
@@ -951,14 +894,14 @@ const ExpressionRow = (props: RowProps): ReactElement => {
   )
 }
 
-/** The header's bookmark button beside ℝ | π: the outline while the expressions show, filled while the bookmark list does. */
+/** The header's bookmark button beside the view button: the outline while the expressions show, filled while the bookmark list does. */
 const BookmarksToggle = ({ open, toggle }: { open: boolean; toggle: () => void }): ReactElement => (
   <button type="button" className="grapher-bookmarks-toggle" aria-pressed={open} aria-label={uiText('bookmarks.toggle')} {...api.ui.tooltip(uiText('bookmarks.toggle'))} onClick={toggle}>
     {open ? <BookmarkFilled /> : <Bookmark />}
   </button>
 )
 
-/** Left sidebar: the focused graph's view button, axis labels, bookmarks and open button in the 38px header, then its expressions. */
+/** Left sidebar: the focused graph's view button, bookmarks and open button in the 38px header, then its expressions. */
 export const Sidebar = (): ReactElement => {
   const store = getStore()
   const { loaded, document, active, tab, engine, problems, bookmarksOpen } = useGrapher()
@@ -966,9 +909,6 @@ export const Sidebar = (): ReactElement => {
   // The expressions' view, or, while the bookmark list is open, the bookmark view's own: the two never mix.
   const mode = bookmarksOpen ? store.bookmarkView(active).mode : graph.mode
   const rows = graph.sheets[graph.mode]
-  const units = unitsOf(graph, mode)
-  const scale = scaleOf(graph, mode)
-  const view = viewOf(mode)
   const [choosing, setChoosing] = React.useState(false)
   // The bookmark list stays open across tabs; each graph shows its own bookmark view meanwhile.
   const [renaming, setRenaming] = React.useState<string | undefined>(undefined)
@@ -1059,8 +999,6 @@ export const Sidebar = (): ReactElement => {
     <div className="grapher-panel">
       <div className="panel-header grapher-header">
         <ViewButton mode={mode} open={choosing} toggle={() => setChoosing((open) => !open)} />
-        {!choosing ? <UnitsSwitch graph={active} mode={mode} units={units} /> : null}
-        {!choosing && view.canvas === 'plane' && view.logAxes ? <ScaleButton graph={active} mode={mode} scale={scale} /> : null}
         {!choosing && loaded ? <BookmarksToggle open={bookmarking !== null} toggle={() => (bookmarking ? setBookmarking(null) : showBookmarks())} /> : null}
         <button
           type="button"

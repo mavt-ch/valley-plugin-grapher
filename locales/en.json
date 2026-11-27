@@ -325,7 +325,6 @@
   "bookmarks.undo.color": "Change bookmark color",
   "units.degrees": "Axes in degrees (90°, 180°, 360° …; values stay radians)",
   "units.scientific": "Axes in scientific notation (5·10⁻¹, 10³ …)",
-  "scale.label": "Axis scale: {{scale}}",
   "scale.linear": "Linear",
   "scale.linear.hint": "Both axes evenly spaced",
   "scale.log-y": "Logarithmic y",
@@ -335,5 +334,6 @@
   "scale.log": "Log–log",
   "scale.log.hint": "Both axes logarithmic: power laws become straight lines",
   "fence.unknownScale": "Unknown scale “{{value}}”: use linear, log-x, log-y or log.",
-  "fence.scaleView": "The {{view}} view has no logarithmic axes; the graph stays linear."
+  "fence.scaleView": "The {{view}} view has no logarithmic axes; the graph stays linear.",
+  "scale.title": "Axis scale"
 }

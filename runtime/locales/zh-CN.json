@@ -325,7 +325,6 @@
   "bookmarks.undo.color": "更改书签颜色",
   "units.degrees": "坐标轴使用角度（90°、180°、360° …；数值仍为弧度）",
   "units.scientific": "坐标轴使用科学计数法（5·10⁻¹、10³ …）",
-  "scale.label": "坐标轴刻度：{{scale}}",
   "scale.linear": "线性",
   "scale.linear.hint": "两条坐标轴均匀分度",
   "scale.log-y": "y 轴对数",
@@ -335,5 +334,6 @@
   "scale.log": "双对数",
   "scale.log.hint": "两条坐标轴均为对数：幂律变为直线",
   "fence.unknownScale": "未知刻度“{{value}}”：请使用 linear、log-x、log-y 或 log。",
-  "fence.scaleView": "{{view}} 视图没有对数坐标轴；图形保持线性。"
+  "fence.scaleView": "{{view}} 视图没有对数坐标轴；图形保持线性。",
+  "scale.title": "坐标轴刻度"
 }

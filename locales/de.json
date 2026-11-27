@@ -325,7 +325,6 @@
   "bookmarks.undo.color": "Lesezeichenfarbe ändern",
   "units.degrees": "Achsen in Grad (90°, 180°, 360° …; Werte bleiben im Bogenmaß)",
   "units.scientific": "Achsen in wissenschaftlicher Schreibweise (5·10⁻¹, 10³ …)",
-  "scale.label": "Achsenskala: {{scale}}",
   "scale.linear": "Linear",
   "scale.linear.hint": "Beide Achsen gleichmäßig geteilt",
   "scale.log-y": "Logarithmisch y",
@@ -335,5 +334,6 @@
   "scale.log": "Doppelt logarithmisch",
   "scale.log.hint": "Beide Achsen logarithmisch: Potenzgesetze werden zu Geraden",
   "fence.unknownScale": "Unbekannte Skala „{{value}}“: verwende linear, log-x, log-y oder log.",
-  "fence.scaleView": "Die Ansicht {{view}} hat keine logarithmischen Achsen; der Graph bleibt linear."
+  "fence.scaleView": "Die Ansicht {{view}} hat keine logarithmischen Achsen; der Graph bleibt linear.",
+  "scale.title": "Achsenskala"
 }

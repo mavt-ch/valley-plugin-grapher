@@ -50,7 +50,7 @@ export interface PlaneView extends CommonView {
   /** Units across the width of a fresh view. */
   homeSpan: number
   grid: GridPainter
-  /** The axis labels a fresh sheet uses; the header switch flips between decimal numbers and multiples of π. */
+  /** The axis labels a fresh sheet uses; the labels button under the zoom buttons picks another. */
   units: AxisUnits
   /** Complex numbers as arrows from 0 and readouts as `a + bi`. */
   complex?: boolean

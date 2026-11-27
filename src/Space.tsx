@@ -11,6 +11,7 @@ import { runFlow } from './animate'
 import { registerExporter, renderPng } from './exporting'
 import { degreeTicks, formatNumber, formatScientific, piTicks } from './ticks'
 import type { AxisUnits } from './model'
+import { AxisControls } from './AxisControls'
 import type { SpaceView } from './views'
 
 /** x towards the lower right, y towards the upper right, z up, the cube [-10, 10]³ in view. */
@@ -349,6 +350,7 @@ export const SpaceCanvas = ({ view, rows, engine, graph, slot, units, embedded =
         <button type="button" className="grapher-zoom-button" onClick={() => zoomBy(1.5)} aria-label={uiText('zoom.in')} title={uiText('zoom.in')}><Plus /></button>
         <button type="button" className="grapher-zoom-button" onClick={() => zoomBy(1 / 1.5)} aria-label={uiText('zoom.out')} title={uiText('zoom.out')}><Minus /></button>
         <button type="button" className="grapher-zoom-button" onClick={reset} aria-label={uiText('zoom.reset')} title={uiText('zoom.reset')}><Fit /></button>
+        {embedded ? null : <AxisControls graph={graph} mode={view.id} units={units} />}
       </div>
     </div>
   )

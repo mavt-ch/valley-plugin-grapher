@@ -1,8 +1,7 @@
 import React from 'react'
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, describe, expect, it } from 'vitest'
 import { createMockValleyApi, loadPackageWasm, type PackageWasmModule } from '@valley/plugin-testkit'
-import type { UiMenuItem } from '@valley/plugin-sdk'
 import { getStore } from '../src/store'
 import { SCALE_AXES } from '../src/model'
 import { pluginDataDirectoryPath } from '@valley/plugin-sdk/paths'
@@ -40,8 +39,8 @@ function mount(files: Record<string, string> = {}) {
 }
 
 describe('the sidebar', () => {
-  it('picks the view from a list in place of the expressions and switches the axis labels', async () => {
-    const mock = mount()
+  it('picks the view from a list in place of the expressions', async () => {
+    mount()
     render(<Sidebar />)
     expect(await screen.findByRole('button', { name: 'View: Cartesian' })).toBeTruthy()
     expect(screen.getByDisplayValue('y = x^2 - 2')).toBeTruthy()
@@ -52,43 +51,52 @@ describe('the sidebar', () => {
     expect(screen.queryByDisplayValue('y = x^2 - 2')).toBeNull()
     fireEvent.keyDown(options[0], { key: 'Escape' })
     expect(await screen.findByDisplayValue('y = x^2 - 2')).toBeTruthy()
-    const real = screen.getByRole('radio', { name: 'Axes in real numbers' })
-    const pi = screen.getByRole('radio', { name: /^Axes in multiples of π/ })
-    expect(real.getAttribute('aria-checked')).toBe('true')
-    fireEvent.click(pi)
-    expect(pi.getAttribute('aria-checked')).toBe('true')
-    await waitFor(async () => expect(await mock.api.data.files.readText('graphs.json')).toContain('"cartesian": "pi"'), { timeout: 2000 })
-    await pick('Polar')
-    expect(await screen.findByDisplayValue('r = 1 + cos(θ)')).toBeTruthy()
-    expect(screen.getByRole('radio', { name: /^Axes in multiples of π/ }).getAttribute('aria-checked')).toBe('true')
-    await pick('3D')
-    expect(await screen.findByDisplayValue('z = (x^2 + y^2) / 5 - 6')).toBeTruthy()
-    const spaceReal = screen.getByRole('radio', { name: 'Axes in real numbers' })
-    expect(spaceReal.getAttribute('aria-checked')).toBe('true')
-    fireEvent.click(screen.getByRole('radio', { name: /^Axes in multiples of π/ }))
-    await waitFor(async () => expect(await mock.api.data.files.readText('graphs.json')).toContain('"space": "pi"'), { timeout: 2000 })
+    // The axis labels moved out of the header into the graph's control stack.
+    expect(screen.queryByRole('radio', { name: 'Axes in real numbers' })).toBeNull()
   })
 
-  it('switches the Cartesian axes to logarithmic scales from the scale menu and keeps the labels for linear axes', async () => {
+  it('picks the axis labels and scale from round buttons under the zoom buttons, like Map\'s layer picker', async () => {
     const mock = mount()
-    const openMenu = vi.spyOn(mock.api.ui, 'openMenu').mockResolvedValue(null)
-    render(<Sidebar />)
-    const button = await screen.findByRole('button', { name: 'Axis scale: Linear' })
-    expect(button.textContent).toBe('lin')
-    fireEvent.click(button)
-    const items = openMenu.mock.calls.at(-1)![0] as UiMenuItem[]
-    expect(items.map((item) => [item.id, item.label, item.checked])).toEqual([['scale:linear', 'Linear', true], ['scale:log-y', 'Logarithmic y', false], ['scale:log-x', 'Logarithmic x', false], ['scale:log', 'Log–log', false]])
-    await act(async () => { await items.find((item) => item.id === 'scale:log-y')!.onSelect!() })
-    expect(screen.getByRole('button', { name: 'Axis scale: Logarithmic y' }).textContent).toBe('log y')
+    render(<><Sidebar /><GraphTab /></>)
+    await screen.findByDisplayValue('y = x^2 - 2')
+    const labels = await screen.findByRole('button', { name: 'Axis labels: Axes in real numbers' })
+    expect(labels.getAttribute('aria-expanded')).toBe('false')
+    expect(screen.queryByRole('group', { name: 'Axis labels' })).toBeNull()
+    fireEvent.click(labels)
+    const choices = within(screen.getByRole('group', { name: 'Axis labels' })).getAllByRole('button')
+    expect(choices.map((choice) => choice.textContent)).toEqual(['ℝ', 'π', '°', '10ⁿ'])
+    expect(choices[0].getAttribute('aria-pressed')).toBe('true')
+    fireEvent.click(choices[1])
+    await waitFor(async () => expect(await mock.api.data.files.readText('graphs.json')).toContain('"cartesian": "pi"'), { timeout: 2000 })
+    // Picking keeps the choices open; Escape closes them.
+    expect(within(screen.getByRole('group', { name: 'Axis labels' })).getByRole('button', { name: /^Axes in multiples of π/ }).getAttribute('aria-pressed')).toBe('true')
+    fireEvent.keyDown(document.body, { key: 'Escape' })
+    expect(screen.queryByRole('group', { name: 'Axis labels' })).toBeNull()
+    // The scale picker: opening it closes the labels; lin, log_y, log_x and log_xy.
+    fireEvent.click(screen.getByRole('button', { name: /^Axis labels/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Axis scale: Linear' }))
+    expect(screen.queryByRole('group', { name: 'Axis labels' })).toBeNull()
+    const scales = within(screen.getByRole('group', { name: 'Axis scale' })).getAllByRole('button')
+    expect(scales.map((choice) => choice.getAttribute('aria-label'))).toEqual(['Linear', 'Logarithmic y', 'Logarithmic x', 'Log–log'])
+    expect(scales.map((choice) => choice.textContent)).toEqual(['lin', 'logy', 'logx', 'logxy'])
+    fireEvent.click(scales[1])
+    expect(screen.getByRole('button', { name: 'Axis scale: Logarithmic y' })).toBeTruthy()
     await waitFor(async () => expect(JSON.parse((await mock.api.data.files.readText('graphs.json')) ?? '{}').scales).toEqual({ cartesian: 'log-y' }), { timeout: 2000 })
-    // The axis labels still switch, for the x-axis that stays linear.
-    expect(screen.getByRole('radio', { name: /^Axes in degrees/ })).toBeTruthy()
-    // Back to linear is stored as no entry; views without logarithmic axes show no scale button.
+    // A click outside closes it; back to linear is stored as no entry.
+    fireEvent.pointerDown(document.body)
+    expect(screen.queryByRole('group', { name: 'Axis scale' })).toBeNull()
     act(() => getStore().setScale('main', 'cartesian', 'linear'))
     await waitFor(async () => expect(JSON.parse((await mock.api.data.files.readText('graphs.json')) ?? '{}').scales).toBeUndefined(), { timeout: 2000 })
+    // Polar has labels but no scale; 3D keeps the labels picker; parametric has both.
     await pick('Polar')
     expect(await screen.findByDisplayValue('r = 1 + cos(θ)')).toBeTruthy()
+    expect(screen.getByRole('button', { name: /^Axis labels/ })).toBeTruthy()
     expect(screen.queryByRole('button', { name: /^Axis scale/ })).toBeNull()
+    await pick('3D')
+    expect(await screen.findByRole('button', { name: 'Axis labels: Axes in real numbers' })).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Axis labels: Axes in real numbers' }))
+    fireEvent.click(within(screen.getByRole('group', { name: 'Axis labels' })).getByRole('button', { name: /^Axes in multiples of π/ }))
+    await waitFor(async () => expect(await mock.api.data.files.readText('graphs.json')).toContain('"space": "pi"'), { timeout: 2000 })
     await pick('Parametric')
     expect(await screen.findByRole('button', { name: 'Axis scale: Linear' })).toBeTruthy()
     expect(SCALE_AXES.log).toBe(3)

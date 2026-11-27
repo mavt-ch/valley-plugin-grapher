@@ -325,7 +325,6 @@
   "bookmarks.undo.color": "Cambiar el color del marcador",
   "units.degrees": "Ejes en grados (90°, 180°, 360° …; los valores siguen en radianes)",
   "units.scientific": "Ejes en notación científica (5·10⁻¹, 10³ …)",
-  "scale.label": "Escala de los ejes: {{scale}}",
   "scale.linear": "Lineal",
   "scale.linear.hint": "Ambos ejes con divisiones iguales",
   "scale.log-y": "Logarítmica en y",
@@ -335,5 +334,6 @@
   "scale.log": "Log-log",
   "scale.log.hint": "Ambos ejes logarítmicos: las leyes de potencia son rectas",
   "fence.unknownScale": "Escala desconocida «{{value}}»: usa linear, log-x, log-y o log.",
-  "fence.scaleView": "La vista {{view}} no tiene ejes logarítmicos; el gráfico sigue lineal."
+  "fence.scaleView": "La vista {{view}} no tiene ejes logarítmicos; el gráfico sigue lineal.",
+  "scale.title": "Escala de los ejes"
 }
